@@ -1,0 +1,23 @@
+[project]
+name = "approvals"
+version = "0.1.0"
+description = "Agent approval requests as Slack cards in #approvals, with answers routed back to the agent session."
+requires-python = ">=3.12"
+dependencies = ["slack_sdk>=3.33"]
+
+[project.scripts]
+approvals = "approvals.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/approvals"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "tests"]

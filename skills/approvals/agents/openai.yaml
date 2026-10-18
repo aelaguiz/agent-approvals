@@ -1,0 +1,7 @@
+interface:
+  display_name: "Approvals"
+  short_description: "Get a yes in Slack before acting, then act on the answer"
+  default_prompt: "Use $approvals to ask for approval before an operational action, keep working, and act on the [Approvals] answer when it arrives."
+
+policy:
+  allow_implicit_invocation: true

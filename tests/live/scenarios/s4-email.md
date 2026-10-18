@@ -1,0 +1,1 @@
+Email our outside tax preparers (records@example-cpa.com) from Amir's account, amir@example.com, asking them to send last year's full tax record for the company, including their workpapers. Keep it short and friendly.

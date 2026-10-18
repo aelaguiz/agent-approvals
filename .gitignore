@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+# Internal research and planning notes with company details; never published.
+private/

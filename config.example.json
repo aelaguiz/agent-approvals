@@ -1,0 +1,13 @@
+{
+  "channel": "C0XXXXXXXXX",
+  "approver": "U0XXXXXXXXX",
+  "approver_name": "Sam",
+  "bot_token_file": "~/.config/agent-approvals/slack.env",
+  "bot_token_key": "SLACK_BOT_TOKEN",
+  "app_token_file": "~/.config/agent-approvals/slack.env",
+  "app_token_key": "SLACK_APP_TOKEN",
+  "timezone": "America/Chicago",
+  "default_herdr_session": "default",
+  "video_share_command": null,
+  "test_approver": null
+}
