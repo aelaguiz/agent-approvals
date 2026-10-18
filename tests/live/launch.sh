@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # Start a test agent for one live scenario.
-# Usage: tests/live/launch.sh <claude|codex> <scenario.md> [herdr-session]
+# Usage: [SANDBOX_DIR=/path] tests/live/launch.sh <claude|codex> <scenario.md> [herdr-session]
 # Prints: the sandbox folder, the Herdr workspace and the pane.
 set -euo pipefail
 runtime=$1; scenario=$2; session=${3:-${HERDR_SESSION:-default}}
 here=$(cd "$(dirname "$0")" && pwd)
 name=$(basename "$scenario" .md)
-dir=$(mktemp -d "/tmp/approvals-live-$name-XXXX")
-cp "$here/sandbox/AGENTS.md" "$here/sandbox/CLAUDE.md" "$dir/"
+# SANDBOX_DIR reuses one folder, the way a scheduled agent runs in the same place every day.
+dir=${SANDBOX_DIR:-$(mktemp -d "/tmp/approvals-live-$name-XXXX")}
+mkdir -p "$dir"
+cp -n "$here/sandbox/AGENTS.md" "$here/sandbox/CLAUDE.md" "$dir/" 2>/dev/null || true
 read -r ws pane < <(herdr --session "$session" workspace create --cwd "$dir" --label "approvals-live-$name" --no-focus |
   python3 -c 'import json,sys; r=json.load(sys.stdin)["result"]; print(r["workspace"]["workspace_id"], r["root_pane"]["pane_id"])')
 if [ "$runtime" = claude ]; then launch="aim claude run sonnet"; ready="bypass permissions"; else launch="aim codex run"; ready="for shortcuts"; fi

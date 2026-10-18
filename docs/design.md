@@ -64,6 +64,17 @@ Only the asker or a moved copy of it can change where a request's answers go. If
 
 Every message starts with `[Approvals]` and the request number, quotes the approver's words exactly, and says what to do next. It's sent as one line, so nothing is submitted half-typed.
 
+## Acknowledgements
+
+📨 means one thing: the service saw its message in the agent's transcript. That proves delivery, not understanding.
+
+**The agent's acknowledgement:**
+- Every answer tells the agent to acknowledge first. Deadlines are the exception.
+- The agent posts in the thread with `approvals ack`, in its own words: what it understood and what it's about to do. For example: "Got it: you approved v2. Posting the reply now, then I'll mark it done."
+- The thread then shows, from the agent itself, what will happen. Any later difference between the acknowledgement and the action is visible there.
+
+**The warning.** A delivered answer that hasn't been acknowledged after 10 minutes gets one ⚠️ note in the thread. It names the agent and says nothing confirms the answer was understood or acted on.
+
 ## Polling and deadlines
 
 - **Replies:** the listener polls each open request's thread directly, capped at about 40 Slack calls a minute, so an old card's thread is still checked. Socket Mode message events, when the app receives them, trigger an immediate check.

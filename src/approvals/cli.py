@@ -127,6 +127,21 @@ def cmd_revise(a):
     print(f"{a.id} v{n} posted in the thread; the first post now shows v{n}.")
 
 
+def cmd_ack(a):
+    rec = store.load(a.id)
+    me = reach.capture(a.agent)
+    name = rec["agent"]
+    ts = slackapi.post([cards.md(f"🤖 *{cards.esc(name)}:* {cards.esc(a.text)}"),
+                        cards.ctx(f"Acknowledged by the agent · {rec['id']} · {cards.when(store.now())}")],
+                       f"{name}: {a.text}", thread_ts=rec["thread_ts"])
+
+    def fn(r):
+        reach.refresh(r, me)
+        return core.acknowledge(r, a.text, ts)
+    kinds = store.update(a.id, fn)
+    print(f"Acknowledged in the thread of {a.id}" + (f" ({', '.join(kinds)})." if kinds else "."))
+
+
 def cmd_done(a):
     def fn(rec):
         reach.refresh(rec, reach.capture())
@@ -233,6 +248,12 @@ def main(argv=None):
     s.add_argument("id")
     s.add_argument("card")
     s.set_defaults(fn=cmd_revise)
+
+    s = sub.add_parser("ack", help="acknowledge an answer in the thread: what you understood and what you'll do")
+    s.add_argument("id")
+    s.add_argument("text")
+    s.add_argument("--agent")
+    s.set_defaults(fn=cmd_ack)
 
     s = sub.add_parser("done", help="mark an approved request done, with what you did and checked")
     s.add_argument("id")

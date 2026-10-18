@@ -9,13 +9,14 @@ from datetime import datetime, timedelta
 from slack_sdk.socket_mode import SocketModeClient
 from slack_sdk.socket_mode.response import SocketModeResponse
 
-from . import config, core, router, slackapi, store
+from . import cards, config, core, router, slackapi, store
 
 log = logging.getLogger("approvals")
 
 WATCH_DAYS = 14          # threads stay watched this long after their last activity
 POLL_BUDGET_PER_MIN = 40
 FAILURE_NOTE_AFTER = 3
+ACK_MINUTES = 10         # a delivered answer the agent hasn't acknowledged by then gets a warning in the thread
 
 
 def is_approver(msg, rec):
@@ -155,6 +156,7 @@ class Listener:
                 rec = store.load(rec["id"])
             if rec.get("card_dirty"):
                 self.try_refresh(rec["id"])
+            self.warn_unacknowledged(rec)
             for item in rec.get("outbox", []):
                 if item.get("delivered_at") or item.get("inbox_only"):
                     continue
@@ -163,6 +165,29 @@ class Listener:
                     self.in_flight.add(key)
                     self.deliveries.put(key)
                 break   # a request's later messages wait until this one lands, so they arrive in order
+
+    def warn_unacknowledged(self, rec):
+        """Delivery only means the message was typed into the session. Say so when the agent never confirms it."""
+        late = [i for i in rec.get("outbox", []) if i.get("needs_ack") and i.get("delivered_at") and not i.get("acked_at")
+                and not i.get("ack_warned")
+                and store.now() - datetime.fromisoformat(i["delivered_at"]) >= timedelta(minutes=ACK_MINUTES)]
+        if not late:
+            return
+        refs = {i["ref"] for i in late}
+
+        def mark(r):
+            for i in r["outbox"]:
+                if i["ref"] in refs:
+                    i["ack_warned"] = True
+        store.update(rec["id"], mark)
+        first = min(datetime.fromisoformat(i["delivered_at"]) for i in late)
+        what = "your answer" if len(late) == 1 else f"your last {len(late)} answers"
+        try:
+            slackapi.note(rec["thread_ts"], f"⚠️ {rec['agent']} received {what} at {cards.when(first)} (📨) but hasn't acknowledged "
+                                            f"in {ACK_MINUTES} minutes, so nothing confirms it was understood or acted on.")
+        except Exception as e:
+            log.warning("ack warning for %s failed: %s", rec["id"], e)
+        log.info("%s: no acknowledgement for %s", rec["id"], ", ".join(sorted(refs)))
 
     def delivery_worker(self):
         while not self.stop.is_set():

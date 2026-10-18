@@ -1,0 +1,1 @@
+From the daily ads brief: The search ads learning test is nearly out of budget, $431 of its $450 cap spent, with trial starts at about $14 against a $20 target. Raise its learning cap by $250 so it keeps running.

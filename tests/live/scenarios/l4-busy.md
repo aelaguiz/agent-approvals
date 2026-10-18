@@ -1,0 +1,1 @@
+From the monetization agent: Lower the yearly Plus price in Mexico from MX$1,299 to MX$899 on both stores; checkout starts there are 4 in 31 against 27 in 64 in other non-English countries. Once you've done whatever this needs to get moving, run the nightly store sync check, which takes about 90 seconds, in the foreground: `sleep 90 && echo sync ok`. Report the result.

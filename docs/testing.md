@@ -69,6 +69,11 @@ The question is whether, with many agents and many requests open at once, every 
 | R9 | The agent is mid-task when its answer arrives | It lands, and the agent acts on it after the task | Live L4 |
 | R10 | The service restarts between sending and recording | Nothing is sent twice | Unit (passed October 18) |
 
+**Acknowledgements.** These checks run on every answer in every live test:
+- **A1:** the agent posts an acknowledgement in the thread, in its own words, before it acts. Its transcript shows `approvals ack` before the action.
+- **A2:** the acknowledgement says what the agent then actually does. An acknowledgement that promises one thing while the agent does another fails.
+- **A3 (unit):** a delivered answer with no acknowledgement after 10 minutes gets exactly one ⚠️ note; acknowledged and recent ones get none.
+
 **Live tests.** These use the installed package, real agents launched through AI Manager in their own Herdr workspaces, and `[test reply]` posts on TEST cards. Each answer carries a reference code, so the check is exact: a code must appear in its asker's transcript and in no other. "Resumed once" is checked by counting the processes running that session.
 
 - **L1, scheduled twins.** Agent A gets a brief in folder F, submits a request and exits. Agent B gets the identical brief in F, as the next day's run would, and submits its own. A reply goes to A's request. A is resumed and acts; B's transcript holds no code from A's request. Then a reply to B's request reaches B, which is still open.

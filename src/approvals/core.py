@@ -21,8 +21,27 @@ def enqueue(rec, kind, text, react_ts=None):
         "ref": ref, "kind": kind, "text": f"{text} (ref {ref})", "created": store.iso(),
         "react_ts": react_ts, "attempts": 0, "next_try": store.iso(), "delivered_at": None,
         "noted_failure": False, "seen_by_agent": False,
+        "needs_ack": kind != "expired", "acked_at": None, "ack_warned": False,
     })
     return ref
+
+
+def ack_step(rec, what):
+    return f'First acknowledge it in the thread, in your own words, with what you understood and {what}: `approvals ack {rec["id"]} "<your acknowledgement>"`.'
+
+
+ACK_LABELS = {"decision": "answer", "feedback": "reply", "answer": "answer to your question", "comment": "reply"}
+
+
+def acknowledge(rec, text, ts):
+    """The agent posted its acknowledgement; every answer it had been sent so far counts as acknowledged."""
+    kinds = []
+    for item in rec.get("outbox", []):
+        if item.get("needs_ack") and not item.get("acked_at"):
+            item["acked_at"] = store.iso()
+            kinds.append(item["kind"])
+    store.event(rec, "ack", text=text, ts=ts, acknowledges=kinds)
+    return kinds
 
 
 def head(rec):
@@ -33,9 +52,10 @@ def head(rec):
 def msg_decision(rec, verdict, where):
     t = cards.when(store.now())
     if verdict == "approved":
-        return f'{head(rec)} {who()} approved it ({where}, {t}). Do it now, then run `approvals done {rec["id"]} "<what you did and how you checked it>"`.'
+        return (f'{head(rec)} {who()} approved it ({where}, {t}). {ack_step(rec, "what you are about to do")} '
+                f'Then do exactly what the card describes, and run `approvals done {rec["id"]} "<what you did and how you checked it>"`.')
     if verdict == "declined":
-        return f'{head(rec)} {who()} declined it ({where}, {t}). Drop it. Don\'t resubmit unless asked to.'
+        return f'{head(rec)} {who()} declined it ({where}, {t}). {ack_step(rec, "that you are dropping it")} Then drop it. Don\'t resubmit unless asked to.'
     return f'{head(rec)} No answer by the deadline, so it is not approved. Don\'t resubmit or send a reminder; a reply in the thread would reopen it.'
 
 
@@ -44,11 +64,13 @@ def msg_replies(rec, kind, texts, question=None):
     said = " / ".join(f'"{one_line(x)}"' for x in texts)
     rid = rec["id"]
     if kind == "answer":
-        return f'{head(rec)} {who()} answered your question ("{one_line(question)}") in Slack at {t}: {said}. Carry on, usually with `approvals revise {rid} <card.json>`.'
+        return (f'{head(rec)} {who()} answered your question ("{one_line(question)}") in Slack at {t}: {said}. '
+                f'{ack_step(rec, "what you will do next")} Then carry on, usually with `approvals revise {rid} <card.json>`.')
     if kind == "comment":
-        return f'{head(rec)} {who()} replied in Slack at {t}, after the decision: {said}. Take it into account; no new card unless asked for one.'
+        return (f'{head(rec)} {who()} replied in Slack at {t}, after the decision: {said}. '
+                f'{ack_step(rec, "what, if anything, you will change")} Take it into account; no new card unless asked for one.')
     return (f'{head(rec)} {who()} replied in Slack at {t}: {said}. This is feedback on the card. '
-            f'Post a revised card with `approvals revise {rid} <card.json>` (say what changed in "changes"), '
+            f'{ack_step(rec, "what you will change or do as a result")} Then post a revised card with `approvals revise {rid} <card.json>` (say what changed in "changes"), '
             f'or ask one question with `approvals ask {rid} "<question>"`. '
             f'If the reply plainly approves the card as it stands, record it with `approvals record {rid} --approved --words "<their words>" --where "Slack thread"`, do it, then run `approvals done {rid} "<readback>"`. '
             f'If it plainly declines, record it with `approvals record {rid} --declined --words "<their words>" --where "Slack thread"` and drop it.')

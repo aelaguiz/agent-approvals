@@ -1,6 +1,6 @@
 ---
 name: approvals
-description: "Get a person's yes before an operational action by posting an approval card to Slack with the `approvals` command, then act on the answer when it arrives in this session as an [Approvals] message. Use when your instructions say an action needs someone's approval first, and that person isn't plainly the one giving you this task, so asking in this conversation wouldn't reach them: posting or replying publicly as them or the brand, ad or test spend, a purchase or money move, a price or offer change, a message to players or customers, an experiment or feature switch, a store listing or web page change, content going live, email or Slack in their name, or deleting an account. Also use when an [Approvals] message arrives, or to record a yes they gave somewhere else. Not for code reviews, merges, releases or deploys; not for actions a standing rule already lets you take; not for announcing finished work in Slack."
+description: "Get a person's yes before an operational action by posting an approval card to Slack with the `approvals` command, then acknowledge the answer in the thread and act on it when it arrives in this session as an [Approvals] message. Use when your instructions say an action needs someone's approval first, and that person isn't plainly the one giving you this task, so asking in this conversation wouldn't reach them: posting or replying publicly as them or the brand, ad or test spend, a purchase or money move, a price or offer change, a message to players or customers, an experiment or feature switch, a store listing or web page change, content going live, email or Slack in their name, or deleting an account. Also use when an [Approvals] message arrives, or to record a yes they gave somewhere else. Not for code reviews, merges, releases or deploys; not for actions a standing rule already lets you take; not for announcing finished work in Slack."
 ---
 
 # Approvals
@@ -15,6 +15,7 @@ When an action needs your approver's yes first, put one card in front of them th
 - **Never take the action before the answer.** Only two things count as a yes. One is the card's approve button, which reaches you as an `[Approvals]` message saying it was approved. The other is the approver's own words naming this request, such as a reply on the card like "post it", or a yes they gave elsewhere that you record with `approvals record`. A friendly reply to a long report is not a yes.
 - **Put the real thing on the card.** Show the exact reply under the post it answers, the ad itself, the price table with today beside proposed, the email word for word. If the approver would have to open something else to know what they're agreeing to, the card isn't ready.
 - **Ask once.** Don't send reminders or post the same card again. No answer by the deadline means no.
+- **Acknowledge every answer in the thread before acting on it.** The approver can't see your session. The 📨 on their reply only means the message was typed into it, not that you understood it or will act. When an `[Approvals]` message arrives, say in your own words what you understood and what you're about to do, with `approvals ack`, then do exactly that. If you end up doing something different, say so in the thread. An answer left unacknowledged for 10 minutes gets a warning in the thread.
 - **Don't wait around.** After submitting, keep working on something else, or end your turn saying which request you're waiting on. The answer is typed into this session. If this session has closed by then, it's resumed first and then told.
 
 ## Asking
@@ -41,6 +42,8 @@ Write it the way a busy owner reads:
 ## When the answer arrives
 
 Answers arrive as messages starting with `[Approvals]` that quote the approver's words exactly.
+
+First, acknowledge it: `approvals ack AP-0013 "<what you understood and what you'll do>"`. For example: "Got it: you approved v2. Posting the reply now, then I'll mark it done." Or: "Understood: shorter, and no product mention. v3 coming in a few minutes." Then act as below. A deadline passing needs no acknowledgement.
 
 | The message says | Do this |
 | --- | --- |

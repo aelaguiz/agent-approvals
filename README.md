@@ -14,7 +14,8 @@ agent ──approvals submit──▶ card in #approvals ──▶ you: ✅ / �
   - An open session gets the answer typed into its terminal pane.
   - A closed session is resumed through [AI Manager](#requirements) in a new [Herdr](https://herdr.dev) pane, then told.
   - A session that moved to another account is found by its content, and the newest copy gets the answer.
-  - Every answer is checked in the session's transcript and marked 📨 in Slack.
+  - Every answer is checked in the session's transcript and marked 📨 in Slack. 📨 means it was typed into the session, nothing more.
+  - The agent then acknowledges in the thread in its own words: what it understood and what it's going to do. If it doesn't within 10 minutes, the thread gets a warning, so a delivery never looks like a handled answer.
 - **Agents learn it from a skill.** The `approvals` skill teaches when to ask (only when a yes is required, and once), how to write a card someone can decide from at a glance, and what to do with each kind of answer.
 
 ## Requirements
@@ -66,6 +67,7 @@ Agents use the skill. To try it by hand:
 approvals submit card.json --agent "Pricing"   # posts the card, prints AP-0001 and a link
 approvals ask AP-0001 "Mexico at MX$899 or MX$999?"
 approvals revise AP-0001 card-v2.json          # next version, in the same thread
+approvals ack AP-0001 "Got it: setting both prices now"   # the agent's own acknowledgement, in the thread
 approvals done AP-0001 "Set both prices; read them back from the store"
 approvals inbox --agent "Pricing"              # answers waiting, for agents that can't be reached directly
 approvals record AP-0001 --approved --words "yes do it" --where "phone call"
