@@ -208,8 +208,7 @@ class Listener:
         item = next(i for i in rec["outbox"] if i["ref"] == ref)
         if item.get("delivered_at"):
             return
-        waited = (store.now() - datetime.fromisoformat(item["created"])).total_seconds()
-        res = router.deliver(rec.get("reach") or {}, item["text"], ref, request_id=rid, waited_seconds=waited)
+        res = router.deliver(rec.get("reach") or {}, item["text"], ref, request_id=rid)
         log.info("%s %s: %s (%s)", rid, ref, res.status, res.reason)
         note = store.update(rid, lambda r: self._after(r, ref, res))
         if res.status == "delivered" and item.get("react_ts"):
@@ -241,9 +240,6 @@ class Listener:
         if res.status == "delivered":
             item["delivered_at"] = store.iso()
             store.event(r, "delivered", ref=ref)
-            return None
-        if res.status == "wait":
-            item["next_try"] = store.iso(store.now() + timedelta(seconds=60))
             return None
         if res.status == "inbox":
             item["delivered_at"] = None

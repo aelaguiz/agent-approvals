@@ -49,7 +49,7 @@ When there's a message for the agent, the listener:
    - **Claude:** each process writes the session id it's running to `<config dir>/sessions/<pid>.json`.
    - **Codex:** the session id is read from the session file the process holds open.
    - **A different session counts as the asker only if it's a moved copy:** AI Manager rewrote its ids when it moved it to another account, so it starts with the same first prompt and has the request number in its history. A later run of the same scheduled agent, another agent in the same folder, or a sub-agent may start the same way, but none of them made this request.
-3. **If the asker is running,** it waits while that pane is focused (someone may be typing, up to 10 minutes), then types the message and presses Enter through Herdr. It never starts a second copy of a session that's already running. If the session runs outside Herdr, the message waits and is retried.
+3. **If the asker is running,** it types the message and presses Enter through Herdr straight away. It never starts a second copy of a session that's already running. If the session runs outside Herdr, the message waits and is retried.
 4. **If it isn't running, it resumes it and then tells it.**
    - **Finds the newest copy:** the newest moved copy, by the rule above, or the asker itself.
    - **Resumes it.** It opens a tab in the agent's Herdr workspace, or in an `approvals` workspace if that's gone, and runs `aim claude resume <id>` or `aim codex resume <id>`.

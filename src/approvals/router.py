@@ -9,7 +9,6 @@ from . import config, transcripts
 
 CONFIRM_SECONDS = 90
 READY_SECONDS = 180
-FOCUS_WAIT_SECONDS = 600
 
 
 class HerdrError(RuntimeError):
@@ -89,7 +88,7 @@ class Herdr:
 
 @dataclass
 class Result:
-    status: str                      # delivered | wait | retry | inbox
+    status: str                      # delivered | retry | inbox
     reason: str = ""
     reach: dict = field(default_factory=dict)   # fields to update on the record's reach
     moves: list = field(default_factory=list)   # [old_id, new_id] pairs seen
@@ -175,7 +174,7 @@ def find_live_asker(reach, request_id, run=subprocess.run):
     return None, None, None
 
 
-def deliver(reach, text, ref, request_id=None, waited_seconds=0, run=subprocess.run, sleep=time.sleep, clock=time.monotonic):
+def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sleep, clock=time.monotonic):
     runtime, sid = reach.get("runtime"), reach.get("session_id")
     if reach.get("host") != config.hostname() or runtime not in ("claude", "codex") or not sid:
         return Result("inbox", "that session isn't a Claude or Codex session on this Mac")
@@ -193,9 +192,6 @@ def deliver(reach, text, ref, request_id=None, waited_seconds=0, run=subprocess.
 
     if pane:
         h = Herdr(hs, run=run)
-        info = h.pane(pane) or {}
-        if info.get("focused") and waited_seconds < FOCUS_WAIT_SECONDS:
-            return Result("wait", "the agent's pane is focused; waiting so nothing is typed over", moves=moves)
         h.send(pane, text)
         if pane != reach.get("herdr_pane") or hs != reach.get("herdr_session"):
             updates = {"herdr_session": hs, "herdr_pane": pane, "herdr_workspace": pane.split(":")[0], "herdr_tab": None}

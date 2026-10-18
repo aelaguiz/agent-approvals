@@ -7,7 +7,7 @@
 - 20 processes submitting at once and getting distinct numbers;
 - the first button press winning, and old versions refusing;
 - replies sorted into feedback, an answer or a comment;
-- routing decisions with fake `herdr` and `aim`: live pane, focused pane, closed session, moved session, a different session in the pane, an already delivered message, another machine;
+- routing decisions with fake `herdr` and `aim`: live pane, focused pane (sent straight away), closed session, moved session, a different session in the pane, an already delivered message, another machine;
 - the failure note posting once.
 
 ## Live end-to-end test

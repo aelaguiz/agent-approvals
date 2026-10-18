@@ -111,11 +111,11 @@ def test_unrecognized_agent_falls_back_to_typing(reach, world):
     assert ["pane", "run", "w1:p1", "m (ref abc)"] in fake.calls
 
 
-def test_focused_pane_waits(reach, world):
+def test_focused_pane_gets_the_message_right_away(reach, world):
     world.pid_sid = {1: "sid-1"}
     fake = FakeHerdr(panes={"w1:p1": {"focused": True}}, procs={"w1:p1": [{"pid": 1}]})
-    assert run(world, fake, reach).status == "wait"
-    assert run(world, fake, reach, waited_seconds=700).status == "delivered"
+    assert run(world, fake, reach).status == "delivered"
+    assert fake.sent_to("w1:p1")
 
 
 def test_closed_session_is_resumed_then_told(reach, world):
