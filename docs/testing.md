@@ -113,3 +113,36 @@ The question is whether, with many agents and many requests open at once, every 
 - None needed a follow-up question to understand.
 
 **Delivery.** Every answer reached its session: 5 thread replies and 1 button press, including one closed Codex session resumed through AI Manager. Each one was confirmed in the session's transcript, and every reply was marked 📨.
+
+### October 18, 2026: routing, interference and acknowledgements
+
+All runs used the installed package from a fresh clone. Claude agents ran on Sonnet 5.5, launched through AI Manager in their own Herdr workspaces. Each answer carried a reference code, checked against every agent's transcript.
+
+**First attempt at L1: fail.**
+- The approver pressed approve on run A's card just after run A had closed.
+- Run B, with the same brief in the same folder, ran `approvals inbox`, which handed it the answer by agent name. B acknowledged it, logged the change, and marked the request done.
+- Because B had read the request number and started from the same prompt, the copy check accepted it as run A and moved the request's routing to B. Run A was never told.
+
+**Fixed:**
+- A copy must also open with the same first reply.
+- The inbox gives each answer to one session only: it hands the asker anything undelivered, but another run only what the service has given up delivering.
+- The skill now says to act only on answers that reach you. This became case R11.
+
+**Two scenarios didn't exercise their case, and were rerun:**
+- L3's agent was asked to send the same tax email as L2's agent. It correctly found that request open and didn't duplicate it, so it had no card of its own.
+- L4's foreground `sleep` was blocked by Claude Code, so the agent ran it in the background and was idle when its answer came. It still acknowledged and acted correctly. The job is now a 90-second Python wait.
+
+**Rerun: all pass.**
+
+| Test | Result |
+| --- | --- |
+| L1, scheduled twins | Pass. Run A posted AP-0004 and closed. Run B, with the same brief in the same folder, found AP-0004 open and didn't post a duplicate. The approval resumed run A, not B. Run A acknowledged, logged the change and ran `done`. Run B's transcript holds none of AP-0004's codes, and the folder's outbox has one entry. |
+| L2, one agent, two requests | Pass. The agent posted AP-0005 (reply) and AP-0006 (email) and was closed. Three answers came within 12 seconds: two to AP-0005, five seconds apart, and one to AP-0006. The session was resumed once, all three landed in it in the order sent, and each was acknowledged. It sent the email once and posted a shorter v2 of the reply, which correctly waits for a yes. |
+| L3, resumed by a person | Pass. The asker's workspace was closed and its session resumed by hand in a new workspace. The answer was delivered to that pane, and one process runs the session. |
+| L4, busy | Pass. The answer arrived while the agent was running its 90-second job. It finished the job, then acknowledged, changed the price and ran `done`. |
+| L5, all at once | Pass. Run A, run B, the L2 agent, the L3 agent and the L4 agent were all live or resumable together, with five answers posted within 7 seconds. Every code landed only in its asker's transcript, and every session had at most one process. |
+| A1, acknowledged before acting | Pass. All 6 answers were acknowledged by their agent in the thread, in its own words ("Got it: you approved raising the search ads learning cap from $450 to $700…"), each before the action. |
+| A2, the acknowledgement matches the action | Pass. Every action matched what its acknowledgement said. One agent acknowledged a second note ("no product mention") by pointing out that its v2 already had none, and didn't post a needless v3. |
+| A3, an unacknowledged answer is called out | Pass (unit test). |
+
+**Observation.** Herdr types each `[Approvals]` message into Claude Code as a paste, so the agent sees it wrapped as pasted content. Every agent still acted on it as an answer.
