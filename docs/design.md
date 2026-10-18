@@ -44,15 +44,23 @@ Every request records how to reach the agent that asked. The `approvals` command
 When there's a message for the agent, the listener:
 
 1. **Checks it isn't already there.** If the session's transcript already holds the message's reference code, it marks the message delivered and stops. That covers a restart between sending and recording.
-2. **Checks the session is in its pane.** Each Claude Code process writes the session id it's running to `<config dir>/sessions/<pid>.json`. The listener reads the pane's foreground processes and compares that id with the recorded one. A different id in that pane counts as the same conversation only if its transcript starts with the same first prompt; that's a session AI Manager copied to another account. For Codex, a running `codex` process in the pane counts.
-3. **If the session is live,** it waits while the pane is focused (someone may be typing, up to 10 minutes), then types the message and presses Enter through Herdr.
-4. **If it isn't, it resumes it and then tells it.**
-   - **Finds the newest copy.** AI Manager rewrites every id when it copies a session to another account, so the copy is found by content: the newest transcript in the same work folder that starts with the same first prompt.
+2. **Finds where the asker is running.**
+   - It checks the recorded pane first, then every pane on the Mac.
+   - **Claude:** each process writes the session id it's running to `<config dir>/sessions/<pid>.json`.
+   - **Codex:** the session id is read from the session file the process holds open.
+   - **A different session counts as the asker only if it's a moved copy:** AI Manager rewrote its ids when it moved it to another account, so it starts with the same first prompt and has the request number in its history. A later run of the same scheduled agent, another agent in the same folder, or a sub-agent may start the same way, but none of them made this request.
+3. **If the asker is running,** it waits while that pane is focused (someone may be typing, up to 10 minutes), then types the message and presses Enter through Herdr. It never starts a second copy of a session that's already running. If the session runs outside Herdr, the message waits and is retried.
+4. **If it isn't running, it resumes it and then tells it.**
+   - **Finds the newest copy:** the newest moved copy, by the rule above, or the asker itself.
    - **Resumes it.** It opens a tab in the agent's Herdr workspace, or in an `approvals` workspace if that's gone, and runs `aim claude resume <id>` or `aim codex resume <id>`.
    - **Waits until it's ready.** For Claude, the pane shows "bypass permissions" and a Claude process reports a session. For Codex, its input screen is showing.
    - **Records the real id** the resumed session reports, then sends the message.
 5. **Confirms delivery.** The message's reference code must appear in the session's transcript within 90 seconds. Then the approver's reply, or the card for a button press, gets 📨.
 6. **If delivery fails,** it retries every 5 minutes, then hourly after three failures. It posts one ⚠️ note in the thread saying why. Sessions on another machine, or in runtimes it can't resume, get the message in their `approvals inbox`.
+
+A request's messages arrive in the order they were sent: a later one waits until the earlier one has landed.
+
+Only the asker or a moved copy of it can change where a request's answers go. If another session runs a command on the request, that's noted on the record and changes nothing.
 
 Every message starts with `[Approvals]` and the request number, quotes the approver's words exactly, and says what to do next. It's sent as one line, so nothing is submitted half-typed.
 

@@ -107,9 +107,45 @@ def _codex_in_pane(h, pane):
     return any("codex" in (p.get("cmdline") or "") for p in h.procs(pane))
 
 
-def _same_conversation(a, b):
-    fa = transcripts.first_user_text(transcripts.claude_transcript(a))
-    return bool(fa) and fa == transcripts.first_user_text(transcripts.claude_transcript(b))
+def _codex_sid_in_pane(h, pane):
+    for p in h.procs(pane):
+        cmd = p.get("cmdline") or ""
+        if "/codex" in cmd and "vendor" in cmd:
+            sid = transcripts.codex_session_for_pid(p.get("pid"))
+            if sid:
+                return sid
+    return None
+
+
+def session_in_pane(h, pane, runtime):
+    return _claude_sid_in_pane(h, pane) if runtime == "claude" else _codex_sid_in_pane(h, pane)
+
+
+def herdr_sessions(run=subprocess.run):
+    """Names of the running Herdr servers."""
+    try:
+        out = run(["herdr", "session", "list"], capture_output=True, text=True, timeout=15).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [line.split()[0] for line in out.splitlines()[1:] if len(line.split()) > 1 and line.split()[1] == "running"]
+
+
+def find_pane_for_pid(pid, first_session=None, run=subprocess.run):
+    """(Herdr session, pane id) whose foreground processes include pid, or None."""
+    names = herdr_sessions(run)
+    if first_session in names:
+        names.remove(first_session)
+        names.insert(0, first_session)
+    for name in names:
+        h = Herdr(name, run=run)
+        try:
+            panes = h.call("pane", "list")["result"]["panes"]
+        except (HerdrError, KeyError):
+            continue
+        for pane in panes:
+            if any(p.get("pid") == pid for p in h.procs(pane["pane_id"])):
+                return name, pane["pane_id"]
+    return None
 
 
 def already_delivered(reach, ref):
@@ -118,38 +154,56 @@ def already_delivered(reach, ref):
     return any(transcripts.contains(transcripts.transcript(runtime, i), ref) for i in ids if i)
 
 
-def deliver(reach, text, ref, waited_seconds=0, run=subprocess.run, sleep=time.sleep, clock=time.monotonic):
+def find_live_asker(reach, request_id, run=subprocess.run):
+    """Where the asker (or a moved copy of it) is running right now: (session id, Herdr session, pane).
+
+    Returns (None, None, None) if it isn't running, or (sid, None, None) if it's running outside Herdr.
+    """
+    runtime, sid, cwd = reach.get("runtime"), reach.get("session_id"), reach.get("cwd")
+    h = Herdr(reach.get("herdr_session") or config.settings()["default_herdr_session"], run=run)
+    pane = reach.get("herdr_pane")
+    if pane and h.pane(pane):
+        found = session_in_pane(h, pane, runtime)
+        if found and (found == sid or transcripts.is_copy(runtime, sid, found, request_id)):
+            return found, h.session, pane
+        if found is None and runtime == "codex" and _codex_in_pane(h, pane):
+            return sid, h.session, pane   # Codex is in the recorded pane but its thread can't be read
+    for pid, found, found_cwd in transcripts.live_sessions(runtime):
+        if found == sid or ((found_cwd is None or found_cwd == cwd) and transcripts.is_copy(runtime, sid, found, request_id)):
+            loc = find_pane_for_pid(pid, h.session, run=run)
+            return (found, loc[0], loc[1]) if loc else (found, None, None)
+    return None, None, None
+
+
+def deliver(reach, text, ref, request_id=None, waited_seconds=0, run=subprocess.run, sleep=time.sleep, clock=time.monotonic):
     runtime, sid = reach.get("runtime"), reach.get("session_id")
     if reach.get("host") != config.hostname() or runtime not in ("claude", "codex") or not sid:
         return Result("inbox", "that session isn't a Claude or Codex session on this Mac")
     if already_delivered(reach, ref):
         return Result("delivered", "already in the transcript")
 
-    h = Herdr(reach.get("herdr_session") or config.settings()["default_herdr_session"], run=run)
-    pane = reach.get("herdr_pane")
     moves = []
-    live = False
-    if pane and h.pane(pane):
-        if runtime == "claude":
-            in_pane = _claude_sid_in_pane(h, pane)
-            if in_pane == sid:
-                live = True
-            elif in_pane and _same_conversation(sid, in_pane):
-                moves.append([sid, in_pane])
-                sid, live = in_pane, True
-        else:
-            live = _codex_in_pane(h, pane)
-
     updates = {}
-    if live:
+    found, hs, pane = find_live_asker(reach, request_id, run=run)
+    if found and found != sid:
+        moves.append([sid, found])
+        sid = found
+    if found and not pane:
+        return Result("retry", "the session is open outside Herdr, so it can't be typed into; trying again later", moves=moves)
+
+    if pane:
+        h = Herdr(hs, run=run)
         info = h.pane(pane) or {}
         if info.get("focused") and waited_seconds < FOCUS_WAIT_SECONDS:
             return Result("wait", "the agent's pane is focused; waiting so nothing is typed over", moves=moves)
         h.send(pane, text)
+        if pane != reach.get("herdr_pane") or hs != reach.get("herdr_session"):
+            updates = {"herdr_session": hs, "herdr_pane": pane, "herdr_workspace": pane.split(":")[0], "herdr_tab": None}
     else:
+        h = Herdr(reach.get("herdr_session") or config.settings()["default_herdr_session"], run=run)
         target = sid
         if runtime == "claude":
-            copies = transcripts.claude_copies(sid, reach.get("cwd"))
+            copies = transcripts.claude_copies(sid, reach.get("cwd"), request_id)
             if copies:
                 moves.append([sid, copies[0]])
                 target = copies[0]

@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-from . import config, store
+from . import config, store, transcripts
 
 
 def capture(agent_name=None):
@@ -29,10 +29,20 @@ def capture(agent_name=None):
 
 
 def refresh(rec, new):
-    """Keep reach current; remember every earlier session id."""
+    """Keep reach current as the asker moves; remember every earlier session id.
+
+    Only the asker itself, or a moved copy of it, may update where answers go. Another session running a
+    command on this request (a different agent, a later run of the same scheduled agent, a sub-agent) is
+    noted on the record but doesn't take over its answers.
+    """
     old = rec.get("reach") or {}
     if not new.get("session_id"):
         return
+    if old.get("session_id") and new["session_id"] != old["session_id"]:
+        if new.get("runtime") != old.get("runtime") or not transcripts.is_copy(
+                old["runtime"], old["session_id"], new["session_id"], rec.get("id")):
+            store.event(rec, "used_by_other_session", session_id=new["session_id"], agent=new.get("agent"))
+            return
     ids = list(old.get("earlier_ids", []))
     if old.get("session_id") and old["session_id"] != new["session_id"] and old["session_id"] not in ids:
         ids.append(old["session_id"])

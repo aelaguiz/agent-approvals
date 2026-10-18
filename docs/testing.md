@@ -2,7 +2,7 @@
 
 ## Unit tests
 
-`make test` runs 32 tests, with no network. They cover:
+`make test` runs 39 tests, with no network. They cover:
 - every card type rendering, required fields, escaping;
 - 20 processes submitting at once and getting distinct numbers;
 - the first button press winning, and old versions refusing;
@@ -49,6 +49,33 @@ A card that would make the approver ask "what is the question?" fails.
 - 📨 reactions show delivery.
 
 **Clean-up:** close the test workspaces and sessions, run `approvals purge-tests`, and remove `test_approver` from the config.
+
+## Routing and interference
+
+The question is whether, with many agents and many requests open at once, every answer reaches the session that asked, exactly once, and no other. A request's routing comes from the session that submitted it. Every command the agent runs refreshes it, and the service changes it when it resumes or finds a session.
+
+**The rule these cases enforce.** Another session counts as the asker only if it is a copy of the asker: AI Manager moved it to another account (same first prompt), and its history contains the request number. Tomorrow's run of a scheduled agent, a second agent in the same folder, and a sub-agent may all start the same way, but none of them made this request.
+
+| # | Case | Must happen | Proved by |
+| --- | --- | --- | --- |
+| R1 | Several agents, one request each, answers posted together | Each answer lands only in its asker | Live (passed October 18, regression in L5) |
+| R2 | A scheduled agent's earlier run asked and closed; a newer run with the same prompt is in the same folder | The earlier run is resumed and told; the newer run gets nothing | Unit + live L1 |
+| R3 | The asker's pane now runs a different session that starts with the same prompt | That session isn't prompted; the asker is resumed elsewhere | Unit |
+| R4 | The asker moved to another account | The copy, which holds the request in its history, is told | Unit + live (passed October 18) |
+| R5 | The asker is open in a different pane than recorded, for example a person resumed it there | It's told there; no second copy is started | Unit + live L3 |
+| R6 | One agent has two requests open, its session is closed, and both get answers | The session is resumed once; both answers land in it, in order | Unit + live L2 |
+| R7 | Another session runs a command on a request it didn't make | Routing stays with the asker; the call is noted on the record | Unit |
+| R8 | Two answers to one request, a few seconds apart | Both land, in order | Unit + live L2 |
+| R9 | The agent is mid-task when its answer arrives | It lands, and the agent acts on it after the task | Live L4 |
+| R10 | The service restarts between sending and recording | Nothing is sent twice | Unit (passed October 18) |
+
+**Live tests.** These use the installed package, real agents launched through AI Manager in their own Herdr workspaces, and `[test reply]` posts on TEST cards. Each answer carries a reference code, so the check is exact: a code must appear in its asker's transcript and in no other. "Resumed once" is checked by counting the processes running that session.
+
+- **L1, scheduled twins.** Agent A gets a brief in folder F, submits a request and exits. Agent B gets the identical brief in F, as the next day's run would, and submits its own. A reply goes to A's request. A is resumed and acts; B's transcript holds no code from A's request. Then a reply to B's request reaches B, which is still open.
+- **L2, one agent, two requests.** One agent gets a brief with two actions needing approval and submits two cards, then its session is closed. Answers go to both, plus a second answer to the first a few seconds later. The session is resumed once, all three answers land in it in the order sent, and it acts on each request separately.
+- **L3, resumed by a person.** An asker's pane is closed, and its session is resumed by hand in a new workspace, as the watcher does. A reply is delivered to that pane, and there's still exactly one process running the session.
+- **L4, busy.** An agent submits, then starts a 90-second job. The answer arrives during the job, and the agent acts on it once the job is done.
+- **L5, all at once.** L1, L2 and L3 run at the same time, so their answers cross in the same polling passes.
 
 ## Results
 

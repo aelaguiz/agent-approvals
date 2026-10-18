@@ -156,10 +156,13 @@ class Listener:
             if rec.get("card_dirty"):
                 self.try_refresh(rec["id"])
             for item in rec.get("outbox", []):
+                if item.get("delivered_at") or item.get("inbox_only"):
+                    continue
                 key = (rec["id"], item["ref"])
                 if core.due(item) and key not in self.in_flight:
                     self.in_flight.add(key)
                     self.deliveries.put(key)
+                break   # a request's later messages wait until this one lands, so they arrive in order
 
     def delivery_worker(self):
         while not self.stop.is_set():
@@ -181,7 +184,7 @@ class Listener:
         if item.get("delivered_at"):
             return
         waited = (store.now() - datetime.fromisoformat(item["created"])).total_seconds()
-        res = router.deliver(rec.get("reach") or {}, item["text"], ref, waited_seconds=waited)
+        res = router.deliver(rec.get("reach") or {}, item["text"], ref, request_id=rid, waited_seconds=waited)
         log.info("%s %s: %s (%s)", rid, ref, res.status, res.reason)
         note = store.update(rid, lambda r: self._after(r, ref, res))
         if res.status == "delivered" and item.get("react_ts"):

@@ -78,8 +78,9 @@ def first_user_text(path, limit=400):
     return None
 
 
-def claude_copies(session_id, cwd):
-    """Other Claude transcripts for the same work folder that start with the same prompt, newest first."""
+def claude_copies(session_id, cwd, request_id=None):
+    """Moved copies of a Claude session, newest first: same work folder, same first prompt, and (when a
+    request number is given) that request in their history."""
     src = claude_transcript(session_id)
     first = first_user_text(src)
     if not first:
@@ -91,7 +92,77 @@ def claude_copies(session_id, cwd):
         for p in glob.glob(str(d / "projects" / slug / "*.jsonl")):
             if Path(p).stem == session_id or os.path.getmtime(p) <= src_mtime:
                 continue
-            if first_user_text(p) == first:
+            if first_user_text(p) == first and (not request_id or contains(p, request_id)):
                 found.append(p)
     found.sort(key=os.path.getmtime, reverse=True)
     return [Path(p).stem for p in found]
+
+
+def is_copy(runtime, asker, candidate, request_id):
+    """Is `candidate` the asker under another id? Only a moved copy qualifies: it carries the asker's
+    history, so it holds the request number, and (for Claude) it starts with the same first prompt.
+    A later run of the same scheduled agent, or another agent in the same folder, may start the same
+    way but never made this request."""
+    if not candidate or not request_id:
+        return False
+    if candidate == asker:
+        return True
+    cand = transcript(runtime, candidate)
+    if not contains(cand, request_id):
+        return False
+    if runtime == "claude":
+        first = first_user_text(claude_transcript(asker))
+        return bool(first) and first == first_user_text(cand)
+    return True
+
+
+def _alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, TypeError):
+        return False
+
+
+def live_claude_sessions():
+    """(pid, session id, cwd) for every running Claude process, from its per-process record."""
+    out = []
+    for d in claude_config_dirs():
+        for p in glob.glob(str(d / "sessions" / "*.json")):
+            try:
+                rec = json.loads(Path(p).read_text())
+            except (json.JSONDecodeError, OSError):
+                continue
+            pid, sid = rec.get("pid"), (rec.get("sessionId") or "").lower()
+            if sid and _alive(pid):
+                out.append((pid, sid, rec.get("cwd")))
+    return out
+
+
+def codex_session_for_pid(pid):
+    """The Codex thread a process is writing, from the session file it holds open."""
+    import re
+    import subprocess
+    try:
+        out = subprocess.run(["lsof", "-p", str(pid), "-Fn"], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = re.search(r"rollout-[^/\n]*?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl", out)
+    return m.group(1) if m else None
+
+
+def live_codex_sessions():
+    import subprocess
+    out = []
+    ps = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True).stdout
+    for line in ps.splitlines():
+        pid_s, _, cmd = line.strip().partition(" ")
+        if "/codex" in cmd and "vendor" in cmd:   # the native Codex binary, not its node wrapper
+            sid = codex_session_for_pid(int(pid_s))
+            if sid:
+                out.append((int(pid_s), sid, None))
+    return out
+
+
+def live_sessions(runtime):
+    return live_claude_sessions() if runtime == "claude" else live_codex_sessions()
