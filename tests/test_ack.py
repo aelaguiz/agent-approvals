@@ -57,3 +57,23 @@ def test_acknowledged_or_recent_deliveries_are_not_called_out(monkeypatch):
     core.acknowledge(acked, "On it.", "3.0")
     L.warn_unacknowledged(acked)
     assert notes == []
+
+
+def test_inbox_gives_each_answer_to_one_session(monkeypatch, capsys):
+    from types import SimpleNamespace
+    from approvals import cli, reach
+    rec = rec_with("decision")
+    rec["reach"] = {"agent": "Daily", "session_id": "asker", "earlier_ids": []}
+    store.save(rec)
+    # Today's run of the same agent: the answer is still on its way to the asker, so it's not handed over.
+    monkeypatch.setattr(reach, "capture", lambda agent=None: {"agent": "Daily", "session_id": "today"})
+    cli.cmd_inbox(SimpleNamespace(agent="Daily", all=False))
+    assert "No approval answers waiting" in capsys.readouterr().out
+    # Once the service gives up delivering it, today's run gets it, and the service stops trying.
+    def give_up(r):
+        r["outbox"][0]["noted_failure"] = True
+    store.update("AP-0001", give_up)
+    cli.cmd_inbox(SimpleNamespace(agent="Daily", all=False))
+    assert "approved it" in capsys.readouterr().out
+    item = store.load("AP-0001")["outbox"][0]
+    assert item["delivered_via"] == "inbox" and item["claimed_by"] == "today" and item["delivered_at"]

@@ -8,10 +8,12 @@ from approvals import reach, store, transcripts
 PROMPT = "From the daily brief: check yesterday's numbers and post the summary."
 
 
-def write(path, first_prompt, extra=""):
+def write(path, first_prompt, first_reply, *later):
+    """A transcript: the prompt, the agent's first reply, then later assistant turns."""
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [{"type": "user", "message": {"role": "user", "content": first_prompt}},
-             {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": extra}]}}]
+             {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": first_reply}]}}]
+    lines += [{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": t}]}} for t in later]
     path.write_text("\n".join(json.dumps(l) for l in lines) + "\n")
 
 
@@ -19,9 +21,10 @@ def setup_homes(tmp_path, monkeypatch):
     home = tmp_path / ".claude"
     proj = home / "projects" / "-tmp-x"
     monkeypatch.setattr(transcripts, "claude_config_dirs", lambda: [home])
-    write(proj / "asker.jsonl", PROMPT, "Submitted AP-0001. Waiting on it.")
+    write(proj / "asker.jsonl", PROMPT, "Raising a cap needs approval; I'll post a card.", "Submitted AP-0001. Waiting on it.")
     time.sleep(0.01)
-    write(proj / "twin.jsonl", PROMPT, "Submitted AP-0002 for today's run.")
+    # Today's run: same prompt, its own first reply, and it has even read the request number.
+    write(proj / "twin.jsonl", PROMPT, "Spend changes need Amir's yes. Checking the inbox first.", "approvals show AP-0001: approved")
     os.utime(proj / "twin.jsonl", (time.time() + 5, time.time() + 5))
     return proj
 
@@ -34,7 +37,7 @@ def test_R2_scheduled_twin_is_not_a_copy(tmp_path, monkeypatch):
 
 def test_R4_moved_copy_is_found(tmp_path, monkeypatch):
     proj = setup_homes(tmp_path, monkeypatch)
-    write(proj / "moved.jsonl", PROMPT, "Submitted AP-0001. Waiting on it. (copied by AI Manager)")
+    write(proj / "moved.jsonl", PROMPT, "Raising a cap needs approval; I'll post a card.", "Submitted AP-0001. Waiting on it.", "Back after the move.")
     os.utime(proj / "moved.jsonl", (time.time() + 10, time.time() + 10))
     assert transcripts.claude_copies("asker", "/tmp/x", "AP-0001") == ["moved"]
     assert transcripts.is_copy("claude", "asker", "moved", "AP-0001")
@@ -46,7 +49,7 @@ def test_R7_another_session_cannot_take_over_a_request(tmp_path, monkeypatch):
     reach.refresh(rec, {"runtime": "claude", "session_id": "twin", "agent": "Daily", "herdr_pane": "w2:p1"})
     assert rec["reach"]["session_id"] == "asker" and rec["reach"]["herdr_pane"] == "w1:p1"
     assert rec["events"][-1]["kind"] == "used_by_other_session"
-    write(proj / "moved.jsonl", PROMPT, "Submitted AP-0001. (copied by AI Manager)")
+    write(proj / "moved.jsonl", PROMPT, "Raising a cap needs approval; I'll post a card.", "Submitted AP-0001. Waiting on it.")
     reach.refresh(rec, {"runtime": "claude", "session_id": "moved", "agent": "Daily", "herdr_pane": "w3:p1"})
     assert rec["reach"]["session_id"] == "moved" and rec["reach"]["earlier_ids"] == ["asker"]
     reach.refresh(rec, {"runtime": "claude", "session_id": "moved", "agent": "Daily", "herdr_pane": "w4:p1"})

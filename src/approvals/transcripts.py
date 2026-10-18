@@ -78,11 +78,47 @@ def first_user_text(path, limit=400):
     return None
 
 
+def opening(path, limit=400):
+    """The first prompt and the agent's first reply. A copy AI Manager made of a session carries both word
+    for word; another run started from the same prompt writes its own first reply."""
+    if not path or not os.path.exists(path):
+        return None
+    user = agent = None
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            try:
+                e = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            p = e.get("payload") or {}
+            if e.get("type") in ("user", "assistant"):            # Claude Code
+                role, content, meta = e["type"], (e.get("message") or {}).get("content"), e.get("isMeta")
+            elif p.get("type") == "message":                       # Codex
+                role, content, meta = p.get("role"), p.get("content"), False
+            else:
+                continue
+            if meta:
+                continue
+            text = (_text_of(content) if role != "assistant" or not isinstance(content, list)
+                    else " ".join(c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") in ("text", "output_text"))).strip()
+            if isinstance(content, list) and role == "user" and not text:
+                text = " ".join(c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "input_text").strip()
+            if not text or text.startswith("<"):
+                continue
+            if role == "user" and user is None:
+                user = " ".join(text.split())[:limit]
+            elif role == "assistant" and user is not None and agent is None:
+                agent = " ".join(text.split())[:limit]
+            if user and agent:
+                return user, agent
+    return None
+
+
 def claude_copies(session_id, cwd, request_id=None):
     """Moved copies of a Claude session, newest first: same work folder, same first prompt, and (when a
     request number is given) that request in their history."""
     src = claude_transcript(session_id)
-    first = first_user_text(src)
+    first = opening(src)
     if not first:
         return []
     src_mtime = os.path.getmtime(src)
@@ -92,7 +128,7 @@ def claude_copies(session_id, cwd, request_id=None):
         for p in glob.glob(str(d / "projects" / slug / "*.jsonl")):
             if Path(p).stem == session_id or os.path.getmtime(p) <= src_mtime:
                 continue
-            if first_user_text(p) == first and (not request_id or contains(p, request_id)):
+            if opening(p) == first and (not request_id or contains(p, request_id)):
                 found.append(p)
     found.sort(key=os.path.getmtime, reverse=True)
     return [Path(p).stem for p in found]
@@ -100,9 +136,9 @@ def claude_copies(session_id, cwd, request_id=None):
 
 def is_copy(runtime, asker, candidate, request_id):
     """Is `candidate` the asker under another id? Only a moved copy qualifies: it carries the asker's
-    history, so it holds the request number, and (for Claude) it starts with the same first prompt.
-    A later run of the same scheduled agent, or another agent in the same folder, may start the same
-    way but never made this request."""
+    history word for word, so it opens with the same prompt and the same first reply, and it holds the
+    request number. A later run of the same scheduled agent may start from the same prompt and may even
+    have read the request number, but it wrote its own first reply."""
     if not candidate or not request_id:
         return False
     if candidate == asker:
@@ -110,10 +146,8 @@ def is_copy(runtime, asker, candidate, request_id):
     cand = transcript(runtime, candidate)
     if not contains(cand, request_id):
         return False
-    if runtime == "claude":
-        first = first_user_text(claude_transcript(asker))
-        return bool(first) and first == first_user_text(cand)
-    return True
+    first = opening(transcript(runtime, asker))
+    return bool(first) and first == opening(cand)
 
 
 def _alive(pid):

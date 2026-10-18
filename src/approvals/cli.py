@@ -168,23 +168,32 @@ def cmd_record(a):
 
 
 def cmd_inbox(a):
+    """Answers the service can't type into their asker's session. Each answer goes to exactly one session:
+    the asker gets anything not yet delivered; another run of the same agent gets only answers the
+    service has given up delivering, and taking one here stops the service from delivering it too."""
     me = reach.capture(a.agent)
     shown = 0
 
-    def mark(rec):
+    def take(rec, own):
         nonlocal shown
         for item in rec.get("outbox", []):
-            if not item.get("seen_by_agent"):
-                print(item["text"])
-                item["seen_by_agent"] = True
-                shown += 1
+            if item.get("delivered_at") or item.get("seen_by_agent"):
+                continue
+            if not own and not (item.get("inbox_only") or item.get("noted_failure")):
+                continue
+            print(item["text"])
+            item["seen_by_agent"] = True
+            item["delivered_at"] = store.iso()
+            item["delivered_via"] = "inbox"
+            item["claimed_by"] = me.get("session_id")
+            shown += 1
     for rec in store.all_records():
         r = rec.get("reach") or {}
-        mine = (a.all or r.get("agent") == me["agent"] or (me.get("session_id") and me["session_id"] in [r.get("session_id"), *r.get("earlier_ids", [])]))
-        if mine and any(not i.get("seen_by_agent") for i in rec.get("outbox", [])):
-            store.update(rec["id"], mark)
+        own = bool(me.get("session_id")) and me["session_id"] in [r.get("session_id"), *r.get("earlier_ids", [])]
+        if own or a.all or r.get("agent") == me["agent"]:
+            store.update(rec["id"], lambda x, own=own: take(x, own or a.all))
     if not shown:
-        print("No approval answers waiting.")
+        print("No approval answers waiting for you.")
 
 
 def cmd_show(a):
@@ -201,7 +210,7 @@ def cmd_list(a):
 def cmd_purge_tests(a):
     n = 0
     for rec in store.all_records():
-        if not rec.get("test"):
+        if not rec.get("test") or (a.only and rec["id"] not in a.only):
             continue
         if rec.get("thread_ts"):
             try:
@@ -283,6 +292,7 @@ def main(argv=None):
     s.set_defaults(fn=cmd_list)
 
     s = sub.add_parser("purge-tests", help=argparse.SUPPRESS)
+    s.add_argument("--only", nargs="*", help="just these TEST requests")
     s.set_defaults(fn=cmd_purge_tests)
 
     s = sub.add_parser("doctor", help="check the configuration, Slack access and tools the service needs")

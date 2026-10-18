@@ -2,7 +2,7 @@
 
 ## Unit tests
 
-`make test` runs 39 tests, with no network. They cover:
+`make test` runs 44 tests, with no network. They cover:
 - every card type rendering, required fields, escaping;
 - 20 processes submitting at once and getting distinct numbers;
 - the first button press winning, and old versions refusing;
@@ -68,6 +68,7 @@ The question is whether, with many agents and many requests open at once, every 
 | R8 | Two answers to one request, a few seconds apart | Both land, in order | Unit + live L2 |
 | R9 | The agent is mid-task when its answer arrives | It lands, and the agent acts on it after the task | Live L4 |
 | R10 | The service restarts between sending and recording | Nothing is sent twice | Unit (passed October 18) |
+| R11 | A later run of the same agent checks its inbox while the earlier run's answer is still being delivered, and reads that request | It isn't handed the answer and doesn't count as the asker; the earlier run is resumed and told. It gets the answer only if direct delivery has failed, and then the service stops trying. | Unit + live L1 (found live on October 18: the later run took the answer) |
 
 **Acknowledgements.** These checks run on every answer in every live test:
 - **A1:** the agent posts an acknowledgement in the thread, in its own words, before it acts. Its transcript shows `approvals ack` before the action.
