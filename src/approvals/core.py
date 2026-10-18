@@ -49,7 +49,9 @@ def msg_replies(rec, kind, texts, question=None):
         return f'{head(rec)} {who()} replied in Slack at {t}, after the decision: {said}. Take it into account; no new card unless asked for one.'
     return (f'{head(rec)} {who()} replied in Slack at {t}: {said}. This is feedback on the card. '
             f'Post a revised card with `approvals revise {rid} <card.json>` (say what changed in "changes"), '
-            f'or ask one question with `approvals ask {rid} "<question>"`. If the reply plainly approves the card as it stands, treat it as approved, do it, and run `approvals done {rid} "<readback>"`.')
+            f'or ask one question with `approvals ask {rid} "<question>"`. '
+            f'If the reply plainly approves the card as it stands, record it with `approvals record {rid} --approved --words "<their words>" --where "Slack thread"`, do it, then run `approvals done {rid} "<readback>"`. '
+            f'If it plainly declines, record it with `approvals record {rid} --declined --words "<their words>" --where "Slack thread"` and drop it.')
 
 
 # ---------- decisions and replies (called under the store lock via store.update) ----------

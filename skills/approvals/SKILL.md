@@ -46,7 +46,7 @@ Answers arrive as messages starting with `[Approvals]` that quote the approver's
 | --- | --- |
 | It was approved | Do exactly what the card described, nothing more. Then run `approvals done AP-0013 "<what you did and how you checked it>"`. |
 | It was declined | Drop it. Don't resubmit unless asked. |
-| A reply in the thread (feedback) | Change the proposal and post the next version: `approvals revise AP-0013 card.json`, with a `changes` field saying what changed. If you truly can't continue without one fact, ask instead: `approvals ask AP-0013 "<one question>"`. If the reply plainly approves the card as it stands ("post it"), treat it as approved. |
+| A reply in the thread (feedback) | Change the proposal and post the next version: `approvals revise AP-0013 card.json`, with a `changes` field saying what changed. If you truly can't continue without one fact, ask instead: `approvals ask AP-0013 "<one question>"`. If the reply plainly approves the card as it stands ("post it"), record that with `approvals record AP-0013 --approved --words "<their words>" --where "Slack thread"` and act on it. If it plainly declines ("no, not now"), record it with `--declined` and drop it, so the card stops asking. |
 | An answer to your question | Carry on, usually with `approvals revise`. |
 | No answer by the deadline | It's not approved. Don't resubmit or send a reminder. |
 
