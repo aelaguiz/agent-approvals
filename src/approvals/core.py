@@ -8,7 +8,8 @@ from . import cards, config, slackapi, store
 def who():
     return config.settings()["approver_name"]
 
-FINAL = {"approved", "declined", "expired", "done"}
+FINAL = {"approved", "declined", "expired", "done", "withdrawn"}
+CLOSED = {"approved", "declined", "done", "withdrawn"}   # a reply now is about a settled request
 
 
 def one_line(s):
@@ -55,7 +56,8 @@ def msg_decision(rec, verdict, where):
         return (f'{head(rec)} {who()} approved it ({where}, {t}). {ack_step(rec, "what you are about to do")} '
                 f'Then do exactly what the card describes, and run `approvals done {rec["id"]} "<what you did and how you checked it>"`.')
     if verdict == "declined":
-        return f'{head(rec)} {who()} declined it ({where}, {t}). {ack_step(rec, "that you are dropping it")} Then drop it. Don\'t resubmit unless asked to.'
+        return (f'{head(rec)} {who()} declined it ({where}, {t}). {ack_step(rec, "that you are dropping it")} '
+                f'Then drop this proposal and don\'t send it again. If what it was for still matters, a different proposal is a new card.')
     return f'{head(rec)} No answer by the deadline, so it is not approved. Don\'t resubmit or send a reminder; a reply in the thread would reopen it.'
 
 
@@ -79,12 +81,15 @@ def msg_replies(rec, kind, texts, question=None):
 # ---------- decisions and replies (called under the store lock via store.update) ----------
 
 def decide(rec, n, verdict, by, where="button", words=None):
-    """Returns 'ok', 'stale' or 'already'."""
+    """Returns 'ok', 'stale', 'withdrawn' or 'already'. A decision belongs to the version it was made on, so
+    a later version can be decided afresh."""
     latest = len(rec["versions"])
     if n != latest:
         return "stale"
+    if rec["status"] == "withdrawn":
+        return "withdrawn"
     d = rec.get("decision")
-    if d and d.get("verdict") in ("approved", "declined"):
+    if d and d.get("version") == n and d.get("verdict") in ("approved", "declined"):
         return "already"
     rec["decision"] = {"verdict": verdict, "version": n, "by": by, "where": where, "words": words, "at": store.iso()}
     rec["status"] = verdict
@@ -100,7 +105,7 @@ def take_replies(rec, replies):
     """replies: [(ts, text)] from the approver, oldest first."""
     texts = [t for _, t in replies]
     last_ts = replies[-1][0]
-    if rec["status"] in ("approved", "declined", "done"):
+    if rec["status"] in CLOSED:
         kind = "comment"
     elif rec.get("open_question"):
         kind = "answer"
@@ -130,7 +135,7 @@ def expire(rec):
 # ---------- Slack side ----------
 
 def mode_for(rec):
-    return "final" if rec["status"] in FINAL and rec.get("decision") else "open"
+    return "final" if rec["status"] in FINAL and (rec.get("decision") or rec["status"] == "withdrawn") else "open"
 
 
 def refresh_cards(rec):

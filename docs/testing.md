@@ -2,12 +2,16 @@
 
 ## Unit tests
 
-`make test` runs 44 tests, with no network. They cover:
+`make test` runs 63 tests, with no network. They cover:
 - every card type rendering, required fields, escaping;
 - 20 processes submitting at once and getting distinct numbers;
 - the first button press winning, and old versions refusing;
-- replies sorted into feedback, an answer or a comment;
+- replies sorted into feedback, an answer or a comment, including replies on declined and withdrawn cards;
 - routing decisions with fake `herdr` and `aim`: live pane, focused pane (sent straight away), closed session, moved session, a different session in the pane, an already delivered message, another machine;
+- sessions stopped at their usage limit: the answer goes to a session continuing the work, nothing is typed into the stopped one or into the usage-limit menu, and a resume that lands on that menu closes its pane;
+- continuations and moved copies against real transcript files, including copies whose session ids were rewritten;
+- new versions: approvable after an earlier yes, refused after a decline, and announced in the channel; withdrawn cards;
+- evidence: one block of text is one post, and files named in evidence are uploaded;
 - the failure note posting once.
 
 ## Live end-to-end test
@@ -146,3 +150,23 @@ All runs used the installed package from a fresh clone. Claude agents ran on Son
 | A3, an unacknowledged answer is called out | Pass (unit test). |
 
 **Observation.** Herdr types each `[Approvals]` message into Claude Code as a paste, so the agent sees it wrapped as pasted content. Every agent still acted on it as an answer.
+
+### October 19, 2026: fixes after the first day of real use
+
+The first day of real requests showed six breaks, each fixed in this round:
+1. Replies on declined cards weren't read.
+2. Answers went to a session stopped at its usage limit instead of the session continuing its work.
+3. A new version after a yes couldn't be approved.
+4. Agents marked requests done before the change was real.
+5. Evidence given as one block of text was posted one character at a time.
+6. Cards ran about twice as long as needed, with evidence that couldn't be opened from Slack.
+
+| Test | Result |
+| --- | --- |
+| A reply on a declined card | Pass, on a real request. Two replies the approver had left on a declined card that morning were read once the service restarted, delivered within 55 seconds as a reply after the decision, and acknowledged by the agent in its own words. |
+| A session stopped at its usage limit | Pass, on a real request. An answer that had been typed into a stopped session was resent. It landed in the session continuing that agent's work, found through its opening summary, and nothing was typed into the stopped one. The request's routing moved to the working session. The agent acknowledged in 27 seconds. |
+| A new version after a yes | Pass, on a TEST card. After a yes on v1 and a question, v2 reopened the card, and a yes on v2 was recorded. Before the fix it was refused as already decided. The record keeps the v1 yes on v1. |
+| The channel sees new versions and questions | Pass. Both appeared in the channel as one-line posts pointing to the thread. |
+| Withdraw | Pass. The card shows "Withdrawn" with its reason and no buttons, and a new version on it is refused. A real agent used it unprompted within a minute of the fix going live, to take down a card it called confusing. |
+| Evidence | Pass. One block of text became one post. A file path after a label and a path relative to the agent's folder were attached as files; a note and a link stayed text. |
+| The skill, through clean agents | Pass. Four fresh agents, given only the new skill and cases unlike the incidents, each did the right thing. A pricing card kept its research and workbook codes in the thread, with a sheet link and the analysis file. A report run that couldn't change settings named who would, and wouldn't mark it done before seeing the flag on. A community agent whose post had a wrong answer withdrew the card and planned a new one. A lifecycle agent took a decline as a no to the gift, not to winning players back, and treated a session it continued as its own but a fresh scheduled run as not. |

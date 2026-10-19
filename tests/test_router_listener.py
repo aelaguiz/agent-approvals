@@ -73,11 +73,12 @@ def reach():
 @pytest.fixture
 def world(monkeypatch):
     """Which pid runs which session, and which sessions are copies of the asker."""
-    w = SimpleNamespace(pid_sid={}, copies=set(), delivered=False, fake=None)
+    w = SimpleNamespace(pid_sid={}, copies=set(), newer=[], stopped=set(), delivered=False, fake=None)
     monkeypatch.setattr(transcripts, "claude_session_for_pid", lambda pid: w.pid_sid.get(pid))
     monkeypatch.setattr(transcripts, "contains", lambda path, needle: w.delivered)
     monkeypatch.setattr(transcripts, "transcript", lambda runtime, sid: f"/t/{sid}.jsonl")
-    monkeypatch.setattr(transcripts, "claude_copies", lambda sid, cwd, rid=None: [])
+    monkeypatch.setattr(transcripts, "claude_copies", lambda sid, cwd, rid=None: list(w.newer))
+    monkeypatch.setattr(transcripts, "stopped_for_usage", lambda runtime, sid: sid in w.stopped)
     monkeypatch.setattr(transcripts, "is_copy", lambda runtime, asker, cand, rid: cand == asker or cand in w.copies)
 
     def live(runtime):
@@ -158,6 +159,46 @@ def test_R6_two_answers_one_closed_session_resumes_it_once(reach, world):
     assert first.status == second.status == "delivered"
     assert len(fake.resumes()) == 1
     assert fake.sent_to("w1:p9") and len(fake.sent_to("w1:p9")) == 2
+
+
+def test_stopped_asker_hands_the_answer_to_the_session_continuing_its_work(reach, world):
+    world.pid_sid, world.copies, world.stopped = {1: "sid-1", 2: "sid-2"}, {"sid-2"}, {"sid-1"}
+    fake = FakeHerdr(panes={"w1:p1": {}, "w1:p2": {}}, procs={"w1:p1": [{"pid": 1}], "w1:p2": [{"pid": 2}]})
+    res = run(world, fake, reach)
+    assert res.status == "delivered" and fake.sent_to("w1:p2") and not fake.sent_to("w1:p1")
+    assert ["sid-1", "sid-2"] in res.moves and res.reach["session_id"] == "sid-2"
+
+
+def test_stopped_asker_with_nothing_continuing_it_gets_nothing_typed(reach, world):
+    world.pid_sid, world.stopped = {1: "sid-1"}, {"sid-1"}
+    fake = FakeHerdr(panes={"w1:p1": {}}, procs={"w1:p1": [{"pid": 1}]})
+    res = run(world, fake, reach)
+    assert res.status == "retry" and "usage limit" in res.reason
+    assert not fake.sent_to("w1:p1") and not fake.resumes()
+
+
+def test_usage_limit_menu_on_screen_stops_a_send(reach, world):
+    world.pid_sid = {1: "sid-1"}
+    menu = "What do you want to do?\n1. Stop and wait for limit to reset\n3. Switch to usage credits"
+    fake = FakeHerdr(panes={"w1:p1": {}}, procs={"w1:p1": [{"pid": 1}]}, text=menu)
+    res = run(world, fake, reach)
+    assert res.status == "retry" and not fake.sent_to("w1:p1")
+
+
+def test_closed_asker_resumes_the_newest_session_that_can_still_work(reach, world):
+    world.newer, world.stopped, world.pid_sid = ["sid-3", "sid-2"], {"sid-3"}, {4242: "sid-2"}
+    fake = FakeHerdr(panes={})
+    res = run(world, fake, reach)
+    assert res.status == "delivered" and fake.resumes()[0][-1].endswith("aim claude resume sid-2")
+    assert ["sid-1", "sid-2"] in res.moves
+
+
+def test_a_resume_that_lands_on_the_usage_limit_menu_closes_its_pane(reach, world):
+    world.pid_sid = {4242: "sid-1"}
+    fake = FakeHerdr(panes={}, text="What do you want to do?\n3. Switch to usage credits")
+    res = run(world, fake, reach)
+    assert res.status == "retry" and "usage limit" in res.reason
+    assert ["pane", "close", "w1:p9"] in fake.calls and not fake.sent_to("w1:p9")
 
 
 def test_open_outside_herdr_retries(reach, world, monkeypatch):

@@ -62,6 +62,12 @@ class Herdr:
     def run_cmd(self, pane_id, text):
         self.call("pane", "run", pane_id, text)
 
+    def close(self, pane_id):
+        try:
+            self.call("pane", "close", pane_id)
+        except HerdrError:
+            pass
+
     def read(self, pane_id, lines=40):
         try:
             r = self.call("pane", "read", pane_id, "--source", "recent-unwrapped", "--lines", str(lines))
@@ -153,25 +159,36 @@ def already_delivered(reach, ref):
     return any(transcripts.contains(transcripts.transcript(runtime, i), ref) for i in ids if i)
 
 
-def find_live_asker(reach, request_id, run=subprocess.run):
-    """Where the asker (or a moved copy of it) is running right now: (session id, Herdr session, pane).
-
-    Returns (None, None, None) if it isn't running, or (sid, None, None) if it's running outside Herdr.
-    """
+def live_askers(reach, request_id, run=subprocess.run):
+    """Every running session that is the asker under some id (itself, a moved copy, or a session that
+    continues it), as (session id, Herdr session, pane); the recorded pane first. Herdr session and pane
+    are None for a session running outside Herdr."""
     runtime, sid, cwd = reach.get("runtime"), reach.get("session_id"), reach.get("cwd")
     h = Herdr(reach.get("herdr_session") or config.settings()["default_herdr_session"], run=run)
+    out, seen = [], set()
     pane = reach.get("herdr_pane")
     if pane and h.pane(pane):
         found = session_in_pane(h, pane, runtime)
         if found and (found == sid or transcripts.is_copy(runtime, sid, found, request_id)):
-            return found, h.session, pane
-        if found is None and runtime == "codex" and _codex_in_pane(h, pane):
-            return sid, h.session, pane   # Codex is in the recorded pane but its thread can't be read
+            out.append((found, h.session, pane))
+            seen.add(found)
+        elif found is None and runtime == "codex" and _codex_in_pane(h, pane):
+            return [(sid, h.session, pane)]   # Codex is in the recorded pane but its thread can't be read
     for pid, found, found_cwd in transcripts.live_sessions(runtime):
+        if found in seen:
+            continue
         if found == sid or ((found_cwd is None or found_cwd == cwd) and transcripts.is_copy(runtime, sid, found, request_id)):
             loc = find_pane_for_pid(pid, h.session, run=run)
-            return (found, loc[0], loc[1]) if loc else (found, None, None)
-    return None, None, None
+            out.append((found, *(loc or (None, None))))
+            seen.add(found)
+    return out
+
+
+def usage_menu_showing(h, pane):
+    return transcripts.USAGE_MENU in h.read(pane, 15)
+
+
+STOPPED = "the agent's session is stopped at its usage limit, and no session continuing its work can take this yet; trying again later"
 
 
 def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sleep, clock=time.monotonic):
@@ -183,7 +200,9 @@ def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sl
 
     moves = []
     updates = {}
-    found, hs, pane = find_live_asker(reach, request_id, run=run)
+    live = live_askers(reach, request_id, run=run)
+    working = [x for x in live if not transcripts.stopped_for_usage(runtime, x[0])]
+    found, hs, pane = working[0] if working else (None, None, None)
     if found and found != sid:
         moves.append([sid, found])
         sid = found
@@ -192,17 +211,20 @@ def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sl
 
     if pane:
         h = Herdr(hs, run=run)
+        if usage_menu_showing(h, pane):
+            return Result("retry", STOPPED, moves=moves)
         h.send(pane, text)
         if pane != reach.get("herdr_pane") or hs != reach.get("herdr_session"):
             updates = {"herdr_session": hs, "herdr_pane": pane, "herdr_workspace": pane.split(":")[0], "herdr_tab": None}
     else:
         h = Herdr(reach.get("herdr_session") or config.settings()["default_herdr_session"], run=run)
-        target = sid
-        if runtime == "claude":
-            copies = transcripts.claude_copies(sid, reach.get("cwd"), request_id)
-            if copies:
-                moves.append([sid, copies[0]])
-                target = copies[0]
+        running = {x[0] for x in live}
+        choices = (transcripts.claude_copies(sid, reach.get("cwd"), request_id) if runtime == "claude" else []) + [sid]
+        target = next((c for c in choices if c not in running and not transcripts.stopped_for_usage(runtime, c)), None)
+        if not target:
+            return Result("retry", STOPPED, moves=moves)
+        if target != sid:
+            moves.append([sid, target])
         workspace = reach.get("herdr_workspace")
         label = f"approvals-{reach.get('agent', 'agent')}"[:40]
         cwd = reach.get("cwd") or str(config.HOME)
@@ -224,8 +246,12 @@ def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sl
         while clock() - start < READY_SECONDS:
             sleep(3)
             if runtime == "claude":
+                screen = h.read(pane, 15)
+                if transcripts.USAGE_MENU in screen:
+                    h.close(pane)   # the account is out of usage; this pane can't take the message
+                    return Result("retry", STOPPED, moves=moves)
                 real = _claude_sid_in_pane(h, pane)
-                if real and "bypass permissions" in h.read(pane, 15):
+                if real and "bypass permissions" in screen:
                     break
             else:
                 # Herdr often can't classify Codex; its idle input screen is the reliable sign.

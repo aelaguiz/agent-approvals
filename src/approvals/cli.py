@@ -1,11 +1,12 @@
 """The `approvals` command: what agents use, plus `listen` for the service."""
 import argparse
 import json
+import re
 import sys
 from datetime import timedelta
 from pathlib import Path
 
-from . import cards, config, core, reach, slackapi, store
+from . import cards, config, core, reach, slackapi, store, transcripts
 
 
 def _load_card(path):
@@ -37,13 +38,29 @@ def _video_in_thread(rid, n):
     core.refresh_and_clear(rid)
 
 
+def _evidence_file(item):
+    """A file on this Mac that an evidence line names, alone or after a label ("Recipe: /path/recipe.json"),
+    with that label. Relative paths are from the agent's folder. A path posted as text can't be opened
+    from Slack, so these get uploaded instead."""
+    label, path = None, item.strip()
+    m = re.match(r"^(.{1,200}?):\s+(\S+)$", path)
+    if m:
+        label, path = m.group(1).strip(), m.group(2)
+    try:
+        p = Path(path).expanduser()
+        p = p if p.is_absolute() else Path.cwd() / p
+        return (p, label) if p.is_file() else (None, None)
+    except OSError:
+        return None, None
+
+
 def _post_evidence(rec, evidence):
-    for item in evidence or []:
-        p = Path(str(item))
-        if p.is_absolute() and p.exists():
-            slackapi.upload_to_thread(p, rec["thread_ts"], p.name)
+    for item in cards.evidence_items(evidence):
+        path, label = _evidence_file(item)
+        if path:
+            slackapi.upload_to_thread(path, rec["thread_ts"], label or path.name, label)
         else:
-            slackapi.note(rec["thread_ts"], str(item))
+            slackapi.note(rec["thread_ts"], item)
 
 
 def cmd_submit(a):
@@ -84,7 +101,7 @@ def cmd_ask(a):
         store.event(rec, "question", text=a.question)
         return rec
     rec = store.update(a.id, fn)
-    ts = slackapi.post(cards.question_blocks(rec, a.question), f"{rec['agent']} asks: {a.question}", thread_ts=rec["thread_ts"])
+    ts = slackapi.post(cards.question_blocks(rec, a.question), f"{rec['agent']} asks: {a.question}", thread_ts=rec["thread_ts"], broadcast=True)
     store.update(a.id, lambda r: r["open_question"].__setitem__("ts", ts))
     print(f"Asked in the thread of {a.id}. The answer will arrive as an [Approvals] message.")
 
@@ -95,8 +112,8 @@ def cmd_revise(a):
     if errs:
         _die("Card refused:\n- " + "\n- ".join(errs))
     rec = store.load(a.id)
-    if rec["status"] in ("approved", "declined", "done"):
-        _die(f"{a.id} is {rec['status']}; submit a new request instead.")
+    if rec["status"] in ("declined", "done", "withdrawn"):
+        _die(f"{a.id} is {rec['status']}; a different proposal is a new card: approvals submit <card.json>.")
     n = len(rec["versions"]) + 1
     version = {"n": n, "card": card, "posted_at": store.iso()}
     _prepare_media(card, version)
@@ -107,8 +124,11 @@ def cmd_revise(a):
         r["versions"].append(version)
         r["status"] = "pending"
         r["open_question"] = None
-        if (r.get("decision") or {}).get("verdict") == "expired":
+        if r.get("decision"):
+            # The answer was to the earlier version; this one gets its own.
+            r["versions"][prev["n"] - 1]["decision"] = r["decision"]
             r["decision"] = None
+            r["card_dirty"] = True
         hours = card.get("deadline_hours") or cards.TYPES[card["type"]]["hours"]
         r["deadline"] = store.iso(store.now() + timedelta(hours=hours))
         r["title"] = card["title"]
@@ -124,7 +144,8 @@ def cmd_revise(a):
     store.update(a.id, lambda r: r["versions"][n - 1].__setitem__("copy_ts", ts_new))
     core.refresh_and_clear(a.id)
     _video_in_thread(a.id, n)
-    print(f"{a.id} v{n} posted in the thread; the first post now shows v{n}.")
+    slackapi.post(cards.new_version_blocks(rec, n), f"{rec['agent']} posted v{n}: {card['title']}", thread_ts=rec["thread_ts"], broadcast=True)
+    print(f"{a.id} v{n} posted in the thread, with a line in the channel; the first post now shows v{n}.")
 
 
 def cmd_ack(a):
@@ -156,6 +177,24 @@ def cmd_done(a):
         _die(f"{a.id} is {r}, not approved; nothing marked done.")
     core.refresh_and_clear(a.id)
     print(f"{a.id} marked Done on its card.")
+
+
+def cmd_withdraw(a):
+    def fn(rec):
+        reach.refresh(rec, reach.capture())
+        if rec["status"] in ("done", "declined", "withdrawn"):
+            return rec["status"]
+        rec["status"] = "withdrawn"
+        rec["withdrawn"] = {"text": a.why, "at": store.iso()}
+        rec["open_question"] = None
+        rec["card_dirty"] = True
+        store.event(rec, "withdrawn", text=a.why)
+        return "ok"
+    r = store.update(a.id, fn)
+    if r != "ok":
+        _die(f"{a.id} is {r}; nothing to withdraw.")
+    core.refresh_and_clear(a.id)
+    print(f"{a.id} withdrawn; its card says why and has no buttons.")
 
 
 def cmd_record(a):
@@ -190,6 +229,9 @@ def cmd_inbox(a):
     for rec in store.all_records():
         r = rec.get("reach") or {}
         own = bool(me.get("session_id")) and me["session_id"] in [r.get("session_id"), *r.get("earlier_ids", [])]
+        waiting = any(not i.get("delivered_at") and not i.get("seen_by_agent") for i in rec.get("outbox", []))
+        if not own and waiting and me.get("session_id") and me.get("runtime") == r.get("runtime") and me.get("cwd") == r.get("cwd"):
+            own = transcripts.is_copy(r.get("runtime"), r.get("session_id"), me["session_id"], rec["id"])   # it continues the asker
         if own or a.all or r.get("agent") == me["agent"]:
             store.update(rec["id"], lambda x, own=own: take(x, own or a.all))
     if not shown:
@@ -202,7 +244,7 @@ def cmd_show(a):
 
 def cmd_list(a):
     for rec in store.all_records():
-        if a.open and rec["status"] in ("done", "declined"):
+        if a.open and rec["status"] in ("done", "declined", "withdrawn"):
             continue
         print(f'{rec["id"]}  {rec["status"]:9}  v{len(rec["versions"])}  {rec["agent"]}: {rec["title"]}')
 
@@ -268,6 +310,11 @@ def main(argv=None):
     s.add_argument("id")
     s.add_argument("readback")
     s.set_defaults(fn=cmd_done)
+
+    s = sub.add_parser("withdraw", help="take down a card you no longer stand behind, saying why")
+    s.add_argument("id")
+    s.add_argument("why")
+    s.set_defaults(fn=cmd_withdraw)
 
     s = sub.add_parser("record", help="record an answer the approver gave somewhere else")
     s.add_argument("id")

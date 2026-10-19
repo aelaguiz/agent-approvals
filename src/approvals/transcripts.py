@@ -2,6 +2,7 @@
 import glob
 import json
 import os
+import re
 from pathlib import Path
 
 HOME = Path.home()
@@ -78,9 +79,13 @@ def first_user_text(path, limit=400):
     return None
 
 
+UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
+
+
 def opening(path, limit=400):
     """The first prompt and the agent's first reply. A copy AI Manager made of a session carries both word
-    for word; another run started from the same prompt writes its own first reply."""
+    for word, except for session ids, which it rewrites everywhere; another run started from the same
+    prompt writes its own first reply."""
     if not path or not os.path.exists(path):
         return None
     user = agent = None
@@ -105,21 +110,60 @@ def opening(path, limit=400):
                 text = " ".join(c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "input_text").strip()
             if not text or text.startswith("<"):
                 continue
+            text = UUID_RE.sub("<id>", " ".join(text.split()))
             if role == "user" and user is None:
-                user = " ".join(text.split())[:limit]
+                user = text[:limit]
             elif role == "assistant" and user is not None and agent is None:
-                agent = " ".join(text.split())[:limit]
+                agent = text[:limit]
             if user and agent:
                 return user, agent
     return None
 
 
+SUMMARY_RE = re.compile(r"full transcript at:\s*`?(\S+?\.jsonl)")
+
+
+def continues(path):
+    """The session a continued Claude session picks up from, or None for a fresh start. When AI Manager
+    carries work into a new session (after a usage limit, for one), the new session opens with a summary
+    that names the transcript it continues."""
+    if not path or not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            try:
+                e = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if e.get("type") != "user" or e.get("isMeta"):
+                continue
+            if not e.get("isCompactSummary"):
+                return None
+            m = SUMMARY_RE.search(_text_of((e.get("message") or {}).get("content")))
+            prev = Path(m.group(1)).stem if m else None
+            return prev if prev and prev != Path(path).stem else None
+    return None
+
+
+
+def lineage(session_id, depth=12):
+    """The Claude sessions this one continues, nearest first."""
+    out, seen, sid = [], {session_id}, session_id
+    for _ in range(depth):
+        prev = continues(claude_transcript(sid))
+        if not prev or prev in seen:
+            break
+        out.append(prev)
+        seen.add(prev)
+        sid = prev
+    return out
+
+
 def claude_copies(session_id, cwd, request_id=None):
-    """Moved copies of a Claude session, newest first: same work folder, same first prompt, and (when a
-    request number is given) that request in their history."""
+    """The asker under other ids, newest first: moved copies and sessions that continue it, in the same
+    work folder."""
     src = claude_transcript(session_id)
-    first = opening(src)
-    if not first:
+    if not src:
         return []
     src_mtime = os.path.getmtime(src)
     slug = cwd.replace("/", "-").replace(".", "-") if cwd else "*"
@@ -128,26 +172,60 @@ def claude_copies(session_id, cwd, request_id=None):
         for p in glob.glob(str(d / "projects" / slug / "*.jsonl")):
             if Path(p).stem == session_id or os.path.getmtime(p) <= src_mtime:
                 continue
-            if opening(p) == first and (not request_id or contains(p, request_id)):
+            if is_copy("claude", session_id, Path(p).stem, request_id):
                 found.append(p)
     found.sort(key=os.path.getmtime, reverse=True)
     return [Path(p).stem for p in found]
 
 
+def _moved_copy(runtime, asker, candidate, request_id):
+    """AI Manager rewrote the asker's ids when it moved it: same opening word for word, and it holds the request."""
+    first = opening(transcript(runtime, asker))
+    cand = transcript(runtime, candidate)
+    return bool(first) and first == opening(cand) and (not request_id or contains(cand, request_id))
+
+
 def is_copy(runtime, asker, candidate, request_id):
-    """Is `candidate` the asker under another id? Only a moved copy qualifies: it carries the asker's
-    history word for word, so it opens with the same prompt and the same first reply, and it holds the
-    request number. A later run of the same scheduled agent may start from the same prompt and may even
-    have read the request number, but it wrote its own first reply."""
+    """Is `candidate` the asker under another id? Two kinds qualify. A moved copy carries the asker's
+    history word for word, so it opens with the same prompt and first reply and holds the request. A
+    continuation opens with a summary naming the asker's transcript (or a moved copy of it). A later run
+    of the same scheduled agent may start from the same prompt and even read the request number, but it
+    writes its own first reply and continues nothing."""
     if not candidate or not request_id:
         return False
     if candidate == asker:
         return True
-    cand = transcript(runtime, candidate)
-    if not contains(cand, request_id):
+    if _moved_copy(runtime, asker, candidate, request_id):
+        return True
+    if runtime != "claude":
         return False
-    first = opening(transcript(runtime, asker))
-    return bool(first) and first == opening(cand)
+    return any(prev == asker or _moved_copy(runtime, asker, prev, request_id) for prev in lineage(candidate))
+
+
+USAGE_STOP_RE = re.compile(r"hit your .*limit", re.I)
+USAGE_MENU = "Switch to usage credits"
+
+
+def stopped_for_usage(runtime, session_id):
+    """Claude ends a turn with "You've hit your weekly limit · resets ..." when its account runs out.
+    Until the work continues somewhere else, nothing typed into that session gets an answer."""
+    path = transcript(runtime, session_id) if runtime == "claude" else None
+    if not path or not os.path.exists(path):
+        return False
+    with open(path, "rb") as f:
+        f.seek(max(0, os.path.getsize(path) - 262144))
+        lines = f.read().decode("utf-8", errors="replace").splitlines()
+    for line in reversed(lines):
+        try:
+            e = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if e.get("type") == "assistant":
+            content = (e.get("message") or {}).get("content")
+            text = content if isinstance(content, str) else " ".join(
+                c.get("text", "") for c in content or [] if isinstance(c, dict) and c.get("type") == "text")
+            return bool(e.get("isApiErrorMessage") and USAGE_STOP_RE.search(text))
+    return False
 
 
 def _alive(pid):

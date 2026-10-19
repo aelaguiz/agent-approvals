@@ -84,6 +84,8 @@ class Listener:
             return lambda: slackapi.ephemeral(user, "That version was replaced; use the newest card's buttons.", thread_ts)
         if r == "already":
             return lambda: slackapi.ephemeral(user, "This one is already decided.", thread_ts)
+        if r == "withdrawn":
+            return lambda: slackapi.ephemeral(user, "The agent withdrew this one, so there's nothing to decide.", thread_ts)
         return lambda: self.try_refresh(rid)
 
     def try_refresh(self, rid):
@@ -98,7 +100,7 @@ class Listener:
         cutoff = store.now() - timedelta(days=WATCH_DAYS)
         out = []
         for rec in store.all_records():
-            if not rec.get("thread_ts") or rec["status"] == "declined":
+            if not rec.get("thread_ts"):
                 continue
             last = max(datetime.fromisoformat(e["at"]) for e in rec.get("events") or [{"at": rec["created"]}])
             if last >= cutoff:

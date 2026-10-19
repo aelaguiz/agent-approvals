@@ -61,9 +61,19 @@ def validate(card, revision=False):
             if any(not str(c).strip() for c in r):
                 errs.append("table cells can't be empty (Slack refuses the whole card); write why a value is missing")
                 break
+    ev = card.get("evidence")
+    if ev is not None and not (isinstance(ev, str) or (isinstance(ev, list) and all(isinstance(x, str) for x in ev))):
+        errs.append("evidence must be text, or a list of text items: notes, links, or file paths")
     if revision and not str(card.get("changes", "")).strip():
         errs.append("changes is required on a new version: say what changed from the last one")
     return errs
+
+
+def evidence_items(evidence):
+    """One post per item; a single block of text is one item."""
+    if not evidence:
+        return []
+    return [evidence] if isinstance(evidence, str) else [x for x in evidence if x.strip()]
 
 
 # ---------- formatting helpers ----------
@@ -141,9 +151,10 @@ def card_blocks(rec, n, mode="open"):
         blocks.append(test_tag())
 
     title = card["title"]
-    if mode == "final" and rec.get("decision"):
-        mark = {"approved": "✅", "declined": "❌", "expired": "⌛"}[rec["decision"]["verdict"]]
-        prefix = {"approved": "Approved: ", "declined": "Declined: ", "expired": "No answer: "}[rec["decision"]["verdict"]]
+    verdict = "withdrawn" if rec.get("status") == "withdrawn" else (rec.get("decision") or {}).get("verdict")
+    if mode == "final" and verdict:
+        mark = {"approved": "✅", "declined": "❌", "expired": "⌛", "withdrawn": "↩️"}[verdict]
+        prefix = {"approved": "Approved: ", "declined": "Declined: ", "expired": "No answer: ", "withdrawn": "Withdrawn: "}[verdict]
         head = f"{mark} {prefix}{title}"
     elif mode == "replaced":
         head = f"{t['emoji']} {version_label(n)} (replaced) · {title}"
@@ -189,6 +200,9 @@ def card_blocks(rec, n, mode="open"):
             lines.append(f"*Your words:* “{esc(d['words'])}”")
         if rec.get("done"):
             lines.append(f"*Done, {when(datetime.fromisoformat(rec['done']['at']))}:* {esc(rec['done']['text'])}")
+        if rec.get("status") == "withdrawn" and rec.get("withdrawn"):
+            w = rec["withdrawn"]
+            lines.append(f"*Withdrawn by {esc(rec['agent'])}, {when(datetime.fromisoformat(w['at']))}:* {esc(w['text'])}")
         if lines:
             blocks.append(md("\n".join(lines)))
         blocks.append(ctx(f"💬 Reply in the thread with anything else\n{base}"))
@@ -212,6 +226,14 @@ def root_revised_blocks(rec):
     lines.append(f"*{version_label(latest)}:* {esc(latest_card['title'])} · waiting for you in the thread")
     blocks.append(md("\n".join(lines)))
     blocks.append(ctx(f"From {esc(rec['agent'])} · {rec['id']} · v1's buttons no longer act"))
+    return blocks
+
+
+def new_version_blocks(rec, n):
+    """A short line for the channel: a new version sits in an older thread, where nobody would see it."""
+    blocks = [test_tag()] if rec.get("test") else []
+    blocks.append(md(f"🔄 *{esc(rec['agent'])}* posted {version_label(n)}: {esc(rec['versions'][n - 1]['card']['title'])}"))
+    blocks.append(ctx(f"Waiting for you in this thread, with its buttons · {rec['id']}"))
     return blocks
 
 

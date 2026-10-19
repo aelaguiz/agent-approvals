@@ -2,7 +2,7 @@
 
 Read the section for the type you're writing. Each one says what the approver is judging when they look at that kind of card, what the card must include, and gives a full example. The examples show the shape; your facts come from your own work.
 
-Contents: [Fields](#fields) · [creative](#creative) · [reply](#reply) · [budget](#budget) · [purchase](#purchase) · [money](#money) · [player_message](#player_message) · [price](#price) · [experiment](#experiment) · [page](#page) · [content](#content) · [email](#email) · [account](#account)
+Contents: [Fields](#fields) · [What goes on the card](#what-goes-on-the-card-and-what-goes-in-the-thread) · [creative](#creative) · [reply](#reply) · [budget](#budget) · [purchase](#purchase) · [money](#money) · [player_message](#player_message) · [price](#price) · [experiment](#experiment) · [page](#page) · [content](#content) · [email](#email) · [account](#account)
 
 ## Fields
 
@@ -15,9 +15,28 @@ Contents: [Fields](#fields) · [creative](#creative) · [reply](#reply) · [budg
 | `quotes` | `{"label", "text", "link"?, "link_text"?, "note"?}`, for words shown exactly: a post being answered, a draft, an email body. |
 | `table` | `{"columns": [...], "rows": [[...], ...]}`, for today beside proposed, or several items compared. No empty cells: write why a value is missing. |
 | `image`, `video` | An absolute path to the thing being approved. A video gets a link that plays it. |
-| `evidence` | Notes or absolute file paths, posted in the card's thread: checks run, sources, full lists, screenshots. |
+| `evidence` | A list of notes, links and file paths (or one block of text), posted in the card's thread: checks run, sources, research, full lists, screenshots. A file path, alone or after a label (`"Recipe: /abs/path/recipe.json"`, or a path relative to your folder), is attached so it opens in Slack. |
 | `changes` | Required on a revision: what changed from the last version, in the approver's terms ("Japan dropped, per your reply"). |
 | `deadline_hours`, `yes_label`, `no_label` | Optional overrides. |
+
+## What goes on the card, and what goes in the thread
+
+The card carries what decides the answer; the thread carries what proves you did the work. Here is one fact line from a card that asked to run a still ad as a short video, before and after.
+
+Before, on the card (one of nine fact lines, 530 words in all):
+
+```json
+["What the ad platform says", "The platform does this itself. Its image animation tool turns one still into a short video: last year it said nearly 2 million advertisers were using it and a related video tool, and this spring that use was growing fast and the tool now runs in every placement. Its only performance number is for the related tool, which makes a video from several pictures: over 3% higher conversion rates in its own tests."]
+```
+
+After, on the card:
+
+```json
+["Why a video", "the platform barely shows our stills: 4 impressions in 5 hours, against 9 to 110 an hour for the videos beside it"],
+["Research", "the platform's own tool turns stills into videos for about 2 million advertisers; details in the thread"]
+```
+
+And the paragraph moves to `evidence`, with the link to its source. The approver still sees why, and can open the research when they want it.
 
 ## creative
 
