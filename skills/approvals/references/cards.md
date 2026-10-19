@@ -124,7 +124,7 @@ Prices, offers, discounts, or the words on a paywall. The approver judges each c
 
 ## experiment
 
-Turning a test or feature flag on or off, or changing who's in it. The approver judges what players will see, how many, and how to undo it.
+Turning a test or feature flag on or off, or changing who's in it, when everything it switches is already built. An experiment that needs app or server work before it can run is a decision to build, which never goes on a card. The approver judges what players will see, how many, and how to undo it.
 
 - **Must include:** facts for what's being tested, the split, the exact flag, what players see, and how to undo it.
 - **Good facts:** why now, and what goes wrong if nothing is done.
