@@ -7,16 +7,20 @@ CLAUDE_SKILLS_DIR ?= $(HOME)/.claude/skills
 APPROVALS_HOME   ?= $(HOME)/.approvals
 BIN              := $(HOME)/.local/bin/approvals
 LABEL            := com.agent-approvals.listener
-PLIST            := $(HOME)/Library/LaunchAgents/$(LABEL).plist
+# One service per Slack workspace: the main folder, plus each folder inside it with its own config.json.
+HOMES            := $(APPROVALS_HOME) $(patsubst %/config.json,%,$(wildcard $(APPROVALS_HOME)/*/config.json))
 LEGACY_LABELS    := com.funcountry.approvals
 UID              := $(shell id -u)
 TOOL_DIRS        := $(shell for t in herdr aim uv; do p=$$(command -v $$t 2>/dev/null) && dirname "$$p"; done | awk '!seen[$$0]++' | paste -sd: -)
 SERVICE_PATH     := $(HOME)/.local/bin:$(TOOL_DIRS):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 
+# The main workspace's service is $(LABEL); another workspace's adds its folder name: $(LABEL).<name>.
+label_for = if [ "$(1)" = "$(APPROVALS_HOME)" ]; then echo $(LABEL); else echo $(LABEL).$$(basename $(1)); fi
+
 .PHONY: install install_cli install_skill install_config install_service verify_install uninstall test test-live
 
 install: install_cli install_skill install_config install_service
-	@$(BIN) doctor
+	@for home in $(HOMES); do echo "== $$home"; APPROVALS_HOME=$$home $(BIN) doctor || exit 1; done
 	@echo "Installed. Run 'make verify_install' to check everything."
 
 install_cli:
@@ -42,29 +46,39 @@ install_config:
 
 install_service:
 	@if [ "$$(uname)" != "Darwin" ]; then echo "The service install is macOS-only; run 'approvals listen' under your own supervisor."; exit 0; fi
-	@for l in $(LEGACY_LABELS) $(LABEL); do launchctl bootout gui/$(UID)/$$l 2>/dev/null || true; done
-	@for l in $(LEGACY_LABELS); do rm -f "$(HOME)/Library/LaunchAgents/$$l.plist"; done
+	@for l in $(LEGACY_LABELS); do launchctl bootout gui/$(UID)/$$l 2>/dev/null || true; rm -f "$(HOME)/Library/LaunchAgents/$$l.plist"; done
 	@mkdir -p "$(HOME)/Library/LaunchAgents"
-	@sed -e 's|@LABEL@|$(LABEL)|g' -e 's|@BIN@|$(BIN)|g' -e 's|@HOME@|$(HOME)|g' \
-	     -e 's|@APPROVALS_HOME@|$(APPROVALS_HOME)|g' -e 's|@PATH@|$(SERVICE_PATH)|g' \
-	     launchd/listener.plist.in > "$(PLIST)"
-	@launchctl bootstrap gui/$(UID) "$(PLIST)"
-	@echo "service $(LABEL) started"
+	@for home in $(HOMES); do \
+		label=$$($(call label_for,$$home)); plist="$(HOME)/Library/LaunchAgents/$$label.plist"; \
+		launchctl bootout gui/$(UID)/$$label 2>/dev/null || true; \
+		mkdir -p "$$home/logs"; \
+		sed -e "s|@LABEL@|$$label|g" -e 's|@BIN@|$(BIN)|g' -e 's|@HOME@|$(HOME)|g' \
+		    -e "s|@APPROVALS_HOME@|$$home|g" -e 's|@PATH@|$(SERVICE_PATH)|g' \
+		    launchd/listener.plist.in > "$$plist"; \
+		launchctl bootstrap gui/$(UID) "$$plist"; \
+		echo "service $$label started"; \
+	done
 
 verify_install:
 	@for dir in "$(AGENTS_SKILLS_DIR)" "$(CLAUDE_SKILLS_DIR)"; do \
 		diff -rq "skills/$(SKILL)" "$$dir/$(SKILL)" >/dev/null || { echo "FAIL: $$dir/$(SKILL) is missing or differs from the repo"; exit 1; }; \
 	done
 	@command -v approvals >/dev/null || { echo "FAIL: approvals is not on PATH"; exit 1; }
-	@if [ "$$(uname)" = "Darwin" ]; then \
-		launchctl print gui/$(UID)/$(LABEL) 2>/dev/null | grep -q 'state = running' || { echo "FAIL: service $(LABEL) is not running"; exit 1; }; \
-	fi
-	@$(BIN) doctor
-	@echo "OK: skill, command, service and Slack access all check out"
+	@for home in $(HOMES); do \
+		label=$$($(call label_for,$$home)); \
+		if [ "$$(uname)" = "Darwin" ]; then \
+			launchctl print gui/$(UID)/$$label 2>/dev/null | grep -q 'state = running' || { echo "FAIL: service $$label is not running"; exit 1; }; \
+		fi; \
+		echo "== $$home"; APPROVALS_HOME=$$home $(BIN) doctor || exit 1; \
+	done
+	@echo "OK: skill, command, services and Slack access all check out"
 
 uninstall:
-	-@launchctl bootout gui/$(UID)/$(LABEL) 2>/dev/null
-	@rm -f "$(PLIST)"
+	@for home in $(HOMES); do \
+		label=$$($(call label_for,$$home)); \
+		launchctl bootout gui/$(UID)/$$label 2>/dev/null || true; \
+		rm -f "$(HOME)/Library/LaunchAgents/$$label.plist"; \
+	done
 	@rm -rf "$(AGENTS_SKILLS_DIR)/$(SKILL)" "$(CLAUDE_SKILLS_DIR)/$(SKILL)"
 	-@uv tool uninstall approvals
 	@echo "Removed the service, skill and command. Records and config remain in $(APPROVALS_HOME)."

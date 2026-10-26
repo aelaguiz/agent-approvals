@@ -2,7 +2,9 @@
 
 agent-approvals lets AI agents ask Amir for approval as Slack cards in
 #approvals and routes his answers back into the agent session that asked.
-It's live: the service runs on Amir's Mac, real agents submit real requests,
+It serves two Slack workspaces: Fun Country (requests AP-0001 on) and
+Cratejoy (CJ-0001 on), one service each, picked by the agent's folder.
+It's live: the services run on Amir's Mac, real agents submit real requests,
 and he answers them from Slack. A bug here means an agent never hears his
 answer, or acts on one he didn't give. [README.md](README.md) covers install
 and use.
@@ -12,16 +14,19 @@ and use.
 ```bash
 make test                                   # unit tests, no network, under a second
 uv run pytest -q tests/test_router_listener.py -k <name>   # one test
-make install                                # reinstall the command, copy the skill, restart the service
-make verify_install                         # check the skill copies, command, service and Slack access
-launchctl kickstart -k gui/$(id -u)/com.agent-approvals.listener   # restart the service only
+make install                                # reinstall the command, copy the skill, restart both services
+make verify_install                         # check the skill copies, command, services and Slack access
+launchctl kickstart -k gui/$(id -u)/com.agent-approvals.listener            # restart Fun Country's service only
+launchctl kickstart -k gui/$(id -u)/com.agent-approvals.listener.cratejoy   # restart Cratejoy's service only
 ```
 
 - Python runs through uv (`uv run ...`), Python 3.12+.
 - The running service and the installed skill are copies. A change to `src/`
   or `skills/` does nothing live until `make install`.
-- The service log is `~/.approvals/logs/listener.log`; each request's record
-  is `~/.approvals/requests/<id>.json`.
+- Fun Country's log is `~/.approvals/logs/listener.log`, and each request's
+  record is `~/.approvals/requests/<id>.json`. Cratejoy's are the same paths
+  under `~/.approvals/cratejoy/`, whose `config.json` also lists the folders
+  Cratejoy's agents work in.
 - The live end-to-end test, with real agents and Slack, is in
   [docs/testing.md](docs/testing.md).
 

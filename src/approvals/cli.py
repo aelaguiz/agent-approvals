@@ -1,6 +1,7 @@
 """The `approvals` command: what agents use, plus `listen` for the service."""
 import argparse
 import json
+import os
 import re
 import sys
 from datetime import timedelta
@@ -349,6 +350,12 @@ def main(argv=None):
     s.set_defaults(fn=cmd_listen)
 
     a = p.parse_args(argv)
+    if not os.environ.get("APPROVALS_HOME"):   # the services and tests name their folder
+        rid = getattr(a, "id", None) or (getattr(a, "only", None) or [None])[0]
+        try:
+            config.use(config.choose(rid))
+        except config.ConfigError as e:
+            _die(str(e))
     a.fn(a)
 
 

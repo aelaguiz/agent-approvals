@@ -1,19 +1,29 @@
 """Paths, settings and Slack tokens.
 
-Everything workspace-specific lives in ~/.approvals/config.json (see config.example.json).
-APPROVALS_HOME points the whole tool at another folder, which the tests use.
+Everything workspace-specific lives in ~/.approvals/config.json (see config.example.json). Another Slack
+workspace gets its own folder inside it, ~/.approvals/<name>/, with its own config.json, records and service.
+APPROVALS_HOME points the whole tool at one folder, which the services and the tests use.
 """
 import json
 import os
 import socket
 from pathlib import Path
 
-HOME = Path(os.environ.get("APPROVALS_HOME", Path.home() / ".approvals"))
-REQUESTS = HOME / "requests"
-LOGS = HOME / "logs"
-LOCK = HOME / "store.lock"
-COUNTER = HOME / "next_id"
-CONFIG = HOME / "config.json"
+ROOT = Path.home() / ".approvals"
+
+
+def use(home):
+    """Point the tool at one Slack workspace's folder: its settings, records and log."""
+    global HOME, REQUESTS, LOGS, LOCK, COUNTER, CONFIG
+    HOME = Path(home)
+    REQUESTS = HOME / "requests"
+    LOGS = HOME / "logs"
+    LOCK = HOME / "store.lock"
+    COUNTER = HOME / "next_id"
+    CONFIG = HOME / "config.json"
+
+
+use(os.environ.get("APPROVALS_HOME", ROOT))
 
 REQUIRED = ["channel", "approver", "bot_token_file", "app_token_file"]
 
@@ -26,6 +36,8 @@ DEFAULTS = {
     "video_share_command": None,   # e.g. ["bash", "/path/to/cf_share.sh"]; must print "URL: <url>"
     "test_approver": None,         # a Slack user id whose "[test reply]" posts count, on TEST cards only
     "sweep_seconds": 30,
+    "id_prefix": "AP",             # request numbers, AP-0001; each workspace needs its own
+    "folders": [],                 # agents working in these folders use this workspace
 }
 
 
@@ -33,13 +45,38 @@ class ConfigError(RuntimeError):
     pass
 
 
-def settings():
+def settings(home=None):
     s = dict(DEFAULTS)
-    if CONFIG.exists():
-        s.update(json.loads(CONFIG.read_text()))
+    path = Path(home) / "config.json" if home else CONFIG
+    if path.exists():
+        s.update(json.loads(path.read_text()))
     if os.environ.get("APPROVALS_CHANNEL"):
         s["channel"] = os.environ["APPROVALS_CHANNEL"]
     return s
+
+
+def homes():
+    """The main workspace's folder, then each workspace folder inside it."""
+    return [ROOT] + sorted(p.parent for p in ROOT.glob("*/config.json"))
+
+
+def choose(request_id=None, cwd=None):
+    """The folder of the workspace a command is for: the one whose numbers the request carries, else the one
+    whose folders hold the agent's working folder, else the main one."""
+    found = [(h, settings(h)) for h in homes()]
+    if request_id:
+        prefix = request_id.split("-")[0]
+        for h, s in found:
+            if s["id_prefix"] == prefix:
+                return h
+        raise ConfigError(f"no Slack workspace on this machine numbers its requests {prefix}-")
+    here = Path(os.path.realpath(cwd or os.getcwd()))
+    for h, s in found:
+        for f in s["folders"]:
+            f = Path(os.path.realpath(os.path.expanduser(f)))
+            if here == f or f in here.parents:
+                return h
+    return ROOT
 
 
 def missing():

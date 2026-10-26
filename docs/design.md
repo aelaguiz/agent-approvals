@@ -9,6 +9,8 @@
 | Listener | Holds the Slack connection, records button presses and replies, enforces deadlines, delivers messages to agents | launchd service, `approvals listen` |
 | Skill | Teaches agents when to ask, how to write a card, and what to do with answers | `skills/approvals/` |
 
+**More than one Slack workspace.** Each workspace has its own folder (`~/.approvals` for the main one, `~/.approvals/<name>/` for each other), with its own config, records, request numbers and listener. The code is the same for all of them; only the folder differs. The command picks the folder by itself: a request's number prefix says which workspace it belongs to, and for a new request or the inbox, the agent's working folder decides, by each workspace's `folders` setting. The skill is the same everywhere, so an agent never chooses a workspace and can't choose the wrong one.
+
 ## One thread per request
 
 The card is the first post. Everything about the request stays in its thread:

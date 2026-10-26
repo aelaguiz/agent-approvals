@@ -2,7 +2,7 @@
 
 ## Unit tests
 
-`make test` runs 63 tests, with no network. They cover:
+`make test` runs 67 tests, with no network. They cover:
 - every card type rendering, required fields, escaping;
 - 20 processes submitting at once and getting distinct numbers;
 - the first button press winning, and old versions refusing;
@@ -12,7 +12,8 @@
 - continuations and moved copies against real transcript files, including copies whose session ids were rewritten;
 - new versions: approvable after an earlier yes, refused after a decline, and announced in the channel; withdrawn cards;
 - evidence: one block of text is one post, and files named in evidence are uploaded;
-- the failure note posting once.
+- the failure note posting once;
+- more than one Slack workspace: each numbers and lists only its own requests, a request number finds its workspace from any folder, an agent's folder picks the workspace for new requests (a folder inside a listed one counts; one whose name only starts the same doesn't), and with one workspace every folder uses it.
 
 ## Live end-to-end test
 
@@ -170,3 +171,17 @@ The first day of real requests showed six breaks, each fixed in this round:
 | Withdraw | Pass. The card shows "Withdrawn" with its reason and no buttons, and a new version on it is refused. A real agent used it unprompted within a minute of the fix going live, to take down a card it called confusing. |
 | Evidence | Pass. One block of text became one post. A file path after a label and a path relative to the agent's folder were attached as files; a note and a link stayed text. |
 | The skill, through clean agents | Pass. Four fresh agents, given only the new skill and cases unlike the incidents, each did the right thing. A pricing card kept its research and workbook codes in the thread, with a sheet link and the analysis file. A report run that couldn't change settings named who would, and wouldn't mark it done before seeing the flag on. A community agent whose post had a wrong answer withdrew the card and planned a new one. A lifecycle agent took a decline as a no to the gift, not to winning players back, and treated a session it continued as its own but a fresh scheduled run as not. |
+
+### October 26, 2026: a second Slack workspace
+
+Cratejoy's Slack was added as a second workspace, with its own Approvals app, channel, service and request numbers (CJ-0001 on). Everything ran on the installed package after `make install`.
+
+| Check | Result |
+| --- | --- |
+| Unit tests | Pass, 67 of 67, including the 4 new workspace tests. |
+| Both services run | Pass. `make verify_install` passed for both workspaces, and each log shows its service connected and watching its own channel. |
+| The main workspace is unaffected | Pass. A TEST card submitted by hand from a folder outside Cratejoy's landed in the main workspace's #approvals as the next AP number, and was deleted. |
+| A card from a Cratejoy folder reaches Cratejoy | Pass. A Claude agent in a sandbox inside the Cratejoy agents' repo, given S4 (email the tax preparers as the founder), loaded the skill unprompted and posted an `email` card with From, To, Subject and the exact text. It landed in Cratejoy's #approvals as CJ-0001; nothing was posted to the main workspace. |
+| A thread reply reaches the agent | Pass. A `[test reply]` asking for a shorter email was marked 📨 and acknowledged in the thread 14 seconds later ("Got it: shorter…"), followed by v2 with what changed. |
+| A button press reaches a closed session | Pass. With the agent's session closed, the approver's real press of "Send it" from his Cratejoy Slack account was recorded as his. The service resumed the session in a new pane in the Cratejoy Herdr session, and the answer landed 33 seconds after the press. The agent acknowledged, wrote exactly the v2 email to `outbox.md` and ran `done`; the card shows ✅ Approved. |
+| A request number finds its workspace from anywhere | Pass. `approvals show CJ-0001` run from this repo printed the Cratejoy record, and `approvals list` showed each workspace's own requests depending on the folder it ran in. |

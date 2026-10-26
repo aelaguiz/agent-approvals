@@ -50,7 +50,7 @@ def new_id():
     """Caller must hold the lock."""
     n = int(config.COUNTER.read_text()) if config.COUNTER.exists() else 1
     config.COUNTER.write_text(str(n + 1))
-    return f"AP-{n:04d}"
+    return f"{config.settings()['id_prefix']}-{n:04d}"
 
 
 def create(rec_without_id):
@@ -82,7 +82,7 @@ def update(rid, fn):
 def all_records():
     config.ensure_dirs()
     out = []
-    for p in sorted(config.REQUESTS.glob("AP-*.json")):
+    for p in sorted(config.REQUESTS.glob(f"{config.settings()['id_prefix']}-*.json")):
         try:
             out.append(json.loads(p.read_text()))
         except (json.JSONDecodeError, OSError):

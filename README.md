@@ -56,8 +56,18 @@ The first run creates `~/.approvals/config.json` from [config.example.json](conf
 | `default_herdr_session` | Where the listener opens panes when an agent's own Herdr session is gone. |
 | `video_share_command` | Optional. A command that publishes a video and prints `URL: <link>`. Without it, videos go into the card's thread, where Slack plays them. |
 | `test_approver` | For test runs only. A user whose `[test reply]` posts count, and only on TEST cards. |
+| `id_prefix` | Optional. What request numbers start with; `AP` unless set. Each Slack workspace needs its own. |
+| `folders` | Optional. Agents working in these folders, or inside them, use this workspace. See [More than one Slack workspace](#more-than-one-slack-workspace). |
 
 Tokens stay in their own files; the config only points at them.
+
+### More than one Slack workspace
+
+One install can serve several Slack workspaces, each with its own approvals channel, bot and approver. Agents use the same skill and the same command in all of them, and never choose a workspace themselves.
+
+- **Add a workspace** by giving it a folder inside `~/.approvals`, such as `~/.approvals/acme/`, with its own `config.json`: its channel, approver and token files, an `id_prefix` of its own (`AC`), and the `folders` its agents work in. Its bot needs its own Slack app, set up as in [Requirements](#requirements); a bot that another program also connects to with Socket Mode would receive some of the button presses meant for this one. Then run `make install`.
+- **Each workspace runs its own service**, `com.agent-approvals.listener.<folder name>`, with its own records and log in its folder. The main workspace keeps `~/.approvals` and `com.agent-approvals.listener`.
+- **The command picks the workspace.** A command about a request goes to the workspace whose prefix its number carries, wherever it's run. Otherwise an agent working in one of a workspace's `folders`, or inside one, uses that workspace; everything else uses the main one. Setting `APPROVALS_HOME` to a workspace's folder overrides both.
 
 ## Use
 
@@ -85,6 +95,7 @@ A card is JSON. [skills/approvals/references/cards.md](skills/approvals/referenc
 - **Records:** one JSON file per request in `~/.approvals/requests/`.
 - **Log:** `~/.approvals/logs/listener.log`.
 - **Restart the service:** `launchctl kickstart -k gui/$(id -u)/com.agent-approvals.listener`.
+- Another workspace's records, log and service are the same paths in its own folder, and `com.agent-approvals.listener.<folder name>`.
 
 ## Test
 
@@ -97,7 +108,7 @@ A card is JSON. [skills/approvals/references/cards.md](skills/approvals/referenc
 make uninstall
 ```
 
-This removes the service, the skill and the command, and keeps your records and config.
+This removes the services, the skill and the command, and keeps your records and config.
 
 ## License
 
