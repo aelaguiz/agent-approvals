@@ -16,6 +16,7 @@ agent ──approvals submit──▶ card in #approvals ──▶ you: ✅ / �
   - A session that moved to another account, or whose work continued in a new session after a usage limit, is found by its content, and the newest one that can still work gets the answer. Nothing is typed into a session stopped at its usage limit.
   - Every answer is checked in the session's transcript and marked 📨 in Slack. 📨 means it was typed into the session, nothing more.
   - The agent then acknowledges in the thread in its own words: what it understood and what it's going to do. If it doesn't within 10 minutes, the thread gets a warning, so a delivery never looks like a handled answer.
+- **A morning list of what's waiting on you.** At 8 am each day the service posts one message in the channel that mentions you and lists every card waiting on your answer, grouped by when it closes (today, tomorrow, later), each linked to its card. It also lists cards that closed with no answer since the last list, since a reply reopens them. All day it keeps that message current: each line is struck through, with what happened, once the card stops waiting on you.
 - **Agents learn it from a skill.** The `approvals` skill teaches when to ask (only when a yes is required, and once), how to write a card someone can decide from at a glance, and what to do with each kind of answer.
 
 ## Requirements
@@ -52,7 +53,7 @@ The first run creates `~/.approvals/config.json` from [config.example.json](conf
 | `approver_name` | What cards and agent messages call them. |
 | `bot_token_file`, `bot_token_key` | The env-style file holding the bot token, and the variable name in it. |
 | `app_token_file`, `app_token_key` | The same for the Socket Mode app token. |
-| `timezone` | For deadlines shown on cards. |
+| `timezone` | For deadlines shown on cards, and the morning list's 8 am. |
 | `default_herdr_session` | Where the listener opens panes when an agent's own Herdr session is gone. |
 | `video_share_command` | Optional. A command that publishes a video and prints `URL: <link>`. Without it, videos go into the card's thread, where Slack plays them. |
 | `test_approver` | For test runs only. A user whose `[test reply]` posts count, and only on TEST cards. |
@@ -94,6 +95,7 @@ A card is JSON. [skills/approvals/references/cards.md](skills/approvals/referenc
 
 - **Records:** one JSON file per request in `~/.approvals/requests/`.
 - **Log:** `~/.approvals/logs/listener.log`.
+- **Morning list:** today's message and what it lists, in `~/.approvals/digest.json`.
 - **Restart the service:** `launchctl kickstart -k gui/$(id -u)/com.agent-approvals.listener`.
 - Another workspace's records, log and service are the same paths in its own folder, and `com.agent-approvals.listener.<folder name>`.
 

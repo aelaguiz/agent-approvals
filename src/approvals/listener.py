@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from slack_sdk.socket_mode import SocketModeClient
 from slack_sdk.socket_mode.response import SocketModeResponse
 
-from . import cards, config, core, router, slackapi, store
+from . import cards, config, core, digest, router, slackapi, store
 
 log = logging.getLogger("approvals")
 
@@ -276,6 +276,7 @@ class Listener:
         threads = [
             threading.Thread(target=self.loop, args=(5, self.poll_once), daemon=True),
             threading.Thread(target=self.loop, args=(self.s["sweep_seconds"], self.sweep), daemon=True),
+            threading.Thread(target=self.loop, args=(self.s["sweep_seconds"], digest.tick), daemon=True),
             threading.Thread(target=self.delivery_worker, daemon=True),
         ]
         for t in threads:

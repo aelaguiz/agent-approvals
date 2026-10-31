@@ -51,11 +51,12 @@ install_service:
 	@for home in $(HOMES); do \
 		label=$$($(call label_for,$$home)); plist="$(HOME)/Library/LaunchAgents/$$label.plist"; \
 		launchctl bootout gui/$(UID)/$$label 2>/dev/null || true; \
+		for i in $$(seq 50); do launchctl print gui/$(UID)/$$label >/dev/null 2>&1 || break; sleep 0.2; done; \
 		mkdir -p "$$home/logs"; \
 		sed -e "s|@LABEL@|$$label|g" -e 's|@BIN@|$(BIN)|g' -e 's|@HOME@|$(HOME)|g' \
 		    -e "s|@APPROVALS_HOME@|$$home|g" -e 's|@PATH@|$(SERVICE_PATH)|g' \
 		    launchd/listener.plist.in > "$$plist"; \
-		launchctl bootstrap gui/$(UID) "$$plist"; \
+		launchctl bootstrap gui/$(UID) "$$plist" || { echo "FAIL: service $$label did not start"; exit 1; }; \
 		echo "service $$label started"; \
 	done
 

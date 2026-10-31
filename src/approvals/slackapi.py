@@ -83,6 +83,16 @@ def permalink(ts):
     return client().chat_getPermalink(channel=channel(), message_ts=ts)["permalink"]
 
 
+@functools.lru_cache(maxsize=1)
+def _team_url():
+    return client().auth_test()["url"]
+
+
+def message_url(ts):
+    """A link to a message in the approvals channel, without an API call per message."""
+    return f"{_team_url()}archives/{channel()}/p{ts.replace('.', '')}"
+
+
 def delete(ts):
     client().chat_delete(channel=channel(), ts=ts)
 

@@ -2,7 +2,7 @@
 
 ## Unit tests
 
-`make test` runs 67 tests, with no network. They cover:
+`make test` runs 74 tests, with no network. They cover:
 - every card type rendering, required fields, escaping;
 - 20 processes submitting at once and getting distinct numbers;
 - the first button press winning, and old versions refusing;
@@ -13,6 +13,7 @@
 - new versions: approvable after an earlier yes, refused after a decline, and announced in the channel; withdrawn cards;
 - evidence: one block of text is one post, and files named in evidence are uploaded;
 - the failure note posting once;
+- the morning list: posted once a day from 8 am and again the next day; only cards waiting on the approver, without TEST cards, grouped by closing day; cards closed with no answer since the last list; each way a card stops waiting (approved, declined, replied to, withdrawn, closed) struck through with what happened, and a new version bringing it back; an edit only when something changed; a failed post tried again; one line and no mention when nothing waits;
 - more than one Slack workspace: each numbers and lists only its own requests, a request number finds its workspace from any folder, an agent's folder picks the workspace for new requests (a folder inside a listed one counts; one whose name only starts the same doesn't), and with one workspace every folder uses it.
 
 ## Live end-to-end test
@@ -89,6 +90,14 @@ The question is whether, with many agents and many requests open at once, every 
 - **L5, all at once.** L1, L2 and L3 run at the same time, so their answers cross in the same polling passes.
 
 ## Results
+
+### October 31, 2026: the morning list
+
+**Live, in Fun Country's real #approvals.** A test run from a scratch folder sharing the workspace's channel and bot, with the mention pointed at the bot: two TEST cards were posted, then a TEST list naming both. One card was approved through the same code a button press uses, and on the next sweep the list was edited: "1 of 2 still waiting on you", the approved card struck through with "You approved it, 9:55 am", and "updated 9:55 am" under the headline. Read back from Slack and seen in the Slack web app. The TEST cards and the TEST list were deleted afterwards.
+
+**After `make install`.** Each workspace's service posted today's real list within seconds of starting (it was past 8 am): Fun Country listed AP-0210, closing at 2:30 pm today; Cratejoy listed CJ-0079, closing Sunday. Restarting both services again posted nothing new.
+
+**Found while deploying:** `make install` started Fun Country's service again before launchd had finished stopping it, so the start failed ("Bootstrap failed: 5") while the install still printed "started", and the service was down for 30 seconds until started by hand. The install now waits for each service to stop and fails loudly if one doesn't start.
 
 ### October 18, 2026: run from a fresh clone of the published repo
 

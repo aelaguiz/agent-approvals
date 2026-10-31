@@ -88,3 +88,15 @@ Every message starts with `[Approvals]` and the request number, quotes the appro
 
 - **Replies:** the listener polls each open request's thread directly, capped at about 40 Slack calls a minute, so an old card's thread is still checked. Socket Mode message events, when the app receives them, trigger an immediate check.
 - **Deadlines:** at its deadline a request is marked "No answer: not approved" and the agent is told. A reply after that reopens it.
+
+## The morning list
+
+Cards arrive all day and night, and a card nobody answers closes as a no, so its agent drops it. The morning list keeps one place that says what still waits on the approver.
+
+- **When:** at 8:00 am in the workspace's `timezone`, the listener posts one message in the channel, mentioning the approver. A service that was down at 8 posts when it comes back that day. It posts once a day; `digest.json` in the workspace's folder records today's message and what it lists.
+- **What's on it:** every card waiting on the approver's answer: new cards, new versions, and agents' questions (status `pending` or `question`). Cards waiting on their agent (revising after a reply, or acting on a yes) stay off, and so do TEST cards.
+- **Order:** grouped by the day the card closes (today, tomorrow, later), soonest first. Each line links the request number to the card's first post, which always shows the newest version, and says the agent, when the card last came to the approver, and when it closes.
+- **Closed with no answer:** cards that hit their deadline since the last list get their own section. A reply in a closed card's thread reopens it, and nothing new is posted in the channel when a card closes, so this is where the approver learns of it.
+- **Kept current:** every sweep, the listener renders the list again from the records and edits the message when anything changed. A card that stops waiting on the approver is struck through with what happened: approved, declined, replied to, withdrawn, or closed with no answer. A card that comes back with a new version is shown as waiting again. Cards that arrive after the list is posted are left to the next morning's list.
+- **Nothing waiting:** one line saying so, mentioning no one.
+- **Failures:** the record of today's list changes only after Slack accepts the post or edit, so a failed one is tried again on the next sweep.
