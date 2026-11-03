@@ -1,10 +1,10 @@
 """The morning list: once a day, one message in the approvals channel naming every card that waits on the
-approver, kept current all day as they answer.
+approver, kept current all day as they answer. The approver gets a fresh one any time by posting in the channel.
 
 Cards pile up in the channel and the approver loses track of which still wait on them; one card closed
 unanswered is one the agent drops. The list is what's left, so a line that stops waiting on them is struck
 through with what happened rather than removed. Cards that arrive after the list is posted are in the channel
-as usual and in the next morning's list.
+as usual and in the next list. Only the newest list is kept current; the one it replaces shrinks to a link to it.
 """
 import hashlib
 import json
@@ -122,7 +122,9 @@ def render(st, records):
         headline = f"Nothing left waiting on you: all {n} are answered or closed"
     else:
         headline = "Nothing is waiting on you"
-    mention = f"<@{config.settings()['approver']}> " if listed or closed else ""
+    # A list the approver just asked for needs no ping.
+    mention = f"<@{config.settings()['approver']}> " if (listed or closed) and not st.get("asked") else ""
+    icon = "📋" if st.get("asked") else "☀️"
 
     body, shown = [], 0
     for g, label in enumerate(GROUPS):
@@ -149,25 +151,28 @@ def render(st, records):
         body.append(cards.ctx("Tap a number to open its card. Each line crosses off when you answer it."))
 
     top = [cards.ctx("🧪 *TEST list.* It covers TEST cards only and gets deleted after testing.")] if config.is_test_run() else []
-    top.append(cards.md(f"{mention}☀️ *{headline}*"))
+    top.append(cards.md(f"{mention}{icon} *{headline}*"))
     sub = day.strftime("%A, %b ") + str(day.day) + (" · soonest deadline first" if listed else "")
     content = hashlib.sha256(json.dumps(top + [cards.ctx(sub)] + body, sort_keys=True).encode()).hexdigest()
     if st.get("updated_at"):
         sub += " · updated " + _at(datetime.fromisoformat(st["updated_at"]), day)
-    return top + [cards.ctx(sub)] + body, f"{mention}☀️ {headline}", content
+    return top + [cards.ctx(sub)] + body, f"{mention}{icon} {headline}", content
 
 
-def tick(now=None):
-    """Post today's list once it's due; otherwise keep the latest list current. Called every sweep. State
-    changes only after Slack accepts the post or edit, so a failure is retried on the next sweep."""
+def tick(now=None, asked=False):
+    """Post the morning list once it's due, or a fresh list when the approver asked for one; otherwise keep the
+    newest list current. Called every few seconds. State changes only after Slack accepts the post or edit, so a
+    failure is retried next time."""
     now = now or store.now()
     local = cards.local(now)
     st = load_state()
     records = [r for r in store.all_records() if _ours(r)]
-    if local.hour >= HOUR and (not st or st["date"] != local.date().isoformat()):
+    eight = local.replace(hour=HOUR, minute=0, second=0, microsecond=0)
+    morning = local >= eight and (not st or datetime.fromisoformat(st["posted_at"]) < eight)
+    if morning or asked:
         since = datetime.fromisoformat(st["posted_at"]) if st else now - timedelta(days=1)
         new = {
-            "date": local.date().isoformat(),
+            "date": local.date().isoformat(), "asked": not morning,
             "listed": [r["id"] for r in records if r["status"] in WAITING],
             "closed": [r["id"] for r in records if r["status"] == "expired" and (_last(r, "expired") or now) >= since],
             "posted_at": store.iso(now), "updated_at": None,
@@ -176,7 +181,10 @@ def tick(now=None):
         new["ts"] = slackapi.post(blocks, text)
         new["content"] = content
         _save_state(new)
-        log.info("morning list posted: %d waiting, %d closed with no answer", len(new["listed"]), len(new["closed"]))
+        log.info("%s posted: %d waiting, %d closed with no answer", "morning list" if morning else "list asked for",
+                 len(new["listed"]), len(new["closed"]))
+        if st:
+            _retire(st, new)
         return
     if not st:
         return
@@ -188,4 +196,14 @@ def tick(now=None):
     slackapi.update(st["ts"], blocks, text)
     st["content"] = content
     _save_state(st)
-    log.info("morning list of %s updated", st["date"])
+    log.info("list of %s updated", st["posted_at"])
+
+
+def _retire(old, new):
+    """Shrink the replaced list to a link to the new one, so the channel never shows two lists that disagree."""
+    when = _at(datetime.fromisoformat(new["posted_at"]), datetime.fromisoformat(old["date"]).date())
+    text = f"Replaced by <{slackapi.message_url(new['ts'])}|a newer list> posted {when}."
+    try:
+        slackapi.update(old["ts"], [cards.ctx(text)], text)
+    except Exception as e:
+        log.warning("couldn't shrink the replaced list %s: %s", old["ts"], e)

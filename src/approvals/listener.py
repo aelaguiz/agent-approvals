@@ -29,6 +29,13 @@ def is_approver(msg, rec):
             and (msg.get("text") or "").startswith("[test reply]"))
 
 
+def is_ask(msg):
+    """The approver posting in the channel itself, not in a card's thread, asks for a fresh list. The channel is
+    only cards, so any such post means it; in a test run, the stand-in's "[test reply]" posts count."""
+    return (msg.get("thread_ts") in (None, msg.get("ts")) and not msg.get("subtype")
+            and is_approver(msg, {"test": config.is_test_run()}))
+
+
 def reply_text(msg):
     t = msg.get("text") or ""
     return t[len("[test reply]"):].strip() if t.startswith("[test reply]") else t
@@ -145,6 +152,13 @@ class Listener:
             log.info("%s: %d repl%s from the approver -> %s", rec["id"], len(mine), "y" if len(mine) == 1 else "ies", kind)
             if store.load(rec["id"]).get("card_dirty"):
                 self.try_refresh(rec["id"])
+
+    # ----- the list of what waits on the approver -----
+
+    def lists(self):
+        st = digest.load_state()
+        asked = bool(st) and any(is_ask(m) for m in slackapi.history(st["ts"]))
+        digest.tick(asked=asked)
 
     # ----- deadlines, card refreshes, deliveries -----
 
@@ -276,7 +290,7 @@ class Listener:
         threads = [
             threading.Thread(target=self.loop, args=(5, self.poll_once), daemon=True),
             threading.Thread(target=self.loop, args=(self.s["sweep_seconds"], self.sweep), daemon=True),
-            threading.Thread(target=self.loop, args=(self.s["sweep_seconds"], digest.tick), daemon=True),
+            threading.Thread(target=self.loop, args=(5, self.lists), daemon=True),   # answers an ask within seconds
             threading.Thread(target=self.delivery_worker, daemon=True),
         ]
         for t in threads:

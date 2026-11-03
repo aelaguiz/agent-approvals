@@ -261,6 +261,27 @@ def test_reply_filter(monkeypatch):
     assert listener.reply_text({"text": "[test reply] Do Brazil"}) == "Do Brazil"
 
 
+def test_the_approvers_own_post_in_the_channel_asks_for_a_list(monkeypatch):
+    me = config.settings()["approver"]
+    assert listener.is_ask({"user": me, "ts": "5.0", "text": "what's waiting?"})
+    assert listener.is_ask({"user": me, "ts": "5.0", "thread_ts": "5.0", "text": "a post that has replies"})
+    assert not listener.is_ask({"user": me, "ts": "6.0", "thread_ts": "1.0", "subtype": "thread_broadcast", "text": "x"})
+    assert not listener.is_ask({"user": me, "ts": "5.0", "subtype": "channel_join", "text": "joined"})
+    assert not listener.is_ask({"user": "U_SOMEONE", "ts": "5.0", "text": "what's waiting?"})
+    stand_in = {"user": "UBOT", "bot_id": "B1", "ts": "5.0", "text": "[test reply] what's waiting?"}
+    monkeypatch.setenv("APPROVALS_TEST_APPROVER", "UBOT")
+    assert not listener.is_ask(stand_in)
+    monkeypatch.setenv("APPROVALS_TEST", "1")
+    assert listener.is_ask(stand_in)
+
+    seen = {}
+    monkeypatch.setattr(listener.digest, "load_state", lambda: {"ts": "100.1"})
+    monkeypatch.setattr(listener.slackapi, "history", lambda oldest: seen.setdefault("since", oldest) and [stand_in])
+    monkeypatch.setattr(listener.digest, "tick", lambda asked: seen.update(asked=asked))
+    listener.Listener().lists()
+    assert seen == {"since": "100.1", "asked": True}
+
+
 def test_polling_turns_replies_into_one_message(monkeypatch):
     rec = make_rec(SAMPLES["price"])
     put(rec)

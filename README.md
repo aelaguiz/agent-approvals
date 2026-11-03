@@ -17,6 +17,7 @@ agent ──approvals submit──▶ card in #approvals ──▶ you: ✅ / �
   - Every answer is checked in the session's transcript and marked 📨 in Slack. 📨 means it was typed into the session, nothing more.
   - The agent then acknowledges in the thread in its own words: what it understood and what it's going to do. If it doesn't within 10 minutes, the thread gets a warning, so a delivery never looks like a handled answer.
 - **A morning list of what's waiting on you.** At 8 am each day the service posts one message in the channel that mentions you and lists every card waiting on your answer, grouped by when it closes (today, tomorrow, later), each linked to its card. It also lists cards that closed with no answer since the last list, since a reply reopens them. All day it keeps that message current: each line is struck through, with what happened, once the card stops waiting on you.
+- **The same list whenever you ask.** Post anything in the channel itself, not in a card's thread ("what's waiting?"), and within seconds the service posts a fresh list at the bottom, without mentioning you. Only the newest list is kept current; the one it replaces shrinks to a link to it.
 - **Agents learn it from a skill.** The `approvals` skill teaches when to ask (only when a yes is required, and once), how to write a card someone can decide from at a glance, and what to do with each kind of answer.
 
 ## Requirements
@@ -95,7 +96,7 @@ A card is JSON. [skills/approvals/references/cards.md](skills/approvals/referenc
 
 - **Records:** one JSON file per request in `~/.approvals/requests/`.
 - **Log:** `~/.approvals/logs/listener.log`.
-- **Morning list:** today's message and what it lists, in `~/.approvals/digest.json`.
+- **The list:** the newest list's message and what it lists, in `~/.approvals/digest.json`.
 - **Restart the service:** `launchctl kickstart -k gui/$(id -u)/com.agent-approvals.listener`.
 - Another workspace's records, log and service are the same paths in its own folder, and `com.agent-approvals.listener.<folder name>`.
 

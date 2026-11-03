@@ -159,3 +159,31 @@ def test_a_failed_post_is_tried_again_next_sweep(slack, monkeypatch):
     monkeypatch.setattr(digest.slackapi, "post", ok)
     digest.tick(MON_8AM + timedelta(seconds=30))
     assert len(posted) == 1 and digest.load_state()["listed"] == ["AP-0001"]
+
+
+def test_a_list_asked_for_replaces_the_last_one(slack, monkeypatch):
+    posted, updated = slack
+    card(1)
+    digest.tick(MON_8AM)
+    card(2)   # arrives after the morning list
+    digest.tick(MON_8AM + timedelta(hours=7), asked=True)
+    blocks, text = posted[1]
+    assert text == "📋 2 cards are waiting on you"   # no ping: the approver just asked
+    assert "AP-0002" in text_of(blocks)
+    ts, blocks, _ = updated[0]
+    assert ts == "100.1" and text_of(blocks) == "Replaced by <https://x.slack.com/p100.2|a newer list> posted 3:00 pm."
+    monkeypatch.setattr(store, "now", lambda: MON_8AM + timedelta(hours=8))
+    store.update("AP-0001", lambda r: core.decide(r, 1, "approved", by="UAPPROVER"))
+    digest.tick(MON_8AM + timedelta(hours=8))
+    assert updated[-1][0] == "100.2" and "1 of 2 still waiting on you" in updated[-1][2]   # only the newest is kept current
+    digest.tick(MON_8AM + timedelta(days=1))
+    assert posted[-1][1].startswith("<@UAPPROVER> ☀️") and updated[-1][0] == "100.2"
+
+
+def test_asking_before_8am_still_gets_the_morning_list(slack):
+    posted, _ = slack
+    card(1)
+    digest.tick(MON_8AM - timedelta(hours=2), asked=True)
+    digest.tick(MON_8AM)
+    digest.tick(MON_8AM + timedelta(hours=1))
+    assert [t for _, t in posted] == ["📋 1 card is waiting on you", "<@UAPPROVER> ☀️ 1 card is waiting on you"]

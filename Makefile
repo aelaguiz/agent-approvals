@@ -48,15 +48,21 @@ install_service:
 	@if [ "$$(uname)" != "Darwin" ]; then echo "The service install is macOS-only; run 'approvals listen' under your own supervisor."; exit 0; fi
 	@for l in $(LEGACY_LABELS); do launchctl bootout gui/$(UID)/$$l 2>/dev/null || true; rm -f "$(HOME)/Library/LaunchAgents/$$l.plist"; done
 	@mkdir -p "$(HOME)/Library/LaunchAgents"
+	@# A running service whose definition is unchanged is only restarted. Registering one afresh (bootstrap) is
+	@# refused from some agent sessions, which left a workspace's service down after an install.
 	@for home in $(HOMES); do \
 		label=$$($(call label_for,$$home)); plist="$(HOME)/Library/LaunchAgents/$$label.plist"; \
+		mkdir -p "$$home/logs"; \
+		new=$$(sed -e "s|@LABEL@|$$label|g" -e 's|@BIN@|$(BIN)|g' -e 's|@HOME@|$(HOME)|g' \
+		    -e "s|@APPROVALS_HOME@|$$home|g" -e 's|@PATH@|$(SERVICE_PATH)|g' launchd/listener.plist.in); \
+		if launchctl print gui/$(UID)/$$label >/dev/null 2>&1 && [ "$$new" = "$$(cat "$$plist" 2>/dev/null)" ]; then \
+			launchctl kickstart -k gui/$(UID)/$$label || { echo "FAIL: service $$label did not restart"; exit 1; }; \
+			echo "service $$label restarted"; continue; \
+		fi; \
 		launchctl bootout gui/$(UID)/$$label 2>/dev/null || true; \
 		for i in $$(seq 50); do launchctl print gui/$(UID)/$$label >/dev/null 2>&1 || break; sleep 0.2; done; \
-		mkdir -p "$$home/logs"; \
-		sed -e "s|@LABEL@|$$label|g" -e 's|@BIN@|$(BIN)|g' -e 's|@HOME@|$(HOME)|g' \
-		    -e "s|@APPROVALS_HOME@|$$home|g" -e 's|@PATH@|$(SERVICE_PATH)|g' \
-		    launchd/listener.plist.in > "$$plist"; \
-		launchctl bootstrap gui/$(UID) "$$plist" || { echo "FAIL: service $$label did not start"; exit 1; }; \
+		printf '%s\n' "$$new" > "$$plist"; \
+		launchctl bootstrap gui/$(UID) "$$plist" || { echo "FAIL: service $$label did not start; run 'launchctl bootstrap gui/$(UID) $$plist' in a plain terminal"; exit 1; }; \
 		echo "service $$label started"; \
 	done
 

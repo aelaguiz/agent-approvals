@@ -2,7 +2,7 @@
 
 ## Unit tests
 
-`make test` runs 74 tests, with no network. They cover:
+`make test` runs 77 tests, with no network. They cover:
 - every card type rendering, required fields, escaping;
 - 20 processes submitting at once and getting distinct numbers;
 - the first button press winning, and old versions refusing;
@@ -13,7 +13,7 @@
 - new versions: approvable after an earlier yes, refused after a decline, and announced in the channel; withdrawn cards;
 - evidence: one block of text is one post, and files named in evidence are uploaded;
 - the failure note posting once;
-- the morning list: posted once a day from 8 am and again the next day; only cards waiting on the approver, without TEST cards, grouped by closing day; cards closed with no answer since the last list; each way a card stops waiting (approved, declined, replied to, withdrawn, closed) struck through with what happened, and a new version bringing it back; an edit only when something changed; a failed post tried again; one line and no mention when nothing waits;
+- the morning list: posted once a day from 8 am and again the next day; only cards waiting on the approver, without TEST cards, grouped by closing day; cards closed with no answer since the last list; each way a card stops waiting (approved, declined, replied to, withdrawn, closed) struck through with what happened, and a new version bringing it back; an edit only when something changed; a failed post tried again; one line and no mention when nothing waits; a list asked for in the channel, which mentions no one, includes cards that came after the morning list, shrinks the list it replaces to a link and is the one kept current from then on; an ask before 8 am still getting the morning list; only the approver's own posts outside a card's thread counting as asks (thread replies, other people and joins don't);
 - more than one Slack workspace: each numbers and lists only its own requests, a request number finds its workspace from any folder, an agent's folder picks the workspace for new requests (a folder inside a listed one counts; one whose name only starts the same doesn't), and with one workspace every folder uses it.
 
 ## Live end-to-end test
@@ -90,6 +90,12 @@ The question is whether, with many agents and many requests open at once, every 
 - **L5, all at once.** L1, L2 and L3 run at the same time, so their answers cross in the same polling passes.
 
 ## Results
+
+### November 2, 2026: the list on demand
+
+**Live, in Fun Country's real #approvals.** A test run from a scratch folder sharing the workspace's channel and bot, with the bot's `[test reply]` posts standing in for the approver: one TEST card was posted, and the list loop, run every 5 seconds as the service runs it, posted the TEST morning list. A sweep with no ask posted nothing. The stand-in then posted "[test reply] what's waiting on me?" in the channel. A fresh list (📋, no mention) naming the TEST card appeared 3.8 seconds later, and the morning list was edited to "Replaced by a newer list posted 6:22 pm", linking to it. Two more sweeps posted nothing more. Both lists were read back from Slack. Neither real service reacted to the test ask. The TEST card, both lists and the ask were deleted afterwards.
+
+**Found while deploying:** `make install` stopped Fun Country's service and then couldn't register it again: launchd refused to register any new service, even a test one that runs `/usr/bin/true`, from the agent's session, though it accepted the same command from a plain terminal. The service was down for about 2 minutes, until it was started by hand. This was probably also the October 31 failure. `make install` now only restarts a service that is running and whose definition hasn't changed, which works from an agent's session, and registers one again only when its definition changed. On the rerun, both services restarted that way.
 
 ### October 31, 2026: the morning list
 
