@@ -50,6 +50,8 @@ class FakeHerdr:
         elif args[:2] == ["pane", "run"]:
             if "aim claude resume" in args[3]:
                 self.procs[args[2]] = [{"pid": self.resumed_pid, "cmdline": "/x/2.1.302"}]
+        elif args[:2] == ["pane", "send-keys"]:
+            self.text = getattr(self, "after_keys", self.text)
         elif args[:2] == ["pane", "read"]:
             return SimpleNamespace(returncode=0, stdout=self.text, stderr="")
         elif args[:2] == ["agent", "prompt"]:
@@ -199,6 +201,14 @@ def test_a_resume_that_lands_on_the_usage_limit_menu_closes_its_pane(reach, worl
     res = run(world, fake, reach)
     assert res.status == "retry" and "usage limit" in res.reason
     assert ["pane", "close", "w1:p9"] in fake.calls and not fake.sent_to("w1:p9")
+
+
+def test_a_resume_that_lands_on_the_trust_prompt_accepts_it_then_tells(reach, world):
+    world.pid_sid = {4242: "sid-1"}
+    fake = FakeHerdr(panes={}, text="Yes, I trust this folder")
+    fake.after_keys = "⏵⏵ bypass permissions on"
+    run(world, fake, reach)
+    assert ["pane", "send-keys", "w1:p9", "Down", "Enter"] in fake.calls and fake.sent_to("w1:p9")
 
 
 def test_open_outside_herdr_retries(reach, world, monkeypatch):

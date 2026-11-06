@@ -9,6 +9,7 @@ from . import config, transcripts
 
 CONFIRM_SECONDS = 90
 READY_SECONDS = 180
+TRUST_PROMPT = "Yes, I trust this folder"
 
 
 class HerdrError(RuntimeError):
@@ -251,6 +252,10 @@ def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sl
                 if transcripts.USAGE_MENU in screen:
                     h.close(pane)   # the account is out of usage; this pane can't take the message
                     return Result("retry", STOPPED, moves=moves)
+                if TRUST_PROMPT in screen:
+                    # The session worked in this folder already, but a run with no prompt never answered this.
+                    h.call("pane", "send-keys", pane, "Down", "Enter")
+                    continue
                 real = _claude_sid_in_pane(h, pane)
                 if real and "bypass permissions" in screen:
                     break
