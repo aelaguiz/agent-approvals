@@ -226,17 +226,18 @@ def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sl
         if target != sid:
             moves.append([sid, target])
         workspace = reach.get("herdr_workspace")
-        label = f"approvals-{reach.get('agent', 'agent')}"[:40]
+        prefix = reach.get("tab_label", "approvals")   # agent-email shares this code and names its own tabs
+        label = f"{prefix}-{reach.get('agent', 'agent')}"[:40]
         cwd = reach.get("cwd") or str(config.HOME)
         try:
             if workspace and workspace in h.workspaces():
                 pane, tab, workspace = h.new_tab(workspace, cwd, label)
             else:
-                pane, tab, workspace = h.new_workspace(cwd, "approvals")
+                pane, tab, workspace = h.new_workspace(cwd, prefix)
         except HerdrError as e:
             h = Herdr(config.settings()["default_herdr_session"], run=run)
             try:
-                pane, tab, workspace = h.new_workspace(cwd, "approvals")
+                pane, tab, workspace = h.new_workspace(cwd, prefix)
             except HerdrError:
                 return Result("retry", f"couldn't open a Herdr pane: {e}", moves=moves)
         resume = "aim claude resume" if runtime == "claude" else "aim codex resume"
