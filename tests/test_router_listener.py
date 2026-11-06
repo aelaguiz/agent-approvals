@@ -211,6 +211,16 @@ def test_a_resume_that_lands_on_the_trust_prompt_accepts_it_then_tells(reach, wo
     assert ["pane", "send-keys", "w1:p9", "Down", "Enter"] in fake.calls and fake.sent_to("w1:p9")
 
 
+def test_a_mac_that_changed_its_name_still_gets_its_own_sessions_answers(reach, world, monkeypatch):
+    """A Mac's reported name follows its network, so the name on an older card can differ from today's."""
+    monkeypatch.setattr(config, "hostname", lambda: "Studio-Laptop")
+    reach["host"] = "Mac"
+    world.pid_sid = {1: "sid-1"}
+    fake = FakeHerdr(panes={"w1:p1": {"focused": False}}, procs={"w1:p1": [{"pid": 1, "cmdline": "/x/2.1.302"}]})
+    res = run(world, fake, reach)
+    assert res.status != "inbox" and fake.sent_to("w1:p1")
+
+
 def test_open_outside_herdr_retries(reach, world, monkeypatch):
     world.pid_sid = {55: "sid-1"}
     monkeypatch.setattr(transcripts, "live_sessions", lambda runtime: [(55, "sid-1", "/tmp/x")])
@@ -227,8 +237,9 @@ def test_already_delivered_is_not_sent_twice(reach, world):
     assert res.status == "delivered" and fake.calls == []
 
 
-def test_other_machines_go_to_the_inbox(reach, world):
+def test_other_machines_go_to_the_inbox(reach, world, monkeypatch):
     reach["host"] = "another-machine"
+    monkeypatch.setattr(transcripts, "transcript", lambda runtime, sid: None)
     assert run(world, FakeHerdr(), reach).status == "inbox"
 
 

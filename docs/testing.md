@@ -2,12 +2,12 @@
 
 ## Unit tests
 
-`make test` runs 77 tests, with no network. They cover:
+`make test` runs 79 tests, with no network. They cover:
 - every card type rendering, required fields, escaping;
 - 20 processes submitting at once and getting distinct numbers;
 - the first button press winning, and old versions refusing;
 - replies sorted into feedback, an answer or a comment, including replies on declined and withdrawn cards;
-- routing decisions with fake `herdr` and `aim`: live pane, focused pane (sent straight away), closed session, moved session, a different session in the pane, an already delivered message, another machine;
+- routing decisions with fake `herdr` and `aim`: live pane, focused pane (sent straight away), closed session, moved session, a different session in the pane, an already delivered message, another machine, this machine under a changed name;
 - sessions stopped at their usage limit: the answer goes to a session continuing the work, nothing is typed into the stopped one or into the usage-limit menu, and a resume that lands on that menu closes its pane;
 - continuations and moved copies against real transcript files, including copies whose session ids were rewritten;
 - new versions: approvable after an earlier yes, refused after a decline, and announced in the channel; withdrawn cards;

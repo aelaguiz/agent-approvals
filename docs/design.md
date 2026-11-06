@@ -65,7 +65,7 @@ When there's a message for the agent, the listener:
    - **Waits until it's ready.** For Claude, the pane shows "bypass permissions" and a Claude process reports a session. For Codex, its input screen is showing. A resume that lands on Claude's usage-limit menu means that account is out too: the service closes the pane it opened and retries later.
    - **Records the real id** the resumed session reports, then sends the message.
 5. **Confirms delivery.** The message's reference code must appear in the session's transcript within 90 seconds. Then the approver's reply, or the card for a button press, gets 📨.
-6. **If delivery fails,** it retries every 5 minutes, then hourly after three failures. It posts one ⚠️ note in the thread saying why. Sessions on another machine, or in runtimes it can't resume, get the message in their `approvals inbox`.
+6. **If delivery fails,** it retries every 5 minutes, then hourly after three failures. It posts one ⚠️ note in the thread saying why. Sessions on another machine, or in runtimes it can't resume, get the message in their `approvals inbox`. A different machine name alone doesn't mean another machine, because a Mac's reported name follows its network: a session whose transcript is here is here.
 
 A request's messages arrive in the order they were sent: a later one waits until the earlier one has landed.
 

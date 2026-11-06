@@ -194,7 +194,11 @@ STOPPED = "the agent's session is stopped at its usage limit, and no session con
 
 def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sleep, clock=time.monotonic):
     runtime, sid = reach.get("runtime"), reach.get("session_id")
-    if reach.get("host") != config.hostname() or runtime not in ("claude", "codex") or not sid:
+    if runtime not in ("claude", "codex") or not sid:
+        return Result("inbox", "that session isn't a Claude or Codex session on this Mac")
+    # A Mac's reported name follows its network, so a different name doesn't mean a different machine. A session whose
+    # transcript is here is here.
+    if reach.get("host") != config.hostname() and not transcripts.transcript(runtime, sid):
         return Result("inbox", "that session isn't a Claude or Codex session on this Mac")
     if already_delivered(reach, ref):
         return Result("delivered", "already in the transcript")
