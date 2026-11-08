@@ -319,3 +319,24 @@ def test_polling_turns_replies_into_one_message(monkeypatch):
     saved = store.load("AP-0001")
     assert len(saved["outbox"]) == 1 and saved["last_seen"] == "3.5"
     assert '"Do Brazil and Mexico." / "Leave Japan."' in saved["outbox"][0]["text"]
+
+
+def test_a_herdr_session_that_isnt_running_is_started_for_the_resume(reach, world):
+    """Most machines don't run the session this tool resumes into; it is started headless when needed."""
+    world.pid_sid = {4242: "sid-1"}
+    fake = FakeHerdr(panes={}, sessions=())
+    started = []
+
+    def popen(cmd, env=None, **kw):
+        started.append((cmd, env["HERDR_SESSION"]))
+        fake.sessions.append(env["HERDR_SESSION"])
+    res = run(world, fake, reach, popen=popen)
+    assert started == [(["herdr", "server"], "default")]
+    assert res.status == "delivered" and res.reach["herdr_session"] == "default"
+
+
+def test_an_answer_for_a_session_on_another_machine_is_offered_elsewhere(reach, world, monkeypatch):
+    reach["machine"] = "laptop"
+    monkeypatch.setattr(transcripts, "transcript", lambda runtime, sid: None)
+    res = run(world, FakeHerdr(), reach)
+    assert res.status == "inbox" and res.elsewhere

@@ -5,11 +5,17 @@
 | Piece | What it does | Where |
 | --- | --- | --- |
 | `approvals` command | Agents submit cards, ask questions, post new versions, mark requests done, and read their inbox | In each agent's session |
-| Records | One JSON file per request: every version, every reply and question, the decision, the outbox of messages to the agent, and how to reach the agent | `~/.approvals/requests/` |
-| Listener | Holds the Slack connection, records button presses and replies, enforces deadlines, delivers messages to agents | launchd service, `approvals listen` |
+| Records | One JSON file per request: every version, every reply and question, the decision, the outbox of messages to the agent, and how to reach the agent | `~/.approvals/requests/` on the hub |
+| Listener | On the hub: holds the Slack connection, records button presses and replies, enforces deadlines, serves the records to the other machines. On every machine: delivers messages to the agents there | launchd or systemd service, `approvals listen` |
 | Skill | Teaches agents when to ask, how to write a card, and what to do with answers | `skills/approvals/` |
 
 **More than one Slack workspace.** Each workspace has its own folder (`~/.approvals` for the main one, `~/.approvals/<name>/` for each other), with its own config, records, request numbers and listener. The code is the same for all of them; only the folder differs. The command picks the folder by itself: a request's number prefix says which workspace it belongs to, and for a new request or the inbox, the agent's working folder decides, by each workspace's `folders` setting. The skill is the same everywhere, so an agent never chooses a workspace and can't choose the wrong one.
+
+**More than one machine.** Slack hands each button press to only one of the connections an app holds, so a workspace whose agents run on several machines still has one listener connected to Slack: the hub's. A listener per machine with its own records would lose the presses that went to another machine and post the morning list once per machine.
+- **The records stay on the hub.** On any other machine, the command and the service read and change them over HTTP (`hub.py`). Each change is made to the copy it read, and when the record changed on the hub in between, the hub refuses it and the change is made again on the new copy. So two machines answering, acknowledging or delivering on one request at the same moment can't undo each other.
+- **Each machine posts to Slack itself** with its own copy of the bot token. The hub accepts only callers that sign with a key derived from that token, so no other secret is shared.
+- **Each card names the machine it was asked from** (`reach.machine`, from `~/.approvals/machine.json`). That machine's service asks the hub every 10 seconds for the messages due for its sessions, and delivers them as below. A card from before machines had names belongs to the hub, and without a hub every card belongs to the one machine.
+- **The machine follows the agent.** Any command the asker runs updates the card's reach, its machine included. A message the named machine can't deliver because the session's transcript isn't there is marked a stray: every machine looks for that session's transcript about once a minute, and the one that has it takes the message and the card's later ones.
 
 ## One thread per request
 
@@ -53,7 +59,7 @@ When there's a message for the agent, the listener:
 
 1. **Checks it isn't already there.** If the session's transcript already holds the message's reference code, it marks the message delivered and stops. That covers a restart between sending and recording.
 2. **Finds where the asker is running.**
-   - It checks the recorded pane first, then every pane on the Mac.
+   - It checks the recorded pane first, then every pane on the machine.
    - **Claude:** each process writes the session id it's running to `<config dir>/sessions/<pid>.json`.
    - **Codex:** the session id is read from the session file the process holds open.
    - **A different session counts as the asker only if it's a moved copy or a continuation.** A moved copy is the asker after AI Manager moved it to another account: it starts with the same first prompt and first reply (AI Manager rewrites session ids inside the text, so ids are ignored in the comparison) and has the request number in its history. A continuation carries the asker's work into a new session, as AI Manager does when an account hits its usage limit: it opens with Claude's summary, which names the transcript it continues, so the chain can be followed back. A later run of the same scheduled agent, another agent in the same folder, or a sub-agent may start the same way, but continues nothing and made none of this request.
@@ -61,11 +67,11 @@ When there's a message for the agent, the listener:
 3. **If the asker is running and can work,** it types the message and presses Enter through Herdr straight away. It never starts a second copy of a session that's already running. If the session runs outside Herdr, the message waits and is retried.
 4. **If it isn't running, it resumes it and then tells it.**
    - **Finds the newest session that can still work:** the newest moved copy or continuation, by the rule above, or the asker itself, skipping any stopped at its usage limit. If none can work, the message waits and is retried.
-   - **Resumes it.** It opens a tab in the agent's Herdr workspace, or in an `approvals` workspace if that's gone, and runs `aim claude resume <id>` or `aim codex resume <id>`.
+   - **Resumes it.** It opens a tab in the agent's Herdr workspace, or in an `approvals` workspace if that's gone, and runs `aim claude resume <id>` or `aim codex resume <id>`. When the agent's Herdr session isn't running, it uses `default_herdr_session`, and starts that headless if it isn't running either.
    - **Waits until it's ready.** For Claude, the pane shows "bypass permissions" and a Claude process reports a session. For Codex, its input screen is showing. A resume that lands on Claude's usage-limit menu means that account is out too: the service closes the pane it opened and retries later.
    - **Records the real id** the resumed session reports, then sends the message.
 5. **Confirms delivery.** The message's reference code must appear in the session's transcript within 90 seconds. Then the approver's reply, or the card for a button press, gets 📨.
-6. **If delivery fails,** it retries every 5 minutes, then hourly after three failures. It posts one ⚠️ note in the thread saying why. Sessions on another machine, or in runtimes it can't resume, get the message in their `approvals inbox`. A different machine name alone doesn't mean another machine, because a Mac's reported name follows its network: a session whose transcript is here is here.
+6. **If delivery fails,** it retries every 5 minutes, then hourly after three failures. It posts one ⚠️ note in the thread saying why. Sessions in runtimes it can't resume get the message in their `approvals inbox`. A session whose transcript isn't on this machine gets it there too, until a machine that has the transcript takes it (above). A session whose transcript is here is here, whatever name the card gives the machine.
 
 A request's messages arrive in the order they were sent: a later one waits until the earlier one has landed.
 

@@ -22,7 +22,7 @@ agent ──approvals submit──▶ card in #approvals ──▶ you: ✅ / �
 
 ## Requirements
 
-- macOS, for the launchd service. The command itself is plain Python.
+- macOS (a launchd service) or Linux (a systemd user service). The command itself is plain Python.
 - [uv](https://docs.astral.sh/uv/).
 - A Slack app, with:
   - Socket Mode on, and an app-level token with `connections:write`;
@@ -36,13 +36,13 @@ agent ──approvals submit──▶ card in #approvals ──▶ you: ✅ / �
 ```bash
 git clone git@github.com:aelaguiz/agent-approvals.git
 cd agent-approvals
-make install
+make install MACHINE=laptop
 ```
 
-The first run creates `~/.approvals/config.json` from [config.example.json](config.example.json) and stops. Fill it in, then run `make install` again. That run:
+`MACHINE` names this machine, once; it's kept in `~/.approvals/machine.json`. The first run creates `~/.approvals/config.json` from [config.example.json](config.example.json) and stops. Fill it in, then run `make install` again. That run:
 - installs the `approvals` command with `uv tool install`;
 - copies the skill into `~/.agents/skills/approvals` (Codex) and `~/.claude/skills/approvals` (Claude Code);
-- starts the `com.agent-approvals.listener` service;
+- starts the `com.agent-approvals.listener` service (`agent-approvals` on Linux);
 - runs `approvals doctor`.
 
 `make verify_install` checks all of it.
@@ -60,8 +60,19 @@ The first run creates `~/.approvals/config.json` from [config.example.json](conf
 | `test_approver` | For test runs only. A user whose `[test reply]` posts count, and only on TEST cards. |
 | `id_prefix` | Optional. What request numbers start with; `AP` unless set. Each Slack workspace needs its own. |
 | `folders` | Optional. Agents working in these folders, or inside them, use this workspace. See [More than one Slack workspace](#more-than-one-slack-workspace). |
+| `hub`, `hub_url` | Optional. The machine that holds the records and the Slack connection, and where the others reach it. See [More than one machine](#more-than-one-machine). |
 
 Tokens stay in their own files; the config only points at them.
+
+### More than one machine
+
+Agents on several machines can share one approvals channel, each getting its answers in its own session.
+
+- **One machine is the hub.** Name it in `hub`, with the address the others reach it at in `hub_url` (`http://<hub>:8790`), and give every machine the same config. Slack hands each button press to only one connected listener, so only the hub connects. It keeps the records, watches the threads, posts the morning list, and serves the records to the other machines over HTTP on that port.
+- **Every machine runs the service.** On the hub it does everything. On the others it asks the hub every 10 seconds for answers waiting on the sessions there and types them in, the same way the hub does for its own.
+- **Each card names the machine it was asked from**, the name `make install MACHINE=<name>` gave, and follows the agent when it runs a command from another machine. An answer the named machine can't deliver because the session isn't there goes to whichever machine has the session's transcript.
+- **Only machines that can post as the bot reach the hub.** They post to Slack themselves, and the hub accepts calls signed with a key derived from the bot token. A workspace whose bot token this machine can't read gets no service here, and its commands stop with that error before saving anything.
+- **When the hub is down,** commands on the other machines fail with that error, and answers wait until it's back.
 
 ### More than one Slack workspace
 
@@ -94,10 +105,10 @@ A card is JSON. [skills/approvals/references/cards.md](skills/approvals/referenc
 
 [docs/design.md](docs/design.md) covers the cards, the thread, how each answer is routed back to its session, and what happens when a session has closed or moved.
 
-- **Records:** one JSON file per request in `~/.approvals/requests/`.
-- **Log:** `~/.approvals/logs/listener.log`.
-- **The list:** the newest list's message and what it lists, in `~/.approvals/digest.json`.
-- **Restart the service:** `launchctl kickstart -k gui/$(id -u)/com.agent-approvals.listener`.
+- **Records:** one JSON file per request in `~/.approvals/requests/`, on the hub.
+- **Log:** `~/.approvals/logs/listener.log`, on each machine.
+- **The list:** the newest list's message and what it lists, in `~/.approvals/digest.json`, on the hub.
+- **Restart the service:** `launchctl kickstart -k gui/$(id -u)/com.agent-approvals.listener`, or `systemctl --user restart agent-approvals` on Linux.
 - Another workspace's records, log and service are the same paths in its own folder, and `com.agent-approvals.listener.<folder name>`.
 
 ## Test

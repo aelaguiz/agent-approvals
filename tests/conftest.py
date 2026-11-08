@@ -19,8 +19,15 @@ def tmp_home(tmp_path, monkeypatch):
     monkeypatch.setenv("APPROVALS_HOME", str(home))
     monkeypatch.delenv("APPROVALS_TEST_APPROVER", raising=False)
     monkeypatch.delenv("APPROVALS_TEST", raising=False)
+    monkeypatch.setenv("APPROVALS_MACHINE", "testbox")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-made-up")
     from approvals import config
     importlib.reload(config)
-    for mod in ("store", "cards", "core", "reach", "router", "listener"):
+    for mod in ("store", "cards", "core", "reach", "router", "listener", "hub"):
         importlib.reload(importlib.import_module(f"approvals.{mod}"))
+    from approvals import router
+
+    def no_real_herdr(cmd, **kw):
+        raise AssertionError(f"a test tried to start a real Herdr server: {cmd}")
+    monkeypatch.setattr(router, "_start", no_real_herdr)
     return tmp_path

@@ -3,7 +3,7 @@ import json
 import os
 import time
 
-from approvals import reach, store, transcripts
+from approvals import config, reach, store, transcripts
 
 PROMPT = "From the daily brief: check yesterday's numbers and post the summary."
 
@@ -76,6 +76,7 @@ def test_R8_a_later_message_waits_for_an_earlier_retry(monkeypatch):
     store.save(rec)
     L = listener.Listener.__new__(listener.Listener)
     L.in_flight, L.deliveries = set(), __import__("queue").Queue()
+    L.me, L.next_stray_look = config.machine(), 0.0
     monkeypatch.setattr(listener.Listener, "try_refresh", lambda self, rid: None)
     L.sweep()
     assert L.deliveries.empty()

@@ -3,7 +3,12 @@
 Everything workspace-specific lives in ~/.approvals/config.json (see config.example.json). Another Slack
 workspace gets its own folder inside it, ~/.approvals/<name>/, with its own config.json, records and service.
 APPROVALS_HOME points the whole tool at one folder, which the services and the tests use.
+
+A workspace whose settings name a `hub` keeps its records on that one machine; every other machine reaches them
+at `hub_url`. ~/.approvals/machine.json names this machine, for every workspace.
 """
+import hashlib
+import hmac
 import json
 import os
 import socket
@@ -38,6 +43,8 @@ DEFAULTS = {
     "sweep_seconds": 30,
     "id_prefix": "AP",             # request numbers, AP-0001; each workspace needs its own
     "folders": [],                 # agents working in these folders use this workspace
+    "hub": None,                   # the machine that holds the records and the Slack connection; None: this one
+    "hub_url": None,               # where the other machines reach it, e.g. "http://hub-machine:8790"
 }
 
 
@@ -128,6 +135,39 @@ def app_token():
 
 def hostname():
     return socket.gethostname().split(".")[0]
+
+
+def machine():
+    """This machine's name as the fleet knows it (`make machine_file MACHINE=<name>`). A Mac's own name follows its
+    network, so it is only the fallback."""
+    if os.environ.get("APPROVALS_MACHINE"):
+        return os.environ["APPROVALS_MACHINE"]
+    try:
+        return json.loads((ROOT / "machine.json").read_text())["name"]
+    except (OSError, ValueError, KeyError):
+        return hostname()
+
+
+def hub():
+    """The machine holding this workspace's records: the one named in its settings, else this one."""
+    return settings().get("hub") or machine()
+
+
+def is_hub():
+    return hub() == machine()
+
+
+def hub_url():
+    url = settings().get("hub_url")
+    if not url:
+        raise ConfigError(f"{CONFIG} names {hub()} as the hub but gives no hub_url")
+    return url.rstrip("/")
+
+
+def hub_token():
+    """Every machine that can post as the bot may use the hub, so the bot token is the shared secret, without
+    sending it: the hub and its callers both derive this from it."""
+    return hmac.new(bot_token().encode(), b"agent-approvals hub", hashlib.sha256).hexdigest()
 
 
 def ensure_dirs():

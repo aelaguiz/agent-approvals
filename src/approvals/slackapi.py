@@ -1,5 +1,6 @@
 """Thin wrapper over Slack's Web API, as ops_bot."""
 import functools
+import os
 import re
 import subprocess
 import time
@@ -120,7 +121,7 @@ def share_video(path, title, description):
     cmd = config.settings().get("video_share_command")
     if not cmd:
         return None
-    out = subprocess.run([*cmd, "--title", title[:90], "--description", description[:200], str(path)],
+    out = subprocess.run([*(os.path.expanduser(c) for c in cmd), "--title", title[:90], "--description", description[:200], str(path)],
                          capture_output=True, text=True, timeout=600)
     m = re.search(r"^URL: (\S+)", out.stdout, re.M)
     if out.returncode != 0 or not m:

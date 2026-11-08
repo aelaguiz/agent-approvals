@@ -1,6 +1,6 @@
 """What happens to a request: decisions, replies, deadlines, card refreshes, messages to the agent."""
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from . import cards, config, slackapi, store
 
@@ -161,3 +161,51 @@ def refresh_and_clear(rid):
 
 def due(item):
     return not item.get("delivered_at") and datetime.fromisoformat(item["next_try"]) <= store.now()
+
+
+# ---------- which machine delivers what ----------
+
+STRAY_DAYS = 14
+
+
+def machine_of(rec):
+    """The machine the asker last ran an approvals command on; the hub's for cards from before machines had names."""
+    return (rec.get("reach") or {}).get("machine") or config.hub()
+
+
+def next_item(rec):
+    """A request's first message not yet delivered or left in the inbox. Its later ones wait for it, so they
+    arrive in order."""
+    return next((i for i in rec.get("outbox", []) if not i.get("delivered_at") and not i.get("inbox_only")), None)
+
+
+def to_deliver(records, machine):
+    """What one machine delivers now: [request id, ref] of each request's next message that is due, for sessions
+    on that machine; and [request id, ref, reach] of strays, messages the machine on the card couldn't deliver because
+    the session wasn't there, for whichever machine has it to take."""
+    due_now, strays = [], []
+    cutoff = store.now() - timedelta(days=STRAY_DAYS)
+    one_machine = not config.settings().get("hub")   # every card is this machine's, whatever name it gave then
+    for rec in records:
+        if not rec.get("thread_ts"):
+            continue
+        item = next_item(rec)
+        if item and due(item) and (one_machine or machine_of(rec) == machine):
+            due_now.append([rec["id"], item["ref"]])
+        for i in rec.get("outbox", []):
+            if (i.get("stray") and not i.get("delivered_at") and not i.get("seen_by_agent")
+                    and datetime.fromisoformat(i["created"]) >= cutoff):
+                strays.append([rec["id"], i["ref"], rec.get("reach") or {}])
+    return due_now, strays
+
+
+def claim(rec, ref, machine):
+    """This machine has the stray's session, so the card's answers go to it from now on. False if another
+    machine took it first."""
+    item = next((i for i in rec.get("outbox", []) if i["ref"] == ref), None)
+    if not item or not item.get("stray") or item.get("delivered_at") or item.get("seen_by_agent"):
+        return False
+    item.update(stray=False, inbox_only=False, next_try=store.iso())
+    rec["reach"] = dict(rec.get("reach") or {}, machine=machine)
+    store.event(rec, "claimed", ref=ref, machine=machine)
+    return True

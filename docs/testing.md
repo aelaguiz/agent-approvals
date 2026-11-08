@@ -89,7 +89,32 @@ The question is whether, with many agents and many requests open at once, every 
 - **L4, busy.** An agent submits, then starts a 90-second job. The answer arrives during the job, and the agent acts on it once the job is done.
 - **L5, all at once.** L1, L2 and L3 run at the same time, so their answers cross in the same polling passes.
 
+## More than one machine
+
+A test hub must not connect to Slack: a second connection with the workspace's app token takes some of the approver's real button presses. [tests/live/hub_without_socket.py](../tests/live/hub_without_socket.py) runs everything the hub does except that connection and the morning list; thread replies still reach it by polling.
+
+**Setup:** on the hub machine and a second machine, one scratch folder each with the same `config.json`: the workspace's channel and token files, an `id_prefix` of its own so test numbers can't be mistaken for real ones, `hub` naming the hub machine, a `hub_url` on a port of its own, and `test_approver` set to the bot's user id. Run the test hub on the hub machine with `APPROVALS_HOME` and `APPROVALS_MACHINE` set, and `approvals listen` the same way on the second machine. Start an agent on the second machine with the same two variables and `APPROVALS_TEST=1`.
+
+**Checks:**
+- The card is saved on the hub and names the second machine.
+- A `[test reply]` posted in its thread is typed into the agent's session on the second machine and marked 📨.
+- With the card changed to name the hub machine, the next reply is marked a stray on the hub, with a note in the thread, and the second machine takes it and delivers it.
+
+**Clean-up:** `approvals purge-tests --only <ids>` with the test folder's settings, then stop both services, close the agent and any Herdr session the test started, and delete the scratch folders.
+
 ## Results
+
+### November 8, 2026: several machines, one hub
+
+The hub was a Mac and the second machine a Linux server, both on the code before it was published, with a test hub on its own port and TL numbers.
+
+| Check | Result |
+| --- | --- |
+| Unit tests | Pass, 93 of 93, including a real hub on localhost that another "machine" in the same test creates, changes, races and delivers through. |
+| A card from the second machine | Pass. A Claude agent there, given S3, read the skill and posted a `budget` card. It was saved on the hub as TL-0001, marked TEST, naming the second machine. `approvals doctor` there reported where the records are. |
+| A reply reaches a session on another machine | Pass. A `[test reply]` asking for $200 instead of $250 was seen by the hub 6 seconds after it was posted, and typed into the session on the second machine 10 seconds after that, marked 📨. The agent acknowledged in the thread and posted v2, both through the hub. |
+| A session that moved | Pass. With the card changed to name the hub machine, the hub found no transcript for the session and marked the next reply a stray, with a note in the thread. Two seconds later the second machine found the session's transcript, took the reply, and delivered it 4 seconds after that. The card now names the second machine. |
+| A Herdr session that wasn't running | Pass. The router's Herdr start brought the test's Herdr session up headless on the second machine, and the test agent ran in it. |
 
 ### November 2, 2026: the list on demand
 

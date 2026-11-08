@@ -215,26 +215,29 @@ def cmd_inbox(a):
     shown = 0
 
     def take(rec, own):
-        nonlocal shown
+        """The answers taken; printed once the record is saved, since a change can be made more than once."""
+        texts = []
         for item in rec.get("outbox", []):
             if item.get("delivered_at") or item.get("seen_by_agent"):
                 continue
             if not own and not (item.get("inbox_only") or item.get("noted_failure")):
                 continue
-            print(item["text"])
+            texts.append(item["text"])
             item["seen_by_agent"] = True
             item["delivered_at"] = store.iso()
             item["delivered_via"] = "inbox"
             item["claimed_by"] = me.get("session_id")
-            shown += 1
-    for rec in store.all_records():
+        return texts
+    for rec in store.waiting_records():
         r = rec.get("reach") or {}
         own = bool(me.get("session_id")) and me["session_id"] in [r.get("session_id"), *r.get("earlier_ids", [])]
         waiting = any(not i.get("delivered_at") and not i.get("seen_by_agent") for i in rec.get("outbox", []))
         if not own and waiting and me.get("session_id") and me.get("runtime") == r.get("runtime") and me.get("cwd") == r.get("cwd"):
             own = transcripts.is_copy(r.get("runtime"), r.get("session_id"), me["session_id"], rec["id"])   # it continues the asker
         if own or a.all or r.get("agent") == me["agent"]:
-            store.update(rec["id"], lambda x, own=own: take(x, own or a.all))
+            for text in store.update(rec["id"], lambda x, own=own: take(x, own or a.all)):
+                print(text)
+                shown += 1
     if not shown:
         print("No approval answers waiting for you.")
 
@@ -265,7 +268,7 @@ def cmd_purge_tests(a):
                             pass
             except Exception:
                 pass
-        (config.REQUESTS / f'{rec["id"]}.json').unlink(missing_ok=True)
+        store.delete(rec["id"])
         n += 1
     print(f"Removed {n} test requests and their Slack posts.")
 
@@ -278,6 +281,21 @@ def cmd_doctor(a):
 def cmd_listen(a):
     from . import listener
     listener.main()
+
+
+def cmd_role(a):
+    """What this machine's service does for the workspace: hub, delivery, or none (with why), for the installer."""
+    try:
+        config.require()
+        config.bot_token()
+    except config.ConfigError as e:
+        print(f"none: {e}")
+        return
+    print("hub" if config.is_hub() else "delivery")
+
+
+# Commands that post to Slack check first that this machine can, so nothing is saved for a card it can't post.
+POSTS = {"submit", "ask", "revise", "ack", "done", "withdraw", "record"}
 
 
 def main(argv=None):
@@ -349,6 +367,9 @@ def main(argv=None):
     s = sub.add_parser("listen", help="run the service (launchd runs this)")
     s.set_defaults(fn=cmd_listen)
 
+    s = sub.add_parser("role", help=argparse.SUPPRESS)
+    s.set_defaults(fn=cmd_role)
+
     a = p.parse_args(argv)
     if not os.environ.get("APPROVALS_HOME"):   # the services and tests name their folder
         rid = getattr(a, "id", None) or (getattr(a, "only", None) or [None])[0]
@@ -356,7 +377,15 @@ def main(argv=None):
             config.use(config.choose(rid))
         except config.ConfigError as e:
             _die(str(e))
-    a.fn(a)
+    if a.cmd in POSTS:
+        try:
+            config.bot_token()
+        except config.ConfigError as e:
+            _die(f"This machine can't post the cards of the Slack workspace set up in {config.HOME}: {e}")
+    try:
+        a.fn(a)
+    except store.StoreError as e:
+        _die(str(e))
 
 
 if __name__ == "__main__":

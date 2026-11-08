@@ -1,0 +1,18 @@
+[Unit]
+Description=agent-approvals service for @APPROVALS_HOME@
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=@BIN@ listen
+WorkingDirectory=@HOME@
+Environment=PATH=@PATH@
+Environment=HOME=@HOME@
+Environment=APPROVALS_HOME=@APPROVALS_HOME@
+Restart=always
+RestartSec=10
+StandardOutput=append:@APPROVALS_HOME@/logs/systemd.out.log
+StandardError=append:@APPROVALS_HOME@/logs/systemd.err.log
+
+[Install]
+WantedBy=default.target

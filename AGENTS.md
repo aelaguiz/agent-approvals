@@ -76,8 +76,11 @@ layer, a fallback path, a flag or a mode, ask what real failure it prevents.
   didn't make. Clean up your own test cards with
   `approvals purge-tests --only <ids>`; without `--only` it deletes every
   TEST card, real agents' included.
-- **The service runs on one machine.** Don't install or start it anywhere
-  else.
+- **Only the hub connects to Slack.** Slack hands each button press to one
+  of the app's connections, so a second listener connected with the same app
+  token silently takes some of the approver's presses. Every machine runs the
+  service, but only the machine its settings name as `hub` connects. A test
+  hub runs without the Slack connection (docs/testing.md).
 - **Git:** stage exact paths. Ask before a force push, a history rewrite or
   discarding work. Leave changes you didn't make alone.
 - **Shared machine:** close the Herdr panes, agent sessions and temporary

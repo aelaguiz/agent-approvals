@@ -1,4 +1,8 @@
-"""`approvals listen`: Slack buttons over Socket Mode, thread replies, deadlines, and delivery to agents."""
+"""`approvals listen`: Slack buttons over Socket Mode, thread replies, deadlines, and delivery to agents.
+
+On the workspace's hub it does all of that, delivers to the sessions on its own machine, and serves the records
+to the other machines. On every other machine it only delivers to the sessions there.
+"""
 import logging
 import logging.handlers
 import queue
@@ -9,7 +13,7 @@ from datetime import datetime, timedelta
 from slack_sdk.socket_mode import SocketModeClient
 from slack_sdk.socket_mode.response import SocketModeResponse
 
-from . import cards, config, core, digest, router, slackapi, store
+from . import cards, config, core, digest, router, slackapi, store, transcripts
 
 log = logging.getLogger("approvals")
 
@@ -17,6 +21,8 @@ WATCH_DAYS = 14          # threads stay watched this long after their last activ
 POLL_BUDGET_PER_MIN = 40
 FAILURE_NOTE_AFTER = 3
 ACK_MINUTES = 10         # a delivered answer the agent hasn't acknowledged by then gets a warning in the thread
+FETCH_SECONDS = 10       # how often a machine other than the hub asks it for answers to deliver
+STRAY_SECONDS = 60       # how often a machine looks for answers whose session turned up on it
 
 
 def is_approver(msg, rec):
@@ -50,6 +56,8 @@ class Listener:
         self.in_flight = set()
         self.next_poll = {}               # thread_ts -> monotonic time it is next due
         self.stop = threading.Event()
+        self.me = config.machine()
+        self.next_stray_look = 0.0
 
     # ----- buttons -----
 
@@ -163,6 +171,7 @@ class Listener:
     # ----- deadlines, card refreshes, deliveries -----
 
     def sweep(self):
+        strays = []
         for rec in store.all_records():
             if not rec.get("thread_ts"):
                 continue
@@ -173,14 +182,37 @@ class Listener:
             if rec.get("card_dirty"):
                 self.try_refresh(rec["id"])
             self.warn_unacknowledged(rec)
-            for item in rec.get("outbox", []):
-                if item.get("delivered_at") or item.get("inbox_only"):
-                    continue
-                key = (rec["id"], item["ref"])
-                if core.due(item) and key not in self.in_flight:
-                    self.in_flight.add(key)
-                    self.deliveries.put(key)
-                break   # a request's later messages wait until this one lands, so they arrive in order
+            due, lost = core.to_deliver([rec], self.me)
+            self.queue(due)
+            strays += lost
+        self.take_strays(strays)
+
+    # ----- deliveries to this machine's sessions -----
+
+    def queue(self, due):
+        for rid, ref in due:
+            if (rid, ref) not in self.in_flight:
+                self.in_flight.add((rid, ref))
+                self.deliveries.put((rid, ref))
+
+    def take_strays(self, strays, force=False):
+        """An answer the card's machine couldn't deliver goes to the machine that has the session's transcript."""
+        if not strays or not (force or time.monotonic() >= self.next_stray_look):
+            return
+        self.next_stray_look = time.monotonic() + STRAY_SECONDS
+        for rid, ref, reach in strays:
+            ids = [reach.get("session_id"), *reach.get("earlier_ids", [])]
+            if (rid, ref) in self.in_flight or not any(transcripts.transcript(reach.get("runtime"), i) for i in ids if i):
+                continue
+            if store.update(rid, lambda r, ref=ref: core.claim(r, ref, self.me)):
+                log.info("%s %s: its session is on this machine; delivering it here", rid, ref)
+                self.queue([[rid, ref]])
+
+    def fetch(self):
+        """Off the hub: what's due for this machine's sessions."""
+        due, strays = store.hub_client().due(self.me)
+        self.queue(due)
+        self.take_strays(strays)
 
     def warn_unacknowledged(self, rec):
         """Delivery only means the message was typed into the session. Say so when the agent never confirms it."""
@@ -262,6 +294,10 @@ class Listener:
             item["next_try"] = store.iso(store.now() + timedelta(days=3650))
             item["inbox_only"] = True
             store.event(r, "inbox_only", ref=ref, reason=res.reason)
+            if res.elsewhere:
+                item["stray"] = True
+                return (f"⚠️ Couldn't deliver this to {r['agent']} directly ({res.reason}). Whichever machine has the "
+                        f"session will deliver it; until then it's waiting in its `approvals inbox`.")
             return f"⚠️ Couldn't deliver this to {r['agent']} directly ({res.reason}). It's waiting in its `approvals inbox`."
         item["attempts"] += 1
         mins = 5 if item["attempts"] < FAILURE_NOTE_AFTER else 60
@@ -278,11 +314,18 @@ class Listener:
         while not self.stop.is_set():
             try:
                 fn()
+            except store.StoreError as e:
+                log.warning("%s: %s", fn.__name__, e)
             except Exception:
                 log.exception("%s failed", fn.__name__)
             self.stop.wait(every)
 
     def run(self):
+        if not config.is_hub():
+            return self.run_delivery()
+        if config.settings().get("hub"):
+            from . import hub
+            hub.serve()
         sm = SocketModeClient(app_token=config.app_token(), web_client=slackapi.client())
         sm.socket_mode_request_listeners.append(self.on_socket)
         sm.connect()
@@ -301,6 +344,18 @@ class Listener:
         finally:
             self.stop.set()
             sm.close()
+
+    def run_delivery(self):
+        log.info("delivering answers to the sessions on %s; the records and Slack connection are on %s", self.me, config.hub())
+        threads = [threading.Thread(target=self.loop, args=(FETCH_SECONDS, self.fetch), daemon=True),
+                   threading.Thread(target=self.delivery_worker, daemon=True)]
+        for t in threads:
+            t.start()
+        try:
+            while not self.stop.is_set():
+                time.sleep(1)
+        finally:
+            self.stop.set()
 
 
 def main():

@@ -1,5 +1,6 @@
 """Getting a message into the agent session that asked, resuming it through AI Manager when it's closed."""
 import json
+import os
 import shlex
 import subprocess
 import time
@@ -99,6 +100,7 @@ class Result:
     reason: str = ""
     reach: dict = field(default_factory=dict)   # fields to update on the record's reach
     moves: list = field(default_factory=list)   # [old_id, new_id] pairs seen
+    elsewhere: bool = False          # inbox because the session isn't on this machine; another machine may have it
 
 
 def _claude_sid_in_pane(h, pane):
@@ -134,6 +136,27 @@ def herdr_sessions(run=subprocess.run):
     except (OSError, subprocess.SubprocessError):
         return []
     return [line.split()[0] for line in out.splitlines()[1:] if len(line.split()) > 1 and line.split()[1] == "running"]
+
+
+def _start(cmd, **kw):
+    return subprocess.Popen(cmd, **kw)
+
+
+def ensure_herdr(session, run=subprocess.run, popen=None, sleep=time.sleep):
+    """Start a headless Herdr server for a session that isn't running, with a clean environment so its shells load
+    the user's own profile rather than inheriting this service's."""
+    if session in herdr_sessions(run):
+        return
+    keep = ("HOME", "USER", "LOGNAME", "SHELL", "PATH", "LANG", "SSH_AUTH_SOCK")
+    env = {k: os.environ[k] for k in keep if k in os.environ}
+    env.update(TERM="xterm-256color", HERDR_SESSION=session, HERDR_STARTUP_CWD=os.path.expanduser("~"))
+    (popen or _start)(["herdr", "server"], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+          stderr=subprocess.DEVNULL, start_new_session=True)
+    for _ in range(40):
+        sleep(0.25)
+        if session in herdr_sessions(run):
+            return
+    raise HerdrError(f"the Herdr session {session} did not start")
 
 
 def find_pane_for_pid(pid, first_session=None, run=subprocess.run):
@@ -192,14 +215,15 @@ def usage_menu_showing(h, pane):
 STOPPED = "the agent's session is stopped at its usage limit, and no session continuing its work can take this yet; trying again later"
 
 
-def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sleep, clock=time.monotonic):
+def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sleep, clock=time.monotonic,
+            popen=None):
     runtime, sid = reach.get("runtime"), reach.get("session_id")
     if runtime not in ("claude", "codex") or not sid:
-        return Result("inbox", "that session isn't a Claude or Codex session on this Mac")
-    # A Mac's reported name follows its network, so a different name doesn't mean a different machine. A session whose
-    # transcript is here is here.
-    if reach.get("host") != config.hostname() and not transcripts.transcript(runtime, sid):
-        return Result("inbox", "that session isn't a Claude or Codex session on this Mac")
+        return Result("inbox", "it wasn't asked from a Claude or Codex session")
+    # A session whose transcript is here is here. Without one, a card that names its machine was asked from somewhere
+    # else, wherever the record says; an older card names only the Mac, whose reported name follows its network.
+    if not transcripts.transcript(runtime, sid) and (reach.get("machine") or reach.get("host") != config.hostname()):
+        return Result("inbox", f"that session isn't on {config.machine()}", elsewhere=True)
     if already_delivered(reach, ref):
         return Result("delivered", "already in the transcript")
 
@@ -222,7 +246,16 @@ def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sl
         if pane != reach.get("herdr_pane") or hs != reach.get("herdr_session"):
             updates = {"herdr_session": hs, "herdr_pane": pane, "herdr_workspace": pane.split(":")[0], "herdr_tab": None}
     else:
-        h = Herdr(reach.get("herdr_session") or config.settings()["default_herdr_session"], run=run)
+        # The session it ran in, if that Herdr server is still up; else this tool's own, started if need be.
+        default = config.settings()["default_herdr_session"]
+        hs = reach.get("herdr_session")
+        if not hs or hs not in herdr_sessions(run):
+            hs = default
+            try:
+                ensure_herdr(hs, run=run, popen=popen, sleep=sleep)
+            except HerdrError as e:
+                return Result("retry", f"couldn't start Herdr: {e}", moves=moves)
+        h = Herdr(hs, run=run)
         running = {x[0] for x in live}
         choices = (transcripts.claude_copies(sid, reach.get("cwd"), request_id) if runtime == "claude" else []) + [sid]
         target = next((c for c in choices if c not in running and not transcripts.stopped_for_usage(runtime, c)), None)
@@ -240,8 +273,9 @@ def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sl
             else:
                 pane, tab, workspace = h.new_workspace(cwd, prefix)
         except HerdrError as e:
-            h = Herdr(config.settings()["default_herdr_session"], run=run)
+            h = Herdr(default, run=run)
             try:
+                ensure_herdr(default, run=run, popen=popen, sleep=sleep)
                 pane, tab, workspace = h.new_workspace(cwd, prefix)
             except HerdrError:
                 return Result("retry", f"couldn't open a Herdr pane: {e}", moves=moves)

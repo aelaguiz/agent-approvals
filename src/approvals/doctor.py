@@ -1,5 +1,6 @@
 """`approvals doctor`: one line per thing the service needs, and a non-zero exit if any fails."""
 import json
+import os
 import shutil
 import urllib.request
 
@@ -50,7 +51,20 @@ def run():
         if not r.get("ok"):
             raise RuntimeError(r.get("error"))
         return "a connection can open"
-    results.append(_check("Socket Mode token", socket_mode))
+    if config.is_hub():   # only the hub holds the Slack connection
+        results.append(_check("Socket Mode token", socket_mode))
+
+    def hub():
+        if s.get("hub") and not os.environ.get("APPROVALS_MACHINE") and not (config.ROOT / "machine.json").exists():
+            raise RuntimeError("this machine has no name, so answers can't find it: make machine_file MACHINE=<name>")
+        if config.is_hub():
+            return f"this machine ({config.machine()}) holds the records" + (", for the others too" if s.get("hub") else "")
+        from . import hub as hubmod
+        h = hubmod.Client().health()
+        if h.get("id_prefix") != s["id_prefix"]:
+            raise RuntimeError(f"{config.hub_url()} serves {h.get('id_prefix')}- requests, not {s['id_prefix']}-")
+        return f"{config.machine()} delivers here; the records are on {h.get('machine')}"
+    results.append(_check("records", hub))
 
     for tool in ("herdr", "aim"):
         results.append(_check(tool, lambda t=tool: shutil.which(t) or (_ for _ in ()).throw(RuntimeError("not on PATH; closed sessions can't be resumed"))))

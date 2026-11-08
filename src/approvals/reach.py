@@ -20,6 +20,7 @@ def capture(agent_name=None):
         "session_id": sid,
         "cwd": cwd,
         "host": config.hostname(),
+        "machine": config.machine(),
         "herdr_session": env.get("HERDR_SESSION"),
         "herdr_workspace": env.get("HERDR_WORKSPACE_ID"),
         "herdr_tab": env.get("HERDR_TAB_ID"),
