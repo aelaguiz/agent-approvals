@@ -115,6 +115,9 @@ The hub was a Mac and the second machine a Linux server, both on the code before
 | A reply reaches a session on another machine | Pass. A `[test reply]` asking for $200 instead of $250 was seen by the hub 6 seconds after it was posted, and typed into the session on the second machine 10 seconds after that, marked 📨. The agent acknowledged in the thread and posted v2, both through the hub. |
 | A session that moved | Pass. With the card changed to name the hub machine, the hub found no transcript for the session and marked the next reply a stray, with a note in the thread. Two seconds later the second machine found the session's transcript, took the reply, and delivered it 4 seconds after that. The card now names the second machine. |
 | A Herdr session that wasn't running | Pass. The router's Herdr start brought the test's Herdr session up headless on the second machine, and the test agent ran in it. |
+| Moving the hub | Pass. The workspace's 579 records, its counter and the list's state moved from the old machine to the new hub. Button presses had no listener for 17 seconds. Every card from before was marked as the old machine's, and the old machine's service came back delivering only. A real agent's `done` went through the new hub minutes later. |
+| Six machines, after the move | Pass on the published code: the hub, four machines delivering to their own sessions (one of them Linux), and the old machine, which also keeps a second workspace on its own. A command for that second workspace on a machine without its tokens stopped with that error. |
+| A session on a machine that never had the service | Pass. A Claude session there posted a TEST card with a one-minute deadline. The hub expired it on time, and the session got the message 5 seconds later. |
 
 ### November 2, 2026: the list on demand
 
