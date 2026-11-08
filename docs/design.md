@@ -55,6 +55,8 @@ Every request records how to reach the agent that asked. The `approvals` command
 - working folder and machine;
 - Herdr session, workspace and pane.
 
+`approvals submit` refuses a card when its shell has neither session id, since nothing could ever be typed back to it. That happened when two pods on other machines posted their cards over ssh to the Mac (November 7 and 8, 2026): 18 cards were saved with no asker, and every answer waited in an inbox.
+
 When there's a message for the agent, the listener:
 
 1. **Checks it isn't already there.** If the session's transcript already holds the message's reference code, it marks the message delivered and stops. That covers a restart between sending and recording.

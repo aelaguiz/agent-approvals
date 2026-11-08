@@ -176,6 +176,16 @@ def test_a_machine_that_cannot_post_to_the_workspace_saves_nothing(monkeypatch, 
     assert "can't post" in capsys.readouterr().err and store.all_records() == []
 
 
+def test_a_card_from_a_shell_with_no_session_is_refused(hubbox, monkeypatch, tmp_path, capsys):
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
+    card = tmp_path / "card.json"
+    card.write_text(json.dumps(SAMPLES["money"]))
+    with pytest.raises(SystemExit):
+        cli.main(["submit", str(card)])
+    assert "own session" in capsys.readouterr().err and store.all_records() == []
+
+
 def test_role_says_what_the_service_does_here(hubbox, monkeypatch, capsys):
     cli.main(["role"])
     as_hub(monkeypatch)

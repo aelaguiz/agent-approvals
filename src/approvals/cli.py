@@ -70,6 +70,11 @@ def cmd_submit(a):
     if errs:
         _die("Card refused:\n- " + "\n- ".join(errs))
     who = reach.capture(a.agent)
+    if not who["session_id"]:
+        # A card with no asker can never have its answer typed back: every reply would wait in an inbox. The way
+        # this happened was posting over ssh from another machine, whose shell carries no session.
+        _die("This shell isn't a Claude or Codex session, so the answer to this card could never reach you. "
+             "Run `approvals submit` in your own session, on the machine you run on; every machine has the command.")
     hours = card.get("deadline_hours") or cards.TYPES[card["type"]]["hours"]
     deadline = store.now() + (timedelta(minutes=a.deadline_minutes) if a.deadline_minutes else timedelta(hours=hours))
     version = {"n": 1, "card": card, "posted_at": store.iso()}
