@@ -25,7 +25,7 @@ unit_for = if [ "$(1)" = "$(APPROVALS_HOME)" ]; then echo $(UNIT); else echo $(U
 # workspace's hub, delivery to this machine's own sessions elsewhere. `approvals role` says which, or why neither.
 served = { role=$$(APPROVALS_HOME=$(1) $(BIN) role); case "$$role" in hub|delivery) true;; *) echo "== $(1): no service here ($$role)"; false;; esac; }
 
-.PHONY: install install_cli install_skill install_config machine_file install_service install_systemd verify_install uninstall test test-live
+.PHONY: install install_cli install_skill install_config machine_file install_service install_launchd install_systemd verify_install uninstall test test-live
 
 install: install_cli install_skill install_config machine_file install_service
 	@for home in $(HOMES); do $(call served,$$home) || continue; echo "== $$home"; APPROVALS_HOME=$$home $(BIN) doctor || exit 1; done
@@ -60,8 +60,14 @@ machine_file:
 		echo "Say which machine this is: make install MACHINE=<name>"; exit 1; \
 	fi
 
-install_service:
-	@if [ "$$(uname)" != "Darwin" ]; then $(MAKE) --no-print-directory install_systemd; exit $$?; fi
+# launchd on macOS, systemd elsewhere.
+ifeq ($(shell uname),Darwin)
+install_service: install_launchd
+else
+install_service: install_systemd
+endif
+
+install_launchd:
 	@for l in $(LEGACY_LABELS); do launchctl bootout gui/$(UID)/$$l 2>/dev/null || true; rm -f "$(HOME)/Library/LaunchAgents/$$l.plist"; done
 	@mkdir -p "$(HOME)/Library/LaunchAgents"
 	@# A running service whose definition is unchanged is only restarted. Registering one afresh (bootstrap) is
