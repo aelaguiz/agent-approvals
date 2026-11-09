@@ -137,3 +137,13 @@ def test_a_reply_that_lands_sends_the_next_one_on_the_card_straight_away(monkeyp
     L.in_flight, L.deliveries = set(), __import__("queue").Queue()
     L.deliver_one("AP-0001", first)
     assert L.deliveries.get_nowait() == ("AP-0001", second)
+
+
+def test_a_reply_on_a_card_whose_yes_is_waiting_sends_both_now():
+    card("AP-0001", "sid-a", "1.1")
+    card("AP-0002", "sid-a", "2.1")
+    first, second = press_yes("AP-0001"), press_yes("AP-0002")
+    mark("AP-0001", first, sent_at=store.iso(), delivered_at=store.iso())
+    assert going() == []                             # the second yes waits for the agent
+    store.update("AP-0002", lambda r: core.take_replies(r, [("5.0", "wait, don't send this")]))
+    assert going() == [["AP-0002", second]]          # and then the reply, the moment it lands

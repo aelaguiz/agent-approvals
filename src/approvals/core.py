@@ -460,6 +460,9 @@ def held(records):
                 busy.add(sid)
         item = next_item(rec)
         if item and item["kind"] == "decision" and due(item) and not item.get("sent_at"):
+            behind = rec["outbox"][rec["outbox"].index(item) + 1:]
+            if any(i["kind"] != "decision" and not i.get("delivered_at") for i in behind):
+                continue   # he's replying on this card ("wait, don't send"): the reply can't wait, so the yes before it goes now
             waiting.setdefault(sid, []).append((item["created"], rec["id"], item["ref"]))
     out = set()
     for sid, items in waiting.items():
