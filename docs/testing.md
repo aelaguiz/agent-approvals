@@ -114,6 +114,7 @@ At 6:45 pm the hub's connection went quiet for 46 seconds on an overloaded machi
 | The cause | Reproduced. Once one connection died while the client answered a ping, every later connection failed on its first read with a broken pipe, also after the fake Slack accepted connections again. The fake Slack's log showed it had accepted them and the client was the one that broke. Plain Python with no Slack code fails the same way: a failed TLS write leaves the next read on that thread failing, when another thread opened the connection. |
 | Clearing the thread's error queue | Fixes it. With the queue emptied before each connection's reads, the client reconnected on its first try once the fake Slack accepted again, and stayed connected. |
 | Unit tests | Pass, 96 of 96. The new TLS test fails with `BrokenPipeError` when the clearing step is removed. |
+| Six machines, after the install | Pass. Every machine runs the fix; the hub and the second workspace's service reconnected to Slack on the first try. A real approval through the hub reached its agent on another machine 12 seconds after the press, and the agent acknowledged it 10 seconds later. The original failure can't be made to happen on demand in production, so the reproduction above is what shows the fix. |
 
 ### November 8, 2026: several machines, one hub
 
