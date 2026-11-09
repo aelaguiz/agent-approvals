@@ -104,6 +104,8 @@ def validate(card, revision=False):
     for key in ("title", "approves", "does_not_approve"):
         if not str(card.get(key, "")).strip():
             errs.append(f"{key} is required")
+    if len(str(card.get("title", ""))) > LABEL_MAX:
+        errs.append(f"title is the card's headline, which Slack cuts at {LABEL_MAX} characters: say the action, and put the rest in facts")
     if "part_of" not in card or not (card["part_of"] is None or _text(card["part_of"], 120)):
         errs.append("part_of is required: the initiative this card belongs to, in the approver's words "
                     "(\"Payers keep using what they paid for\"), or null if it stands alone")

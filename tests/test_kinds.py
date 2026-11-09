@@ -117,6 +117,7 @@ def test_refusals_say_what_to_fix(tmp_path):
                 sections=[{"title": f"S{i}", "lines": ["a"]} for i in range(25)])
     assert any("too much for one card" in e for e in cards.validate(many))
     assert any("https" in e for e in cards.validate(dict(KINDS["set"], links=[["Deck", "/local/file"]])))
+    assert any("headline" in e for e in cards.validate(dict(KINDS["set"], title="Keep training " * 15)))
 
 
 # ---------- a set: each row its own answer ----------
