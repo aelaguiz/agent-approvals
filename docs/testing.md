@@ -2,12 +2,12 @@
 
 ## Unit tests
 
-`make test` runs 79 tests, with no network. They cover:
+`make test` runs 102 tests, with no network. They cover:
 - every card type rendering, required fields, escaping;
 - 20 processes submitting at once and getting distinct numbers;
 - the first button press winning, and old versions refusing;
 - replies sorted into feedback, an answer or a comment, including replies on declined and withdrawn cards;
-- routing decisions with fake `herdr` and `aim`: live pane, focused pane (sent straight away), closed session, moved session, a different session in the pane, an already delivered message, another machine, this machine under a changed name;
+- routing decisions with fake `herdr` and `aim`: live pane, focused pane (sent straight away), a closed session left alone with its answer waiting (and resumed only when a caller asks, as agent-email does), moved session, a different session in the pane, an already delivered message, another machine, this machine under a changed name;
 - sessions stopped at their usage limit: the answer goes to a session continuing the work, nothing is typed into the stopped one or into the usage-limit menu, and a resume that lands on that menu closes its pane;
 - continuations and moved copies against real transcript files, including copies whose session ids were rewritten;
 - new versions: approvable after an earlier yes, refused after a decline, and announced in the channel; withdrawn cards;
@@ -35,7 +35,7 @@ The sandbox's `AGENTS.md` and `CLAUDE.md` describe an operations job with two ru
 | # | Agent | Scenario | The approver's side | Passes when |
 | --- | --- | --- | --- | --- |
 | S1 | Claude | [Reply to a Reddit question as the founder](../tests/live/scenarios/s1-reply.md) | Thread reply with feedback, then "post it" | Skill found unprompted; `reply` card with the question and the exact draft; nothing in `outbox.md` before the yes; v2 with `changes`; "post it" taken as the yes; reply written to `outbox.md`; `done` |
-| S2 | Codex | [Lower a country's yearly price](../tests/live/scenarios/s2-price.md) | Session closed, then a real button press from the approver's Slack | `price` card with a today-and-proposed table; the closed session resumed and acted; `done` |
+| S2 | Codex | [Lower a country's yearly price](../tests/live/scenarios/s2-price.md) | Session closed, then a real button press from the approver's Slack; later the session is resumed by hand and told only to carry on | `price` card with a today-and-proposed table; nothing started the session; once back, it found the answer with `approvals inbox` and acted; `done` |
 | S3 | Claude | [Add $250 to a test budget](../tests/live/scenarios/s3-budget.md) | Thread reply "no, not now" | `budget` card with the cap before and after; dropped; nothing in `outbox.md` |
 | S4 | Claude | [Email the tax preparers as the founder](../tests/live/scenarios/s4-email.md) | Answers any question; then "approved, send it" | `email` card with From, To and the exact text; any question asked in the thread; acted only after the yes |
 | S5 | Claude | [Answer a rules question](../tests/live/scenarios/s5-no-ask.md) | Nothing | No card; the answer goes straight to `outbox.md` |
@@ -65,26 +65,26 @@ The question is whether, with many agents and many requests open at once, every 
 | # | Case | Must happen | Proved by |
 | --- | --- | --- | --- |
 | R1 | Several agents, one request each, answers posted together | Each answer lands only in its asker | Live (passed October 18, regression in L5) |
-| R2 | A scheduled agent's earlier run asked and closed; a newer run with the same prompt is in the same folder | The earlier run is resumed and told; the newer run gets nothing | Unit + live L1 |
-| R3 | The asker's pane now runs a different session that starts with the same prompt | That session isn't prompted; the asker is resumed elsewhere | Unit |
+| R2 | A scheduled agent's earlier run asked and closed; a newer run with the same prompt is in the same folder | Nothing starts the earlier run, which will never come back for it; the newer run is handed the answer when it checks its inbox, and acts on it once | Unit + live L1 |
+| R3 | The asker's pane now runs a different session that starts with the same prompt | That session isn't prompted; the answer waits for the asker | Unit |
 | R4 | The asker moved to another account | The copy, which holds the request in its history, is told | Unit + live (passed October 18) |
 | R5 | The asker is open in a different pane than recorded, for example a person resumed it there | It's told there; no second copy is started | Unit + live L3 |
-| R6 | One agent has two requests open, its session is closed, and both get answers | The session is resumed once; both answers land in it, in order | Unit + live L2 |
+| R6 | One agent has two requests open, its session is closed, and both get answers | Nothing starts it; each request's thread gets one 💤 note; once back, its inbox hands it both answers, in order | Unit + live L2 |
 | R7 | Another session runs a command on a request it didn't make | Routing stays with the asker; the call is noted on the record | Unit |
 | R8 | Two answers to one request, a few seconds apart | Both land, in order | Unit + live L2 |
 | R9 | The agent is mid-task when its answer arrives | It lands, and the agent acts on it after the task | Live L4 |
 | R10 | The service restarts between sending and recording | Nothing is sent twice | Unit (passed October 18) |
-| R11 | A later run of the same agent checks its inbox while the earlier run's answer is still being delivered, and reads that request | It isn't handed the answer and doesn't count as the asker; the earlier run is resumed and told. It gets the answer only if direct delivery has failed, and then the service stops trying. | Unit + live L1 (found live on October 18: the later run took the answer) |
+| R11 | A later run of the same agent checks its inbox while the earlier run is running and its answer is being delivered, and reads that request | It isn't handed the answer and doesn't count as the asker; the earlier run is told. It gets the answer only when the service isn't delivering it: the earlier run isn't running, or delivery failed. | Unit + live L1 (found live on October 18: the later run took the answer) |
 
 **Acknowledgements.** These checks run on every answer in every live test:
 - **A1:** the agent posts an acknowledgement in the thread, in its own words, before it acts. Its transcript shows `approvals ack` before the action.
 - **A2:** the acknowledgement says what the agent then actually does. An acknowledgement that promises one thing while the agent does another fails.
 - **A3 (unit):** a delivered answer with no acknowledgement after 10 minutes gets exactly one ⚠️ note; acknowledged and recent ones get none.
 
-**Live tests.** These use the installed package, real agents launched through AI Manager in their own Herdr workspaces, and `[test reply]` posts on TEST cards. Each answer carries a reference code, so the check is exact: a code must appear in its asker's transcript and in no other. "Resumed once" is checked by counting the processes running that session.
+**Live tests.** These use the installed package, real agents launched through AI Manager in their own Herdr workspaces, and `[test reply]` posts on TEST cards. Each answer carries a reference code, so the check is exact: a code must appear in its asker's transcript and in no other. "Nothing started" is checked by counting the processes running that session and the panes on each machine.
 
-- **L1, scheduled twins.** Agent A gets a brief in folder F, submits a request and exits. Agent B gets the identical brief in F, as the next day's run would, and submits its own. A reply goes to A's request. A is resumed and acts; B's transcript holds no code from A's request. Then a reply to B's request reaches B, which is still open.
-- **L2, one agent, two requests.** One agent gets a brief with two actions needing approval and submits two cards, then its session is closed. Answers go to both, plus a second answer to the first a few seconds later. The session is resumed once, all three answers land in it in the order sent, and it acts on each request separately.
+- **L1, scheduled twins.** Agent A gets a brief in folder F, submits a request and exits. Agent B gets the identical brief in F, as the next day's run would, and submits its own. A reply goes to A's request while A isn't running. Nothing starts A. B, checking its inbox as the skill says to at the start of a run, is handed A's answer and acts on it once; A's transcript holds no code from it. Then a reply to B's request reaches B, which is still open.
+- **L2, one agent, two requests.** One agent gets a brief with two actions needing approval and submits two cards, then its session is closed. Answers go to both, plus a second answer to the first a few seconds later. Nothing starts the session, and each thread gets one 💤 note. The session is then resumed by hand and told only to carry on: it runs `approvals inbox`, gets all three in the order sent, acknowledges each and acts on each request separately.
 - **L3, resumed by a person.** An asker's pane is closed, and its session is resumed by hand in a new workspace, as the watcher does. A reply is delivered to that pane, and there's still exactly one process running the session.
 - **L4, busy.** An agent submits, then starts a 90-second job. The answer arrives during the job, and the agent acts on it once the job is done.
 - **L5, all at once.** L1, L2 and L3 run at the same time, so their answers cross in the same polling passes.

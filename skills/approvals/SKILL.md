@@ -24,7 +24,7 @@ When an action needs your approver's yes first, put one card in front of them th
   - **"Done" means the change on the card is real and you've seen it:** the ad running, the post live, the flag on, the money moved. Your part finishing, a hand-off, or a schedule isn't done. Say where it stands, and mark it done when it's real. A card marked done while the setting it asked for was still off got "Did this happen?" back.
   - **If you end up doing something different, say so in the thread.**
 - **Act only on answers that reach you:** an `[Approvals]` message in this session, or one `approvals inbox` hands you. A request another session made belongs to that session even when it's for the same change, and its answer goes to it; that includes an earlier run of your scheduled job, which started fresh just as you did. A session you continue is different: if this session opened with a summary of earlier work, that work is yours, its open cards included, and their answers come here. If the change you were asked for is already requested and still open, don't post a duplicate; say which request it's waiting on.
-- **Don't wait around.** After submitting, keep working on something else, or end your turn saying which request you're waiting on. The answer is typed into this session. If this session has closed by then, it's resumed first and then told.
+- **Don't wait around, and look for your answers whenever you pick work back up.** After submitting, keep working on something else, or end your turn saying which request you're waiting on. While this session is running, the answer is typed into it. But the approver decides when you run: if they stop this session, an answer that comes while it's stopped waits for you, and nothing starts the session for it or types it in when you're back. So whenever you pick work back up with cards out (this session was stopped and then resumed or restored, or this is a new run of a scheduled job), run `approvals inbox --agent "<name>"` before anything else and act on what it hands you. It costs nothing when nothing is waiting. The approver can see in the thread that your answer is waiting, so a yes left unread there looks like an agent ignoring them.
 
 ## Asking
 
@@ -52,7 +52,7 @@ Some types also need `quotes`, a `table`, or an `image` or `video`; the card typ
 
 ## When the answer arrives
 
-Answers arrive as messages starting with `[Approvals]` that quote the approver's words exactly.
+Answers arrive as messages starting with `[Approvals]` that quote the approver's words exactly: typed into this session while it's running, or printed by `approvals inbox` for one that came while it wasn't.
 
 First, acknowledge it: `approvals ack AP-0013 "<what you understood and what you'll do>"`. For example: "Got it: you approved v2. Posting the reply now, then I'll mark it done." Or: "Understood: shorter, and no product mention. v3 coming in a few minutes." Then act as below. A deadline passing needs no acknowledgement.
 
@@ -68,7 +68,7 @@ A revised card replaces the old one; the approver sees the new version in the sa
 
 ## Other commands
 
-- `approvals inbox --agent "<name>"` lists answers waiting for you. If you run on a schedule, check it at the start of each run.
+- `approvals inbox --agent "<name>"` hands you the answers waiting for you: ones that came while your session wasn't running, and ones that couldn't be typed in. Each is handed out once, and the approver sees 📨 when you've taken it.
 - `approvals withdraw AP-0013 "<why>"` takes a card down: it shows your reason and loses its buttons.
 - `approvals record AP-0013 --approved --words "<their exact words>" --where "<where they said it>"` records a yes or no the approver gave outside Slack, so the card shows it.
 - `approvals show AP-0013` shows one request. `approvals list --open` shows what's open.

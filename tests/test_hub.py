@@ -108,7 +108,7 @@ def test_a_card_names_the_machine_it_was_asked_from(monkeypatch):
 def test_off_the_hub_the_service_delivers_to_its_own_sessions(hubbox, monkeypatch):
     rid = card_rec("laptop")["id"]
     sent, reacted = [], []
-    monkeypatch.setattr(router, "deliver", lambda r, text, ref, request_id=None: sent.append((r["session_id"], ref))
+    monkeypatch.setattr(router, "deliver", lambda r, text, ref, request_id=None, resume=True: sent.append((r["session_id"], ref))
                         or router.Result("delivered", "seen in the transcript"))
     monkeypatch.setattr(slackapi, "react", lambda ts, name: reacted.append(name))
     L = listener.Listener()
@@ -139,7 +139,7 @@ def test_an_answer_whose_session_moved_is_delivered_where_the_session_is(hubbox,
 
     monkeypatch.setenv("APPROVALS_MACHINE", "laptop")
     monkeypatch.setattr(transcripts, "transcript", lambda runtime, sid: f"/t/{sid}.jsonl" if sid == "sid-hubbox" else None)
-    monkeypatch.setattr(router, "deliver", lambda r, text, ref, request_id=None: sent.append(ref) or router.Result("delivered"))
+    monkeypatch.setattr(router, "deliver", lambda r, text, ref, request_id=None, resume=True: sent.append(ref) or router.Result("delivered"))
     L = listener.Listener()
     L.fetch()
     L.deliver_one(*L.deliveries.get_nowait())

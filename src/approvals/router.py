@@ -96,7 +96,7 @@ class Herdr:
 
 @dataclass
 class Result:
-    status: str                      # delivered | retry | inbox
+    status: str                      # delivered | retry | inbox | waiting (the session isn't running)
     reason: str = ""
     reach: dict = field(default_factory=dict)   # fields to update on the record's reach
     moves: list = field(default_factory=list)   # [old_id, new_id] pairs seen
@@ -216,7 +216,9 @@ STOPPED = "the agent's session is stopped at its usage limit, and no session con
 
 
 def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sleep, clock=time.monotonic,
-            popen=None):
+            popen=None, resume=True):
+    """Type `text` into the session that asked. With resume=False a session that isn't running is left alone:
+    the answer waits for it. Approvals answers that way; agent-email resumes, so its replies reach a closed session."""
     runtime, sid = reach.get("runtime"), reach.get("session_id")
     if runtime not in ("claude", "codex") or not sid:
         return Result("inbox", "it wasn't asked from a Claude or Codex session")
@@ -246,6 +248,10 @@ def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sl
         if pane != reach.get("herdr_pane") or hs != reach.get("herdr_session"):
             updates = {"herdr_session": hs, "herdr_pane": pane, "herdr_workspace": pane.split(":")[0], "herdr_tab": None}
     else:
+        if not resume:
+            if live:   # running, but stopped at its usage limit
+                return Result("retry", STOPPED, moves=moves)
+            return Result("waiting", "its session isn't running", moves=moves)
         # The session it ran in, if that Herdr server is still up; else this tool's own, started if need be.
         default = config.settings()["default_herdr_session"]
         hs = reach.get("herdr_session")

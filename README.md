@@ -1,20 +1,20 @@
 # agent-approvals
 
-AI agents ask a person for approval as cards in a Slack channel. The person presses a button, or replies in the card's thread with anything they want. That answer is typed straight back into the agent session that asked, whether that's Claude Code or Codex, open or closed. If the session has closed, it's resumed first.
+AI agents ask a person for approval as cards in a Slack channel. The person presses a button, or replies in the card's thread with anything they want. That answer is typed straight back into the agent session that asked, whether that's Claude Code or Codex. If that session isn't running, nothing starts it: the answer waits until the agent is back and checks for it.
 
 ```
 agent ──approvals submit──▶ card in #approvals ──▶ you: ✅ / ❌ / reply in the thread
   ▲                                                        │
-  └──── "[Approvals] AP-0013 ... approved it" ◀── listener ┘   (resumes the session if it closed)
+  └──── "[Approvals] AP-0013 ... approved it" ◀── listener ┘   (waits if the session isn't running)
 ```
 
 - **One card per request, formatted by type.** There are 12 types: creative, public reply, budget, purchase, money, player message, price, experiment, store or web page, content, email in your name, and account action. Each card puts the real thing on it: the ad, the exact reply, a table of today beside proposed, the email word for word. It also says exactly what a yes covers.
 - **One thread per request.** Your replies are feedback. The agent's questions and its next versions arrive in the same thread, and the first post always shows the newest version with working buttons.
 - **Answers reach the exact session that asked.**
-  - An open session gets the answer typed into its terminal pane.
-  - A closed session is resumed through [AI Manager](#requirements) in a new [Herdr](https://herdr.dev) pane, then told.
+  - A running session gets the answer typed into its terminal pane.
+  - A session that isn't running is never started for an answer: you decide when an agent runs. The thread says the answer is waiting, and the agent picks it up with `approvals inbox` when it's back, which the skill tells it to run whenever it picks work back up. Answers that came while it was stopped aren't typed in when it returns either.
   - A session that moved to another account, or whose work continued in a new session after a usage limit, is found by its content, and the newest one that can still work gets the answer. Nothing is typed into a session stopped at its usage limit.
-  - Every answer is checked in the session's transcript and marked 📨 in Slack. 📨 means it was typed into the session, nothing more.
+  - Every answer is checked in the session's transcript and marked 📨 in Slack. 📨 means it was typed into the session, or the agent took it from its inbox, nothing more.
   - The agent then acknowledges in the thread in its own words: what it understood and what it's going to do. If it doesn't within 10 minutes, the thread gets a warning, so a delivery never looks like a handled answer.
 - **A morning list of what's waiting on you.** At 8 am each day the service posts one message in the channel that mentions you and lists every card waiting on your answer, grouped by when it closes (today, tomorrow, later), each linked to its card. It also lists cards that closed with no answer since the last list, since a reply reopens them. All day it keeps that message current: each line is struck through, with what happened, once the card stops waiting on you.
 - **The same list whenever you ask.** Post anything in the channel itself, not in a card's thread ("what's waiting?"), and within seconds the service posts a fresh list at the bottom, without mentioning you. Only the newest list is kept current; the one it replaces shrinks to a link to it.
@@ -29,7 +29,7 @@ agent ──approvals submit──▶ card in #approvals ──▶ you: ✅ / �
   - Interactivity on, which Socket Mode carries;
   - bot scopes `chat:write`, `channels:history` (`groups:history` for a private channel), `channels:read`, `reactions:write`, `files:write` and `users:read`;
   - the bot invited to the approvals channel.
-- To deliver into agent sessions: [Herdr](https://herdr.dev), with agents running in Herdr panes. To resume closed sessions: AI Manager's `aim` command. Without them, answers wait in each agent's `approvals inbox`.
+- To deliver into agent sessions: [Herdr](https://herdr.dev), with agents running in Herdr panes. Without it, answers wait in each agent's `approvals inbox`.
 
 ## Install
 
@@ -93,7 +93,7 @@ approvals revise AP-0001 card-v2.json          # next version, in the same threa
 approvals ack AP-0001 "Got it: setting both prices now"   # the agent's own acknowledgement, in the thread
 approvals withdraw AP-0001 "Prices changed; a new card is coming"   # take down a card the agent no longer stands behind
 approvals done AP-0001 "Set both prices; read them back from the store"
-approvals inbox --agent "Pricing"              # answers waiting, for agents that can't be reached directly
+approvals inbox --agent "Pricing"              # answers that came while the agent wasn't running, or couldn't be typed in
 approvals record AP-0001 --approved --words "yes do it" --where "phone call"
 approvals list --open
 approvals doctor

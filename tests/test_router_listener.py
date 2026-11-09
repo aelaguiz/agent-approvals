@@ -340,3 +340,96 @@ def test_an_answer_for_a_session_on_another_machine_is_offered_elsewhere(reach, 
     monkeypatch.setattr(transcripts, "transcript", lambda runtime, sid: None)
     res = run(world, FakeHerdr(), reach)
     assert res.status == "inbox" and res.elsewhere
+
+
+# ----- an agent that isn't running is never started for an answer -----
+
+def test_a_closed_session_is_left_alone_and_its_answer_waits(reach, world):
+    world.pid_sid = {4242: "sid-1"}
+    fake = FakeHerdr(panes={}, sessions=())
+    started = []
+    res = run(world, fake, reach, resume=False, popen=lambda cmd, **kw: started.append(cmd))
+    assert res.status == "waiting"
+    assert not fake.resumes() and not started
+    assert not [c for c in fake.calls if c[:2] in (["tab", "create"], ["workspace", "create"])]
+
+
+def test_a_running_session_still_has_its_answer_typed_in(reach, world):
+    world.pid_sid = {1: "sid-1"}
+    fake = FakeHerdr(panes={"w1:p1": {"focused": False}}, procs={"w1:p1": [{"pid": 1}]})
+    assert run(world, fake, reach, resume=False).status == "delivered"
+    assert fake.sent_to("w1:p1") and not fake.resumes()
+
+
+def test_a_running_session_stopped_at_its_usage_limit_waits_for_its_work_to_continue(reach, world):
+    world.pid_sid = {1: "sid-1"}
+    world.stopped = {"sid-1"}
+    fake = FakeHerdr(panes={"w1:p1": {"focused": False}}, procs={"w1:p1": [{"pid": 1}]})
+    res = run(world, fake, reach, resume=False)
+    assert res.status == "retry" and res.reason == router.STOPPED and not fake.resumes()
+
+
+def test_answers_for_a_stopped_agent_wait_for_it_with_one_note():
+    rec = make_rec(SAMPLES["money"])
+    core.enqueue(rec, "feedback", "m1")
+    core.enqueue(rec, "feedback", "m2")
+    first, second = (listener.Listener._after(rec, i["ref"], router.Result("waiting", "its session isn't running"))
+                     for i in list(rec["outbox"]))
+    assert "Tester isn't running" in first and second is None
+    assert all(i["inbox_only"] and i["waiting_for_agent"] and i["attempts"] == 0 for i in rec["outbox"])
+    assert core.next_item(rec) is None          # not typed in later, even once the agent is back
+    core.enqueue(rec, "decision", "m3")         # an answer while it's running again is typed in as usual
+    assert core.next_item(rec)["ref"] == rec["outbox"][-1]["ref"]
+
+
+def test_the_service_never_asks_for_a_session_to_be_resumed(monkeypatch):
+    rec = make_rec(SAMPLES["money"])
+    core.enqueue(rec, "decision", "m")
+    put(rec)
+    asked = {}
+
+    def deliver(reach, text, ref, request_id=None, **kw):
+        asked.update(kw)
+        return router.Result("waiting", "its session isn't running")
+    monkeypatch.setattr(router, "deliver", deliver)
+    notes = []
+    monkeypatch.setattr(listener.slackapi, "note", lambda ts, text: notes.append(text))
+    listener.Listener().deliver_one("AP-0001", rec["outbox"][0]["ref"])
+    assert asked == {"resume": False}
+    assert store.load("AP-0001")["outbox"][0]["waiting_for_agent"] and len(notes) == 1
+
+
+def test_an_agent_back_from_being_stopped_finds_its_answer_in_its_inbox(monkeypatch, capsys):
+    from approvals import cli
+    rec = make_rec(SAMPLES["money"], reach={"runtime": "claude", "session_id": "sid-1", "agent": "Tester"})
+    core.enqueue(rec, "feedback", "Amir replied: make it $15,000", react_ts="2.2")
+    listener.Listener._after(rec, rec["outbox"][0]["ref"], router.Result("waiting", "its session isn't running"))
+    put(rec)
+    reacted = []
+    monkeypatch.setattr(cli.slackapi, "react", lambda ts, name: reacted.append((ts, name)))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sid-1")
+    cli.main(["inbox", "--agent", "Tester"])
+    assert "make it $15,000" in capsys.readouterr().out
+    item = store.load("AP-0001")["outbox"][0]
+    assert item["delivered_via"] == "inbox" and item["seen_by_agent"]
+    assert reacted == [("2.2", "incoming_envelope")]
+    cli.main(["inbox", "--agent", "Tester"])
+    assert "No approval answers waiting" in capsys.readouterr().out
+
+
+def test_a_later_run_of_the_same_job_takes_an_answer_waiting_for_a_run_that_stopped(monkeypatch, capsys):
+    """A finished scheduled run never comes back, so its answer goes to the job's next run, once."""
+    from approvals import cli
+    rec = make_rec(SAMPLES["money"], reach={"runtime": "claude", "session_id": "run-1", "agent": "Tester", "cwd": "/tmp/x"})
+    core.enqueue(rec, "decision", "Amir approved it")
+    put(rec)
+    monkeypatch.setattr(cli.slackapi, "react", lambda ts, name: None)
+    monkeypatch.setattr(transcripts, "is_copy", lambda *a: False)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "run-2")
+    cli.main(["inbox", "--agent", "Tester"])
+    assert "No approval answers waiting" in capsys.readouterr().out      # run 1 may still be running: not yet
+    listener.Listener._after(rec, rec["outbox"][0]["ref"], router.Result("waiting", "its session isn't running"))
+    put(rec)
+    cli.main(["inbox", "--agent", "Tester"])
+    assert "Amir approved it" in capsys.readouterr().out
+    assert store.load("AP-0001")["outbox"][0]["claimed_by"] == "run-2"

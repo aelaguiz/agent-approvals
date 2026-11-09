@@ -66,8 +66,7 @@ def run():
         return f"{config.machine()} delivers here; the records are on {h.get('machine')}"
     results.append(_check("records", hub))
 
-    for tool in ("herdr", "aim"):
-        results.append(_check(tool, lambda t=tool: shutil.which(t) or (_ for _ in ()).throw(RuntimeError("not on PATH; closed sessions can't be resumed"))))
+    results.append(_check("herdr", lambda: shutil.which("herdr") or (_ for _ in ()).throw(RuntimeError("not on PATH; answers can't be typed into sessions"))))
     if s.get("video_share_command"):
         results.append(_check("video share command", lambda: " ".join(s["video_share_command"])))
     if s.get("test_approver"):

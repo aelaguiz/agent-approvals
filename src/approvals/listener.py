@@ -284,7 +284,7 @@ class Listener:
         item = next(i for i in rec["outbox"] if i["ref"] == ref)
         if item.get("delivered_at"):
             return
-        res = router.deliver(rec.get("reach") or {}, item["text"], ref, request_id=rid)
+        res = router.deliver(rec.get("reach") or {}, item["text"], ref, request_id=rid, resume=False)
         log.info("%s %s: %s (%s)", rid, ref, res.status, res.reason)
         note = store.update(rid, lambda r: self._after(r, ref, res))
         if res.status == "delivered" and item.get("react_ts"):
@@ -317,6 +317,16 @@ class Listener:
             item["delivered_at"] = store.iso()
             store.event(r, "delivered", ref=ref)
             return None
+        if res.status == "waiting":
+            # The approver decides when an agent runs, so a stopped one isn't started for an answer, and isn't
+            # typed into when it's back either: it finds the answer itself, with `approvals inbox`.
+            already = any(i.get("waiting_for_agent") and not i.get("delivered_at") for i in r["outbox"])
+            item.update(inbox_only=True, waiting_for_agent=True, next_try=store.iso(store.now() + timedelta(days=3650)))
+            store.event(r, "waiting_for_agent", ref=ref)
+            if already:
+                return None
+            return (f"💤 {r['agent']} isn't running, so your answer is waiting for it. Nothing will start it; "
+                    f"it will see the answer when it's back.")
         if res.status == "inbox":
             item["delivered_at"] = None
             item["next_try"] = store.iso(store.now() + timedelta(days=3650))

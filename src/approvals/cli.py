@@ -213,26 +213,27 @@ def cmd_record(a):
 
 
 def cmd_inbox(a):
-    """Answers the service can't type into their asker's session. Each answer goes to exactly one session:
-    the asker gets anything not yet delivered; another run of the same agent gets only answers the
-    service has given up delivering, and taking one here stops the service from delivering it too."""
+    """Answers not typed into their asker's session: ones that came while it wasn't running, and ones the
+    service can't type in. Each answer goes to exactly one session: the asker gets anything not yet delivered;
+    another run of the same agent gets only answers the service isn't delivering, and taking one here stops the
+    service from delivering it too."""
     me = reach.capture(a.agent)
     shown = 0
 
     def take(rec, own):
         """The answers taken; printed once the record is saved, since a change can be made more than once."""
-        texts = []
+        taken = []
         for item in rec.get("outbox", []):
             if item.get("delivered_at") or item.get("seen_by_agent"):
                 continue
             if not own and not (item.get("inbox_only") or item.get("noted_failure")):
                 continue
-            texts.append(item["text"])
+            taken.append((item["text"], item.get("react_ts")))
             item["seen_by_agent"] = True
             item["delivered_at"] = store.iso()
             item["delivered_via"] = "inbox"
             item["claimed_by"] = me.get("session_id")
-        return texts
+        return taken
     for rec in store.waiting_records():
         r = rec.get("reach") or {}
         own = bool(me.get("session_id")) and me["session_id"] in [r.get("session_id"), *r.get("earlier_ids", [])]
@@ -240,9 +241,14 @@ def cmd_inbox(a):
         if not own and waiting and me.get("session_id") and me.get("runtime") == r.get("runtime") and me.get("cwd") == r.get("cwd"):
             own = transcripts.is_copy(r.get("runtime"), r.get("session_id"), me["session_id"], rec["id"])   # it continues the asker
         if own or a.all or r.get("agent") == me["agent"]:
-            for text in store.update(rec["id"], lambda x, own=own: take(x, own or a.all)):
+            for text, react_ts in store.update(rec["id"], lambda x, own=own: take(x, own or a.all)):
                 print(text)
                 shown += 1
+                if react_ts:   # 📨, as when the service types an answer in: the agent has it
+                    try:
+                        slackapi.react(react_ts, "incoming_envelope")
+                    except Exception as e:
+                        print(f"(couldn't mark {rec['id']} as received in Slack: {e})", file=sys.stderr)
     if not shown:
         print("No approval answers waiting for you.")
 
