@@ -415,9 +415,12 @@ class Listener:
         item = next(i for i in rec["outbox"] if i["ref"] == ref)
         if item.get("delivered_at"):
             return
+        start = time.monotonic()
         store.update(rid, lambda r: self._sending(r, ref))
+        saved = time.monotonic()
         res = router.deliver(rec.get("reach") or {}, item["text"], ref, request_id=rid, resume=False, confirm=False)
-        log.info("%s %s: %s (%s)", rid, ref, res.status, res.reason)
+        log.info("%s %s: %s (%s); saving took %.1fs, typing %.1fs", rid, ref, res.status, res.reason,
+                 saved - start, time.monotonic() - saved)
         self.record(rid, ref, res)
         if res.status == "sent":
             self.awaiting[(rid, ref)] = ((rec.get("reach") or {}).get("runtime"), res.reach.get("session_id"), time.monotonic())
