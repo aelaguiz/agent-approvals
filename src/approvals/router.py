@@ -96,7 +96,7 @@ class Herdr:
 
 @dataclass
 class Result:
-    status: str                      # delivered | retry | inbox | waiting (the session isn't running)
+    status: str                      # delivered | sent (typed, not yet seen) | retry | inbox | waiting (the session isn't running)
     reason: str = ""
     reach: dict = field(default_factory=dict)   # fields to update on the record's reach
     moves: list = field(default_factory=list)   # [old_id, new_id] pairs seen
@@ -216,9 +216,10 @@ STOPPED = "the agent's session is stopped at its usage limit, and no session con
 
 
 def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sleep, clock=time.monotonic,
-            popen=None, resume=True):
+            popen=None, resume=True, confirm=True):
     """Type `text` into the session that asked. With resume=False a session that isn't running is left alone:
-    the answer waits for it. Approvals answers that way; agent-email resumes, so its replies reach a closed session."""
+    the answer waits for it. Approvals answers that way; agent-email resumes, so its replies reach a closed session.
+    With confirm=False it returns "sent" once the text is typed, and the caller watches the transcript itself."""
     runtime, sid = reach.get("runtime"), reach.get("session_id")
     if runtime not in ("claude", "codex") or not sid:
         return Result("inbox", "it wasn't asked from a Claude or Codex session")
@@ -320,6 +321,8 @@ def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sl
         updates = {"herdr_session": h.session, "herdr_pane": pane, "herdr_tab": tab, "herdr_workspace": workspace}
 
     updates["session_id"] = sid
+    if not confirm:
+        return Result("sent", "typed in", reach=updates, moves=moves)
     start = clock()
     while clock() - start < CONFIRM_SECONDS:
         if transcripts.contains(transcripts.transcript(runtime, sid), ref):

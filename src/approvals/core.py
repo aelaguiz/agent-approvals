@@ -433,10 +433,23 @@ def machine_of(rec):
     return (rec.get("reach") or {}).get("machine") or config.hub()
 
 
+TYPED_SECONDS = 90   # a message typed into a session should show up in its transcript by then, or it's typed again
+
+
+def just_typed(item):
+    """Typed in a moment ago and waiting to show up in the transcript. Hidden a little longer than the check that
+    confirms it waits, so that check and the next pass never both act on it."""
+    at = item.get("typed_at")
+    return bool(at) and store.now() - datetime.fromisoformat(at) < timedelta(seconds=TYPED_SECONDS + 30)
+
+
 def next_item(rec):
     """A request's first message not yet delivered or left in the inbox. Its later ones wait for it, so they
-    arrive in order."""
-    return next((i for i in rec.get("outbox", []) if not i.get("delivered_at") and not i.get("inbox_only")), None)
+    arrive in order. One just typed in doesn't hold them up: Claude takes a typed message in at its next step, so
+    the next is typed right behind it and the agent reads both at once, rather than acting on a yes for a few
+    seconds before the "wait, don't send" behind it."""
+    return next((i for i in rec.get("outbox", []) if not i.get("delivered_at") and not i.get("inbox_only")
+                 and not just_typed(i)), None)
 
 
 PACE_SECONDS = 120   # the longest a decision waits for its agent to acknowledge the answer before it

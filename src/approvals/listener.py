@@ -83,6 +83,7 @@ class Listener:
         self.poke_lock = threading.Lock()
         self.deliveries = queue.Queue()
         self.in_flight = set()
+        self.awaiting = {}                # (request id, ref) -> (runtime, session id, monotonic time typed)
         self.next_poll = {}               # thread_ts -> monotonic time it is next due
         self.stop = threading.Event()
         self.me = config.machine()
@@ -415,15 +416,37 @@ class Listener:
         if item.get("delivered_at"):
             return
         store.update(rid, lambda r: self._sending(r, ref))
-        res = router.deliver(rec.get("reach") or {}, item["text"], ref, request_id=rid, resume=False)
+        res = router.deliver(rec.get("reach") or {}, item["text"], ref, request_id=rid, resume=False, confirm=False)
         log.info("%s %s: %s (%s)", rid, ref, res.status, res.reason)
-        note = store.update(rid, lambda r: self._after(r, ref, res))
-        if res.status == "delivered":
-            # The approver's next reply on this card goes in now rather than on the next pass, so corrections typed
-            # in a row land one right after another. A decision is left to the pass, which spaces them out.
+        self.record(rid, ref, res)
+        if res.status == "sent":
+            self.awaiting[(rid, ref)] = ((rec.get("reach") or {}).get("runtime"), res.reach.get("session_id"), time.monotonic())
+        if res.status in ("sent", "delivered"):
+            # The approver's next reply on this card is typed right behind it, not on the next pass, so the agent
+            # takes both in at once. A decision is left to the pass, which spaces them out.
             nxt = core.next_item(store.load(rid))
             if nxt and nxt["kind"] != "decision" and core.due(nxt):
                 self.queue([[rid, nxt["ref"]]])
+
+    def confirm_typed(self):
+        """A message typed into a session is delivered once it shows up in the session's transcript, which is when
+        the agent takes it in. One that doesn't within TYPED_SECONDS is tried again later, as a failed one is."""
+        for key, (runtime, sid, at) in list(self.awaiting.items()):
+            if transcripts.contains(transcripts.transcript(runtime, sid), key[1]):
+                res = router.Result("delivered", "seen in the transcript")
+            elif time.monotonic() - at >= core.TYPED_SECONDS:
+                res = router.Result("retry", "sent, but not seen in the transcript yet")
+            else:
+                continue
+            self.awaiting.pop(key, None)
+            log.info("%s %s: %s (%s)", *key, res.status, res.reason)
+            self.record(*key, res)
+
+    def record(self, rid, ref, res):
+        """Save what happened to one message, then 📨 it if it landed, or post the note a failure calls for."""
+        note = store.update(rid, lambda r: self._after(r, ref, res))
+        rec = store.load(rid)
+        item = next(i for i in rec["outbox"] if i["ref"] == ref)
         if res.status == "delivered" and item.get("react_ts"):
             try:
                 slackapi.react(item["react_ts"], "incoming_envelope")
@@ -454,10 +477,14 @@ class Listener:
                     reach["earlier_ids"].append(reach["session_id"])
             reach.update(res.reach)
             r["reach"] = reach
+        if res.status == "sent":
+            item["typed_at"] = store.iso()
+            return None
         if res.status == "delivered":
             item["delivered_at"] = store.iso()
             store.event(r, "delivered", ref=ref)
             return None
+        item.pop("typed_at", None)
         if res.status in ("waiting", "inbox"):
             item.pop("sent_at", None)   # nothing was typed
         if res.status == "waiting":
@@ -517,6 +544,7 @@ class Listener:
             threading.Thread(target=self.loop, args=(5, self.deliver_due), daemon=True),
             threading.Thread(target=self.loop, args=(5, self.lists), daemon=True),   # answers an ask within seconds
             threading.Thread(target=self.delivery_worker, daemon=True),
+            threading.Thread(target=self.loop, args=(3, self.confirm_typed), daemon=True),
         ]
         for t in threads:
             t.start()
@@ -530,7 +558,8 @@ class Listener:
     def run_delivery(self):
         log.info("delivering answers to the sessions on %s; the records and Slack connection are on %s", self.me, config.hub())
         threads = [threading.Thread(target=self.loop, args=(FETCH_SECONDS, self.fetch), daemon=True),
-                   threading.Thread(target=self.delivery_worker, daemon=True)]
+                   threading.Thread(target=self.delivery_worker, daemon=True),
+                   threading.Thread(target=self.loop, args=(3, self.confirm_typed), daemon=True)]
         for t in threads:
             t.start()
         try:

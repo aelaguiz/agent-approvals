@@ -397,7 +397,7 @@ def test_the_service_never_asks_for_a_session_to_be_resumed(monkeypatch):
     notes = []
     monkeypatch.setattr(listener.slackapi, "note", lambda ts, text: notes.append(text))
     listener.Listener().deliver_one("AP-0001", rec["outbox"][0]["ref"])
-    assert asked == {"resume": False}
+    assert asked == {"resume": False, "confirm": False}
     assert store.load("AP-0001")["outbox"][0]["waiting_for_agent"] and len(notes) == 1
 
 

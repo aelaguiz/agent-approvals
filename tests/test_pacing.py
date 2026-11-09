@@ -147,3 +147,67 @@ def test_a_reply_on_a_card_whose_yes_is_waiting_sends_both_now():
     assert going() == []                             # the second yes waits for the agent
     store.update("AP-0002", lambda r: core.take_replies(r, [("5.0", "wait, don't send this")]))
     assert going() == [["AP-0002", second]]          # and then the reply, the moment it lands
+
+
+def replies_on_one_card(*words):
+    card("AP-0001", "sid-a", "1.1")
+    for n, w in enumerate(words):
+        store.update("AP-0001", lambda r, n=n, w=w: core.take_replies(r, [(f"{5 + n}.0", w)]))
+    return [i["ref"] for i in store.load("AP-0001")["outbox"]]
+
+
+def worker(monkeypatch, result):
+    typed = []
+    monkeypatch.setattr(listener.slackapi, "react", lambda ts, name: typed.append(("📨", ts)))
+    monkeypatch.setattr(listener.slackapi, "note", lambda ts, text: None)
+    monkeypatch.setattr(listener.router, "deliver", lambda reach, text, ref, **kw: typed.append(ref) or listener.router.Result(
+        result, reach={"session_id": "sid-a"}))
+    L = listener.Listener.__new__(listener.Listener)
+    L.in_flight, L.deliveries, L.awaiting = set(), __import__("queue").Queue(), {}
+    return L, typed
+
+
+def test_a_cards_next_reply_is_typed_right_behind_the_last_before_either_shows_up(monkeypatch):
+    """So the agent takes a yes and the "wait, don't send" after it in at the same step."""
+    first, second = replies_on_one_card("ship it", "wait, don't send")
+    L, typed = worker(monkeypatch, "sent")
+    L.deliver_one("AP-0001", first)
+    L.deliver_one(*L.deliveries.get_nowait())
+    assert typed == [first, second] and set(L.awaiting) == {("AP-0001", first), ("AP-0001", second)}
+    assert going() == []                    # neither is typed again while it waits to show up
+    assert store.load("AP-0001")["outbox"][0]["delivered_at"] is None
+
+
+def test_a_typed_message_is_delivered_once_it_shows_up_in_the_transcript(monkeypatch):
+    first, = replies_on_one_card("ship it")
+    L, typed = worker(monkeypatch, "sent")
+    L.deliver_one("AP-0001", first)
+    seen = set()
+    monkeypatch.setattr(listener.transcripts, "transcript", lambda runtime, sid: f"/t/{sid}")
+    monkeypatch.setattr(listener.transcripts, "contains", lambda path, ref: ref in seen)
+    L.confirm_typed()
+    assert store.load("AP-0001")["outbox"][0]["delivered_at"] is None and L.awaiting
+    seen.add(first)
+    L.confirm_typed()
+    item = store.load("AP-0001")["outbox"][0]
+    assert item["delivered_at"] and not L.awaiting and ("📨", "5.0") in typed
+
+
+def test_a_typed_message_that_never_shows_up_is_tried_again_later_and_the_next_waits(monkeypatch):
+    first, second = replies_on_one_card("ship it", "wait, don't send")
+    L, typed = worker(monkeypatch, "sent")
+    L.deliver_one("AP-0001", first)
+    L.deliveries.get_nowait()
+    monkeypatch.setattr(listener.transcripts, "contains", lambda path, ref: False)
+    L.awaiting[("AP-0001", first)] = ("claude", "sid-a", listener.time.monotonic() - core.TYPED_SECONDS)
+    L.confirm_typed()
+    item = store.load("AP-0001")["outbox"][0]
+    assert item["attempts"] == 1 and not item.get("typed_at") and not L.awaiting
+    assert core.next_item(store.load("AP-0001"))["ref"] == first and going() == []   # retried in 5 minutes; the next waits behind it
+
+
+def test_when_a_message_cant_be_typed_the_next_one_on_the_card_waits(monkeypatch):
+    first, second = replies_on_one_card("ship it", "wait, don't send")
+    L, typed = worker(monkeypatch, "retry")
+    L.deliver_one("AP-0001", first)
+    assert typed == [first] and L.deliveries.empty() and going() == []
