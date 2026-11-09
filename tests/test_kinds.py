@@ -73,8 +73,8 @@ def test_every_kind_validates_and_renders_within_slacks_limits(kind):
 def test_several_pictures_are_a_carousel_and_one_is_full_width():
     blocks = cards.card_blocks(rec_for(KINDS["before_after"]), 1, "open")
     slides = next(b for b in blocks if b["type"] == "carousel")["elements"]
-    assert [s["title"]["text"] for s in slides] == ["Fix 1 of 3 · TODAY · real screen, iPhone, 2.1.65", "Fix 1 of 3 · AFTER · real screen, staging"]
-    assert slides[0]["hero_image"]["slack_file"]["id"] == "F0" and slides[1]["body"]["text"].startswith("New: this step")
+    assert [s["body"]["text"] for s in slides] == ["*Fix 1 of 3 · TODAY · real screen, iPhone, 2.1.65*", "*Fix 1 of 3 · AFTER · real screen, staging*"]
+    assert slides[0]["hero_image"]["slack_file"]["id"] == "F0" and slides[1]["subtext"]["text"].startswith("New: this step")
     one = cards.card_blocks(rec_for(KINDS["message"]), 1, "open")
     assert not [b for b in one if b["type"] == "carousel"]
     assert [b["title"]["text"] for b in one if b["type"] == "image"] == ["The email, as designed · real render at iPhone width"]

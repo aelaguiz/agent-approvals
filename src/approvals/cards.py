@@ -556,10 +556,12 @@ def _gallery(rec, n, stacked=False):
     slides = []
     for i, g in shown:
         key = f"gallery:{i}"
+        # A card's title is cut to one line; its body and subtext wrap, so the label (which says real or mock, which
+        # phone and build) goes in the body.
         c = {"type": "card", "block_id": f"g{i}", "hero_image": picture(files.get(key + ":card") or files[key], g["label"], hero=True),
-             "title": {"type": "mrkdwn", "text": esc(g["label"])}}
+             "body": {"type": "mrkdwn", "text": f"*{esc(g['label'])}*"[:NOTE_MAX]}}
         if g.get("note"):
-            c["body"] = {"type": "mrkdwn", "text": esc(g["note"])}
+            c["subtext"] = {"type": "mrkdwn", "text": esc(g["note"])[:NOTE_MAX]}
         c["actions"] = [button("Full size", f"{rec['id']}|{n}|pic:{key}")]
         if videos.get(key):
             c["actions"].append(button("▶ Play it", url=videos[key], action_id=f"play{i}"))
@@ -573,13 +575,13 @@ def _option_cards(rec, n, mode):
     card, files = v["card"], v.get("files") or {}
     slides = []
     for i, o in enumerate(card["options"]):
-        c = {"type": "card", "block_id": f"o{i}", "title": {"type": "mrkdwn", "text": f"*{esc(o['name'])}*" + (f" · {esc(o['title'])}" if o.get("title") else "")}}
+        c = {"type": "card", "block_id": f"o{i}", "body": {"type": "mrkdwn", "text": (f"*{esc(o['name'])}*" + (f" · {esc(o['title'])}" if o.get("title") else ""))[:NOTE_MAX]}}
         if files.get(f"option:{i}"):
             c["hero_image"] = picture(files.get(f"option:{i}:card") or files[f"option:{i}"], o.get("title") or o["name"], hero=True)
         if o["name"] == card.get("pick"):
             c["subtitle"] = {"type": "mrkdwn", "text": "🔹 *Our pick*"}
         if o.get("note"):
-            c["body"] = {"type": "mrkdwn", "text": esc(o["note"])[:NOTE_MAX]}
+            c["subtext"] = {"type": "mrkdwn", "text": esc(o["note"])[:NOTE_MAX]}
         c["actions"] = [button(option_button(o), f"{rec['id']}|{n}|pick:{i}", "primary" if o["name"] == card.get("pick") else None)] if mode == "open" else []
         if files.get(f"option:{i}"):
             c["actions"].append(button("Full size", f"{rec['id']}|{n}|pic:option:{i}"))
@@ -778,7 +780,7 @@ def _timeline_blocks(rec, card):
         lines.append(f"✅ *Done, {when(datetime.fromisoformat(rec['done']['at']))}:* {esc(rec['done']['text'])}")
     if lines:
         blocks.append(md("\n".join(lines)))
-    if card.get("from") and verdict == "approved":
+    if card.get("from") and not card.get("items") and verdict == "approved":   # one message sent as him: their reply
         ans = their_answer(rec)
         blocks.append(md("*Their answer*\n" + (quoted(ans["text"]) if ans else "_No reply yet. It shows here when they answer._")))
     return blocks
@@ -845,7 +847,7 @@ def items_view(rec, n, ticked=None):
         chosen = [o for o in opts if int(o["value"]) in ticked]
         if chosen:
             el["initial_options"] = chosen
-        blocks.append({"type": "input", "block_id": f"items{k // 10}", "optional": True, "dispatch_action": True,
+        blocks.append({"type": "input", "block_id": f"items{k // 10}", "optional": len(items) > 10, "dispatch_action": True,
                        "label": plain("Send these" if k == 0 else "And these", 2000), "element": el})
     label = (card.get("pick_label") or "Approve {n}").replace("{n}", str(len(ticked)))
     return _modal("Pick which", blocks, f"{rec['id']}|{n}|items", label)

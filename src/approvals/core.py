@@ -71,7 +71,8 @@ def msg_decision(rec, verdict, where, choice=None, items=None, edited=None):
         names = [cards.item_name(it) for it in c["items"]]
         keep = "; ".join(f"{i} {names[i - 1]}" for i in items)
         left = [f"{i} {x}" for i, x in enumerate(names, 1) if i not in items]
-        what = (f'approved all {len(names)} items' if not left else f'approved {len(items)} of the {len(names)} items, picked in Slack')
+        what = f'approved all {len(names)} items' if not left else f'approved {len(items)} of the {len(names)} items'
+        where = "Pick which in Slack" if where.startswith("picked") else where
         return (f'{head(rec)} {who()} {what} ({where}, {t}). Do these: {keep}.' + (f' Leave out: {"; ".join(left)}.' if left else '')
                 + f' {ack_step(rec, "what you are about to do")} Then do exactly what the card describes for those items only, and {done_step(rec)}')
     if verdict == "approved" and edited is not None:
