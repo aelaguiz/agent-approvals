@@ -435,3 +435,9 @@ def test_a_next_step_posted_before_done_drops_away():
     core.add_status(rec, "Early read, day 3: no harm to trials")
     text = txt(cards.card_blocks(rec, 1, "final"))
     assert "✅ Early read, day 3" in text and text.index("Done") < text.index("Early read")   # in the order it happened
+
+
+def test_a_row_numbered_by_the_agent_isnt_numbered_twice():
+    card = dict(KINDS["set"], parts=[{"title": "1. Under the Plus badge, one line"}, {"title": "2 · The streak moves"}])
+    text = txt(cards.card_blocks(rec_for(card), 1, "open"))
+    assert "*1 · Under the Plus badge" in text and "*2 · The streak moves" in text

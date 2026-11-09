@@ -2,7 +2,7 @@
 
 ## Unit tests
 
-`make test` runs 140 tests, with no network. They cover:
+`make test` runs 141 tests, with no network. They cover:
 - every card type rendering, required fields, escaping;
 - 20 processes submitting at once and getting distinct numbers;
 - the first button press winning, and old versions refusing;
@@ -126,7 +126,7 @@ A test hub must not connect to Slack: a second connection with the workspace's a
 
 ### November 8, 2026: the kinds of card
 
-Built for issue #7. Unit tests: 140 of 140. Then the live run above, on the installed package on the hub (the Studio) and on the M5, where three Claude agents ran in their own Herdr session. Every answer was a real press or pop-up in Slack by the approver's account on a TEST card, except one condition given as a `[test reply]`.
+Built for issue #7. Unit tests: 141 of 141. Then the live run above, on the installed package on the hub (the Studio) and on the M5, where three Claude agents ran in their own Herdr session. Every answer was a real press or pop-up in Slack by the approver's account on a TEST card, except one condition given as a `[test reply]`.
 
 **What real Slack showed before the agents ran** (TEST-tagged render checks with no record behind them, deleted after):
 - A carousel card shows a picture only once its file is shared where the card is; a privately uploaded file is a broken image there, though it works in an image block. A new card now posts its pictures in its thread and is redrawn with them.
@@ -147,7 +147,7 @@ Built for issue #7. Unit tests: 140 of 140. Then the live run above, on the inst
 | Status lines and the reply box | Pass. Agents posted what happened and what comes next, per row where there were rows; the cards redrew in place. |
 | Each card against its mock | Pass after the fixes below. Screenshots of every kind beside its mock are listed in issue #7. |
 
-**Found and fixed during the run:** picture labels cut to one line; "(optional)" on a one-group checklist; a batch's answer saying "picked in Slack" twice; the reply box showing on a batch; a next step posted in the same second as `done` showing above it; a title past Slack's 150-character headline being cut instead of refused. Agents also wrote paragraph-long status lines, so the skill now says each is one short sentence.
+**Found and fixed during the run:** picture labels cut to one line; "(optional)" on a one-group checklist; a batch's answer saying "picked in Slack" twice; the reply box showing on a batch; a next step posted in the same second as `done` showing above it; a title past Slack's 150-character headline being cut instead of refused; an answered card's timeline out of order when lines came after done; rows numbered twice when the agent numbered its titles. Agents also wrote paragraph-long status lines, so the skill now says each is one short sentence.
 
 **Seen, not changed:** `make verify_install` run over ssh straight after a restart reported the hub's service not running twice while it was in fact up; it passed once the restart settled. A `[test reply]` on a quiet card waits for the hub's next read of that thread, about 15 minutes with this many cards open (issue #3).
 

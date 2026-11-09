@@ -4,6 +4,7 @@ A card's `type` says what the action is (its emoji, button words and deadline). 
 answered one way: a yes or no, a pick among `options`, a yes per row of `parts`, or a yes to a list of `items`.
 Pictures, sections, links and the rest can go on any card.
 """
+import re
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -622,7 +623,8 @@ def _rows(rec, n, mode):
         pid = part_id(p, j)
         a = answers.get(pid)
         new = n > 1 and prev_by_id.get(pid) != p and mode != "replaced"
-        text = f"{'🆕 ' if new else ''}*{j} · {esc(p['title'])}*" + (f"\n{esc(p['note'])}" if p.get("note") else "")
+        title = re.sub(rf"^{j}\s*[.·:)]\s*", "", p["title"])   # the card numbers its rows; drop a number the agent wrote too
+        text = f"{'🆕 ' if new else ''}*{j} · {esc(title)}*" + (f"\n{esc(p['note'])}" if p.get("note") else "")
         sec = md(text)
         if files.get(f"part:{j}"):
             sec["accessory"] = picture(files[f"part:{j}"], p["title"])
