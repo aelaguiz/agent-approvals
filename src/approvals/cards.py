@@ -777,9 +777,14 @@ def _timeline_blocks(rec, card):
     elif verdict == "withdrawn" and rec.get("withdrawn"):
         w = rec["withdrawn"]
         lines.append(f"↩️ Withdrawn by {esc(rec['agent'])}, {when(datetime.fromisoformat(w['at']))}: {esc(w['text'])}")
-    lines += status_lines(rec)
+    # What happened, in the order it happened (done included), then what comes next.
+    happened = [(e["at"], 1, f"✅ {esc(e['text'])}") for e in _scope(rec, None) if e["kind"] == "done"]
     if rec.get("done"):
-        lines.append(f"✅ *Done, {when(datetime.fromisoformat(rec['done']['at']))}:* {esc(rec['done']['text'])}")
+        happened.append((rec["done"]["at"], 0, f"✅ *Done, {when(datetime.fromisoformat(rec['done']['at']))}:* {esc(rec['done']['text'])}"))
+    lines += [text for *_, text in sorted(happened, key=lambda x: x[:2])]
+    nxt = pending_lines(rec).get("next")
+    if nxt:
+        lines.append(f"⏳ {esc(nxt['text'])}")
     if lines:
         blocks.append(md("\n".join(lines)))
     if card.get("from") and not card.get("items") and verdict == "approved":   # one message sent as him: their reply

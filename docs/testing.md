@@ -2,7 +2,7 @@
 
 ## Unit tests
 
-`make test` runs 102 tests, with no network. They cover:
+`make test` runs 140 tests, with no network. They cover:
 - every card type rendering, required fields, escaping;
 - 20 processes submitting at once and getting distinct numbers;
 - the first button press winning, and old versions refusing;
@@ -14,6 +14,7 @@
 - evidence: one block of text is one post, and files named in evidence are uploaded;
 - the failure note posting once;
 - the morning list: posted once a day from 8 am and again the next day; only cards waiting on the approver, without TEST cards, grouped by closing day; cards closed with no answer since the last list; each way a card stops waiting (approved, declined, replied to, withdrawn, closed) struck through with what happened, and a new version bringing it back; an edit only when something changed; a failed post tried again; one line and no mention when nothing waits; a list asked for in the channel, which mentions no one, includes cards that came after the morning list, shrinks the list it replaces to a link and is the one kept current from then on; an ask before 8 am still getting the morning list; only the approver's own posts outside a card's thread counting as asks (thread replies, other people and joins don't);
+- the kinds of card: each kind validates and renders within Slack's limits in every state (open, answered, replaced, in a pop-up); old records without the new fields still render with their old buttons; each refusal (no `part_of`, a missing picture, mixed answer shapes, a pick that names no option, two editable quotes, a link that isn't https, a title past Slack's headline, a card over 50 blocks); each row of a set answered on its own with one message naming it and where the others stand; Approve all skipping rows that need their own yes; a pick, a batch picked in a pop-up and edited words each reaching the agent exactly; a change on a row, a revision keeping unchanged rows' answers and asking again about the changed one; only open rows closing at the deadline; the offer to stop asking; status lines, a condition waiting on the approver (and on the morning list), a next step dropping away once a later line or done comes; the frame line set in place on an old card with nothing reposted; presses and pop-ups through the listener (saved before the ack, refused on a replaced version or from someone else, the Pick which count kept current); a new card's pictures posted in its thread and the card redrawn with them;
 - more than one Slack workspace: each numbers and lists only its own requests, a request number finds its workspace from any folder, an agent's folder picks the workspace for new requests (a folder inside a listed one counts; one whose name only starts the same doesn't), and with one workspace every folder uses it.
 
 ## Live end-to-end test
@@ -55,6 +56,25 @@ A card that would make the approver ask "what is the question?" fails.
 - 📨 reactions show delivery.
 
 **Clean-up:** close the test workspaces and sessions, run `approvals purge-tests`, and remove `test_approver` from the config.
+
+### The kinds of card
+
+The same harness, with one brief per kind of ask (`tests/live/scenarios/k*.md`), each written as a teammate would hand the work over, naming the initiative but never the skill, the command or the card's shape. A brief that mentions pictures needs them in the sandbox's `pictures/` folder before launch (`SANDBOX_DIR`); they're the company's screenshots, so they aren't in this public repo. Three agents can take the ten briefs between them, one after another, as one agent gets several tasks in a day. The approver's answers are real presses and pop-ups in Slack on the TEST cards, by the approver's own account, plus `[test reply]` posts for words in the thread.
+
+| # | Brief | The approver's side | Passes when |
+| --- | --- | --- | --- |
+| K1 | Three lesson fixes, today beside after | Approve one fix, Change on another (pop-up), approve its next version | Pictures today beside after, labelled real or mock, change outlined; each answer reaches the agent naming its fix; the next version keeps the first fix's answer |
+| K2 | Four related changes toward one goal | As K1, across rows | A row each, Approve all while two or more are open |
+| K3 | A training run's next spend, with reads | Approve the read, pick the sender's option on the run | The clock and what happens with no answer on arrival; each row's buttons named for what happens; the pick reaches the agent by name |
+| K4 | Ten emails to creators | Pick which, untick one; then the offer to stop asking | One card; the pop-up counts what it sends; the agent sends only the ticked ones; the offer's answer reaches it |
+| K5 | A new ad | Run it | The first frame full height with a play mark and a link that plays it; what it costs to read and what counts as working, above the buttons |
+| K6 | A push and an email to users | Approve | The push word for word, the email as designed at phone width, who, when and where a tap goes |
+| K7 | A release, with a row per store | Approve two stores, then the iPhone row again once Apple approves | Changes grouped by initiative and tagged for who gets them; no Approve all; the version asking again keeps the other rows |
+| K8 | A message sent as the approver | Edit the words, send | The chat as it will look; the agent sends his words exactly; their reply lands on the card |
+| K9 | A choice between two designs | Pick A, then a thread reply with a condition | Options side by side with the pick marked; the condition shows as waiting on the approver |
+| K10 | A test to build and read | Build and test, then the first reads | The card links its deck; each read lands on the card after the yes |
+
+Each card is screenshotted in desktop Slack and compared with its mock in psbrain's `projects/asks-in-pieces/cards/mocks/`.
 
 ## Routing and interference
 
@@ -103,6 +123,33 @@ A test hub must not connect to Slack: a second connection with the workspace's a
 **Clean-up:** `approvals purge-tests --only <ids>` with the test folder's settings, then stop both services, close the agent and any Herdr session the test started, and delete the scratch folders.
 
 ## Results
+
+### November 8, 2026: the kinds of card
+
+Built for issue #7. Unit tests: 140 of 140. Then the live run above, on the installed package on the hub (the Studio) and on the M5, where three Claude agents ran in their own Herdr session. Every answer was a real press or pop-up in Slack by the approver's account on a TEST card, except one condition given as a `[test reply]`.
+
+**What real Slack showed before the agents ran** (TEST-tagged render checks with no record behind them, deleted after):
+- A carousel card shows a picture only once its file is shared where the card is; a privately uploaded file is a broken image there, though it works in an image block. A new card now posts its pictures in its thread and is redrawn with them.
+- A carousel card crops its picture to a fixed landscape frame, which cut phone screens to their middle; tapping it opens nothing. Pictures are now fitted to that frame (zoomed onto a marked change, or whole and letterboxed), with a Full size button.
+- A card's title is cut to one line, so picture labels moved to its body. Tapping a row's thumbnail is unproven, so rows with a picture got a See it button.
+
+**The agents** (never told the skill, the command or a shape). Each picked a shape that fits from the skill alone: the lesson fixes as a before-and-after carousel with a row per fix, zoomed onto the change on both sides; the ten emails as a batch with Pick which and Edit the words; the spend call with its reads in a section, a row per decision and the pick named on its button; the release with tagged changes and a row per store; the reply as the approver with Edit the words; the two designs side by side with the pick marked. Each posted progress on its card after the yes, row by row where it had rows, and one put a creator's reply in the reply box unprompted. Three briefs matched real open or approved cards (the paywall test, the training run, the ad) and the agents refused to post duplicates, as the skill says; those were rerun with briefs nobody had asked yet.
+
+| Check | Result |
+| --- | --- |
+| Row answers by button | Pass. Each press was saved on the hub before the ack and reached the agent as its own message naming the row and where the others stood ("This answer is for part 1 only; part 2 is waiting"); every one was acknowledged in the thread. |
+| Change on a row (pop-up) | Pass. His words reached the agent as a change to that row and were posted in the thread; the agent's next version changed only that row, kept the other's answer, and brought the changed row back marked new. |
+| Pick which (pop-up) | Pass. The button counted the ticked boxes as they changed ("Send 8"); the agent was told exactly which to send and which to leave out, and sent only those. |
+| Edit the words (pop-up) | Pass. His edited words, line breaks and all, reached the agent as a JSON string, and it used them exactly. |
+| A pick, and a row's pick | Pass. Delivered by name; the answered card's title says what he picked. |
+| The release's rows | Pass. No Approve all over rows that need their own yes; the version asking again for the iPhone release kept the server's answer and Google Play's open row. |
+| The offer to stop asking | Pass. Shown only after the yes; his answer reached the agent, which acknowledged it. |
+| Status lines and the reply box | Pass. Agents posted what happened and what comes next, per row where there were rows; the cards redrew in place. |
+| Each card against its mock | Pass after the fixes below. Screenshots of every kind beside its mock are listed in issue #7. |
+
+**Found and fixed during the run:** picture labels cut to one line; "(optional)" on a one-group checklist; a batch's answer saying "picked in Slack" twice; the reply box showing on a batch; a next step posted in the same second as `done` showing above it; a title past Slack's 150-character headline being cut instead of refused. Agents also wrote paragraph-long status lines, so the skill now says each is one short sentence.
+
+**Seen, not changed:** `make verify_install` run over ssh straight after a restart reported the hub's service not running twice while it was in fact up; it passed once the restart settled. A `[test reply]` on a quiet card waits for the hub's next read of that thread, about 15 minutes with this many cards open (issue #3).
 
 ### November 8, 2026: answers wait for a stopped agent
 

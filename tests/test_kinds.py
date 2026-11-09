@@ -433,4 +433,5 @@ def test_a_next_step_posted_before_done_drops_away():
     text = txt(cards.card_blocks(rec, 1, "final"))
     assert "First read at about day 3" not in text and "Done" in text
     core.add_status(rec, "Early read, day 3: no harm to trials")
-    assert "✅ Early read, day 3" in txt(cards.card_blocks(rec, 1, "final"))
+    text = txt(cards.card_blocks(rec, 1, "final"))
+    assert "✅ Early read, day 3" in text and text.index("Done") < text.index("Early read")   # in the order it happened
