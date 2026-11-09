@@ -5,7 +5,7 @@ from approvals import core, listener, store
 
 
 def rec_with(*kinds):
-    rec = {"id": "AP-0001", "title": "t", "agent": "Pricing", "status": "pending", "versions": [{"n": 1}],
+    rec = {"id": "AP-0001", "title": "t", "agent": "Pricing", "status": "pending", "versions": [{"n": 1, "card": {"type": "money", "title": "t"}}],
            "events": [], "outbox": [], "open_question": None, "thread_ts": "1.1",
            "deadline": store.iso(store.now() + timedelta(hours=5))}
     for k in kinds:

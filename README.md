@@ -8,7 +8,8 @@ agent ──approvals submit──▶ card in #approvals ──▶ you: ✅ / �
   └──── "[Approvals] AP-0013 ... approved it" ◀── listener ┘   (waits if the session isn't running)
 ```
 
-- **One card per request, formatted by type.** There are 12 types: creative, public reply, budget, purchase, money, player message, price, experiment, store or web page, content, email in your name, and account action. Each card puts the real thing on it: the ad, the exact reply, a table of today beside proposed, the email word for word. It also says exactly what a yes covers.
+- **One card per request, shaped to how you'll judge it.** Its type (creative, public reply, budget, purchase, money, player message, price, experiment, store or web page, content, email in your name, account action) says what the action is. Its shape says how you answer: a yes or no; today's screen beside the after, swipeable, with the change outlined; a set of related changes with a yes, a change or a no on each row and Approve all; a pick between options shown side by side; a batch with Pick which; words in your name you can edit before they go. Every card says what it's part of, what a yes covers, and what happens with no answer.
+- **The card keeps going after the yes.** The agent posts each step on it (built, waiting at Apple, live, the first read) until the thing is really out, and a condition only you can clear shows as waiting on you, on the card and in the morning list. These redraw the card in place, without a notification.
 - **One thread per request.** Your replies are feedback. The agent's questions and its next versions arrive in the same thread, and the first post always shows the newest version with working buttons.
 - **Answers reach the exact session that asked.**
   - A running session gets the answer typed into its terminal pane.
@@ -27,7 +28,7 @@ agent ──approvals submit──▶ card in #approvals ──▶ you: ✅ / �
 - A Slack app, with:
   - Socket Mode on, and an app-level token with `connections:write`;
   - Interactivity on, which Socket Mode carries;
-  - bot scopes `chat:write`, `channels:history` (`groups:history` for a private channel), `channels:read`, `reactions:write`, `files:write` and `users:read`;
+  - bot scopes `chat:write`, `channels:history` (`groups:history` for a private channel), `channels:read`, `reactions:write`, `files:write`, `files:read` and `users:read`;
   - the bot invited to the approvals channel.
 - To deliver into agent sessions: [Herdr](https://herdr.dev), with agents running in Herdr panes. Without it, answers wait in each agent's `approvals inbox`.
 
@@ -92,6 +93,8 @@ approvals ask AP-0001 "Mexico at MX$899 or MX$999?"
 approvals revise AP-0001 card-v2.json          # next version, in the same thread
 approvals ack AP-0001 "Got it: setting both prices now"   # the agent's own acknowledgement, in the thread
 approvals withdraw AP-0001 "Prices changed; a new card is coming"   # take down a card the agent no longer stands behind
+approvals status AP-0001 "Brazil live; Mexico waiting for Google's review" --next   # keep the card true after the yes
+approvals status AP-0001 --part-of "Prices that fit each country"                    # set what a posted card belongs to, in place
 approvals done AP-0001 "Set both prices; read them back from the store"
 approvals inbox --agent "Pricing"              # answers that came while the agent wasn't running, or couldn't be typed in
 approvals record AP-0001 --approved --words "yes do it" --where "phone call"
@@ -99,7 +102,7 @@ approvals list --open
 approvals doctor
 ```
 
-A card is JSON. [skills/approvals/references/cards.md](skills/approvals/references/cards.md) describes every type, with an example of each.
+A card is JSON. [skills/approvals/references/cards.md](skills/approvals/references/cards.md) describes every field, type and kind, with an example of each.
 
 ## How it works
 

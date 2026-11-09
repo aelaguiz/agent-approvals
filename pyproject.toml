@@ -3,7 +3,10 @@ name = "approvals"
 version = "0.1.0"
 description = "Agent approval requests as Slack cards in #approvals, with answers routed back to the agent session."
 requires-python = ">=3.12"
-dependencies = ["slack_sdk>=3.33"]
+dependencies = [
+    "pillow>=10",
+    "slack_sdk>=3.33",
+]
 
 [project.scripts]
 approvals = "approvals.cli:main"

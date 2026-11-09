@@ -41,6 +41,11 @@ def _save_state(st):
     os.replace(tmp, _path())
 
 
+def waiting(rec):
+    """Waiting on the approver: a card or question he hasn't answered, or a yes with a condition only he can clear."""
+    return rec["status"] in WAITING or bool(cards.on_you(rec))
+
+
 def _ours(rec):
     """Real cards on the real list; a test run's list covers only TEST cards."""
     return bool(rec.get("thread_ts")) and bool(rec.get("test")) == config.is_test_run()
@@ -97,8 +102,10 @@ def _line(rec, day, detail=None):
     """Two blocks: the card, linked, then one gray line. A card no longer waiting is struck through."""
     emoji = cards.TYPES[rec["versions"][-1]["card"]["type"]]["emoji"]
     link = f"<{slackapi.message_url(rec['thread_ts'])}|{rec['id']}>"
-    if detail is None and rec["status"] not in WAITING:
+    if detail is None and not waiting(rec):
         return [cards.md(f"{emoji} ~{link}  {_title(rec)}~"), cards.ctx(_outcome(rec, day))]
+    if detail is None and rec["status"] not in WAITING:
+        detail = f"{cards.esc(rec['agent'])} · ⏳ waiting on you: {cards.esc(cards.on_you(rec)['text'])}"
     if detail is None:
         asked = "❓ asked you a question · " if rec["status"] == "question" else ""
         detail = (f"{cards.esc(rec['agent'])} · {asked}since {_at(_waiting_since(rec), day)}"
@@ -112,7 +119,7 @@ def render(st, records):
     by_id = {r["id"]: r for r in records}
     listed = [by_id[i] for i in st["listed"] if i in by_id]
     closed = [by_id[i] for i in st["closed"] if i in by_id]
-    still = sum(1 for r in listed if r["status"] in WAITING)
+    still = sum(1 for r in listed if waiting(r))
     n = len(listed)
     if n and still == n:
         headline = f"{n} cards are waiting on you" if n > 1 else "1 card is waiting on you"
@@ -173,7 +180,7 @@ def tick(now=None, asked=False):
         since = datetime.fromisoformat(st["posted_at"]) if st else now - timedelta(days=1)
         new = {
             "date": local.date().isoformat(), "asked": not morning,
-            "listed": [r["id"] for r in records if r["status"] in WAITING],
+            "listed": [r["id"] for r in records if waiting(r)],
             "closed": [r["id"] for r in records if r["status"] == "expired" and (_last(r, "expired") or now) >= since],
             "posted_at": store.iso(now), "updated_at": None,
         }

@@ -1,5 +1,8 @@
 """One made-up sample card per type."""
-BASE = {"approves": "this exact thing.", "does_not_approve": "anything else."}
+from pathlib import Path
+
+SCREEN = str(Path(__file__).parent / "screen.png")   # a small picture that exists
+BASE = {"approves": "this exact thing.", "does_not_approve": "anything else.", "part_of": None}
 
 
 def s(**kw):
@@ -7,7 +10,7 @@ def s(**kw):
 
 
 SAMPLES = {
-    "creative": s(type="creative", title="Run this video ad in the spring creative test", image="/tmp/example-ad.png",
+    "creative": s(type="creative", title="Run this video ad in the spring creative test", image=SCREEN,
                   facts=[["Ad", "Learn the game in five minutes a day"], ["Money", "inside the test's $50 a day"]]),
     "reply": s(type="reply", title="Post this reply on r/boardgames as our account",
                quotes=[{"label": "They asked", "text": "What book should I read?", "link": "https://reddit.com/r/x", "link_text": "Best books?"},

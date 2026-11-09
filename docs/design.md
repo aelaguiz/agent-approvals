@@ -42,6 +42,29 @@ When the approver decides:
 - the card shows ✅ or ❌ with their name and the time, and the buttons go away;
 - the agent adds "Done" and what it checked when it finishes.
 
+## The card's shape, and its answers
+
+A card's `type` says what the action is; its fields say how the approver judges it and answers it. The renderer is `cards.py`; what an answer does to the record is `core.py`. One card is answered one way:
+
+- **A yes or no**, as before, with buttons named for what happens. `change_label` adds a Change button; quotes marked `edit` add Edit the words.
+- **A pick** among `options`. With pictures, the options are carousel cards side by side, each with its own Pick button and the sender's pick marked; without, they're buttons. The decision records the `choice`.
+- **A row each** (`parts`): each row has its own buttons and its own answer, kept in `answers` by the row's id (its `id`, else its position). The card is waiting on the approver while any row is open, back with the agent while a row waits for a new version (Change on that row), and otherwise approved if any row was approved or chosen, declined if none was. Approve all answers every open plain row except those marked `own_yes`, in one message. At the deadline only the open rows close.
+- **A batch** (`items`): a yes covers all; Pick which opens a checklist, and the decision records which `items` were approved.
+
+Everything else (the frame line `part_of`, `if_no_answer`, `gallery`, `sections`, `links`, `from`) can go on any card.
+
+**Each answer reaches the agent as its own message, naming exactly what it answers:** a row's answer names the row by number and title and says where the other rows stand ("This answer is for part 2 only; part 1 is approved, parts 3 and 4 are waiting"); a pick names the option; a batch lists what to do and what to leave out; edited words are quoted as a JSON string, so the line breaks survive the one-line message.
+
+**Buttons.** Each button's value is `<id>|<version>|<what>`, as before: `approve` and `decline` mean what they always did, so cards already in the channel keep working. The new ones are `pick:<i>`, `all`, `p<j>:approve|decline|pick:<i>`, `offer:stop|keep`, and the ones that open a pop-up: `change`, `p<j>:change`, `edit`, `items`, `read:<quote>`, `pic:<picture>` and `see`.
+
+**Pop-ups.** Slack allows 3 seconds from a press to open a pop-up, so the hub opens it right after acknowledging the press, after checking the card hasn't moved on (a newer version, an answered row). A submission is checked against the record again, since the version can be replaced while the box is open, and is refused inside the box when it has; only the approver's submissions count. A change from a pop-up is posted in the thread too, so the thread keeps the whole record. Only the approver can open the ones that decide; anyone can open Full size, See it, Read and See the card.
+
+**Pictures.** Slack shows a picture inside a carousel card only once the file is shared where the card is; a privately uploaded file shows as a broken image there, though it works in an image block. So a new card is posted, its pictures are posted in its thread in one message (full size, which is also where they open), and the card is redrawn with them. Slack also crops a carousel card's picture to a fixed landscape frame, which cuts a phone screenshot down to its middle, so each carousel picture is first fitted to that frame (`pictures.card_frame`): zoomed onto what changed and outlined when it has a `mark`, otherwise whole and letterboxed. Each slide's Full size button opens the picture whole.
+
+**Revisions.** A new version keeps the answer of each row the agent left exactly as it was, and asks again about every row it changed, plus rows that closed with no answer. The changed row is marked new, and the line in the channel carries the version's `changes`.
+
+**Keeping a posted card true.** `approvals status` adds a line to a card (what happened, what comes next, a condition waiting on the approver, the other side's reply to a message sent as him), sets the answered card's headline, or sets the frame line. Each redraws the card in place, so it notifies no one and leaves answers and buttons as they were. A condition waiting on the approver is also posted in the thread and keeps the card on the morning list until the agent's next line. An answered card collapses to its timeline, with a button that opens the card as it was asked.
+
 ## Who counts
 
 - **Buttons:** only presses by the configured approver count.

@@ -7,7 +7,7 @@ import sys
 from datetime import timedelta
 from pathlib import Path
 
-from . import cards, config, core, reach, slackapi, store, transcripts
+from . import cards, config, core, pictures, reach, slackapi, store, transcripts
 
 
 def _load_card(path):
@@ -21,21 +21,63 @@ def _die(msg):
 
 
 def _prepare_media(card, version):
-    """Upload the image privately and publish any video; store the handles on the version."""
+    """Upload the pictures privately and publish any videos; store the handles on the version. A video's first
+    frame gets a play mark, and a picture with a `mark` gets an outline round what changed."""
     if card.get("image"):
-        version["image_file_id"] = slackapi.upload_private_image(card["image"], card["title"])
+        path = pictures.with_play_mark(card["image"]) if card.get("video") else card["image"]
+        version["image_file_id"] = slackapi.upload_private_image(path, card["title"])
     if card.get("video"):
         version["video_url"] = slackapi.share_video(card["video"], card["title"], card.get("video_note") or "A video waiting for approval.")
+    videos = {}
+    for key, path in cards.gallery_videos(card):
+        url = slackapi.share_video(path, card["title"], "A clip waiting for approval.")
+        if url:
+            videos[key] = url
+    if videos:
+        version["videos"] = videos
+
+
+def _share_pictures(rid, n):
+    """The card's pictures go in its thread, one post, full size; Slack then shows them in the card too, which is
+    redrawn with them. A carousel picture is fitted to the card's landscape frame (zoomed onto what changed when
+    it's marked, and then also posted whole, outlined)."""
+    rec = store.load(rid)
+    card = rec["versions"][n - 1]["card"]
+    todo = []
+    for key, path, mark in cards.pictures(card):
+        if cards.in_carousel(card, key):
+            todo.append((key + ":card", pictures.card_frame(path, mark)))
+            if mark:
+                todo.append((key, pictures.outlined(path, mark)))
+        else:
+            todo.append((key, pictures.outlined(path, mark) if mark else path))
+    if not todo:
+        return
+    what = "The pictures on this card" if n == 1 else f"The pictures on {cards.version_label(n)}"
+    refs = slackapi.upload_pictures_to_thread([(path, card["title"]) for _, path in todo], rec["thread_ts"], f"🖼 {what}, full size.")
+    files = {key: ref for (key, _), ref in zip(todo, refs)}
+    for key in [k[:-5] for k in files if k.endswith(":card")]:
+        files.setdefault(key, files[key + ":card"])   # whole already: the frame is the full picture
+    store.update(rid, lambda r: r["versions"][n - 1].__setitem__("files", files))
 
 
 def _video_in_thread(rid, n):
-    """No share command configured: put the video in the thread, where Slack plays it, and link the card to it."""
+    """No share command configured: put the videos in the thread, where Slack plays them, and link the card to them."""
     rec = store.load(rid)
     v = rec["versions"][n - 1]
-    if not v["card"].get("video") or v.get("video_url"):
+    card = v["card"]
+    todo = [("video", card["video"])] if card.get("video") and not v.get("video_url") else []
+    todo += [(k, path) for k, path in cards.gallery_videos(card) if not (v.get("videos") or {}).get(k)]
+    if not todo:
         return
-    link = slackapi.upload_to_thread(v["card"]["video"], rec["thread_ts"], v["card"]["title"], "The video, to play here.")
-    store.update(rid, lambda r: r["versions"][n - 1].__setitem__("video_url", link))
+    links = {k: slackapi.upload_to_thread(path, rec["thread_ts"], card["title"], "The video, to play here.") for k, path in todo}
+
+    def put(r):
+        ver = r["versions"][n - 1]
+        if "video" in links:
+            ver["video_url"] = links.pop("video")
+        ver.setdefault("videos", {}).update(links)
+    store.update(rid, put)
     core.refresh_and_clear(rid)
 
 
@@ -93,6 +135,9 @@ def cmd_submit(a):
     version["ts"] = ts
     store.event(rec, "submitted")
     store.save(rec)
+    if cards.pictures(card):
+        _share_pictures(rec["id"], 1)
+        core.refresh_and_clear(rec["id"])
     _video_in_thread(rec["id"], 1)
     _post_evidence(rec, card.get("evidence"))
     print(rec["id"])
@@ -135,6 +180,14 @@ def cmd_revise(a):
             r["versions"][prev["n"] - 1]["decision"] = r["decision"]
             r["decision"] = None
             r["card_dirty"] = True
+        if r.get("answers"):
+            # A row left exactly as it was keeps its answer; a changed row, or one that closed unanswered, is asked again.
+            r["versions"][prev["n"] - 1]["answers"] = r["answers"]
+            before = {cards.part_id(p, j): p for j, p in enumerate(prev["card"].get("parts") or [], 1)}
+            r["answers"] = {pid: a for j, p in enumerate(card.get("parts") or [], 1)
+                            if (pid := cards.part_id(p, j)) in r["answers"] and before.get(pid) == p
+                            and (a := r["answers"][pid])["verdict"] in ("approved", "declined", "chose")}
+        core.settle(r)
         hours = card.get("deadline_hours") or cards.TYPES[card["type"]]["hours"]
         r["deadline"] = store.iso(store.now() + timedelta(hours=hours))
         r["title"] = card["title"]
@@ -145,6 +198,7 @@ def cmd_revise(a):
     if not prev.get("copy_ts"):
         ts_old = slackapi.post(cards.card_blocks(rec, prev["n"], "replaced"), cards.card_text(rec, prev["n"]), thread_ts=rec["thread_ts"])
         store.update(a.id, lambda r: r["versions"][prev["n"] - 1].__setitem__("copy_ts", ts_old))
+    _share_pictures(a.id, n)
     rec = store.load(a.id)
     ts_new = slackapi.post(cards.card_blocks(rec, n, "open"), cards.card_text(rec, n), thread_ts=rec["thread_ts"])
     store.update(a.id, lambda r: r["versions"][n - 1].__setitem__("copy_ts", ts_new))
@@ -173,7 +227,7 @@ def cmd_done(a):
     def fn(rec):
         reach.refresh(rec, reach.capture())
         if rec["status"] != "approved":
-            return rec["status"]
+            return rec["status"] + (f" with {len(cards.open_rows(rec))} part(s) still open" if cards.open_rows(rec) else "")
         rec["done"] = {"text": a.readback, "at": store.iso()}
         rec["status"] = "done"
         store.event(rec, "done", text=a.readback)
@@ -204,12 +258,54 @@ def cmd_withdraw(a):
 
 
 def cmd_record(a):
-    verdict = "approved" if a.approved else "declined"
-    r = store.update(a.id, lambda rec: core.decide(rec, len(rec["versions"]), verdict, by=config.settings()["approver_name"], where=a.where, words=a.words))
+    if not (a.approved or a.declined or a.choice):
+        _die("Say what they answered: --approved, --declined, or --choice <option>.")
+    verdict = "approved" if a.approved or a.choice else "declined"
+    by = config.settings()["approver_name"]
+
+    def fn(rec):
+        n = len(rec["versions"])
+        if a.part:
+            return core.answer_part(rec, n, a.part, "chose" if a.choice else verdict, by, where=a.where, words=a.words,
+                                    choice=a.choice, tell=False)
+        if a.choice and a.choice not in [o["name"] for o in rec["versions"][-1]["card"].get("options") or []]:
+            return f"{a.choice} isn't one of this card's options"
+        return core.decide(rec, n, verdict, by=by, where=a.where, words=a.words, choice=a.choice)
+    r = store.update(a.id, fn)
     if r != "ok":
         _die(f"Not recorded: {r}.")
     core.refresh_and_clear(a.id)
-    print(f"{a.id} recorded as {verdict} ({a.where}).")
+    what = f"part {a.part} " if a.part else ""
+    print(f"{a.id} {what}recorded as {'picked ' + a.choice if a.choice else verdict} ({a.where}).")
+
+
+def cmd_status(a):
+    if not a.text and not a.headline and a.part_of is None and not a.stands_alone:
+        _die("Say what happened, or give a --headline, --part-of or --stands-alone.")
+    frame = a.part_of if a.part_of is not None else (None if a.stands_alone else core.UNSET)
+    kind = "next" if a.next else "on_you" if a.on_you else "their_answer" if a.their_answer else "done"
+
+    def fn(rec):
+        reach.refresh(rec, reach.capture())
+        if rec["status"] == "withdrawn":
+            return "withdrawn"
+        part = None
+        if a.part:
+            parts = rec["versions"][-1]["card"].get("parts") or []
+            if not 1 <= a.part <= len(parts):
+                return f"has no part {a.part}"
+            part = cards.part_id(parts[a.part - 1], a.part)
+        core.add_status(rec, a.text, kind, part, a.headline, frame)
+        return "ok"
+    r = store.update(a.id, fn)
+    if r != "ok":
+        _die(f"{a.id} {r}; nothing added.")
+    core.refresh_and_clear(a.id)
+    rec = store.load(a.id)
+    if kind == "on_you":
+        # It waits on the approver: the thread says so, as a question would.
+        slackapi.note(rec["thread_ts"], f"⏳ Waiting on you: {a.text}")
+    print(f"{a.id}: the card shows it" + (" and the morning list counts it as waiting on the approver." if kind == "on_you" else "."))
 
 
 def cmd_inbox(a):
@@ -306,7 +402,7 @@ def cmd_role(a):
 
 
 # Commands that post to Slack check first that this machine can, so nothing is saved for a card it can't post.
-POSTS = {"submit", "ask", "revise", "ack", "done", "withdraw", "record"}
+POSTS = {"submit", "ask", "revise", "ack", "done", "withdraw", "record", "status"}
 
 
 def main(argv=None):
@@ -348,12 +444,28 @@ def main(argv=None):
 
     s = sub.add_parser("record", help="record an answer the approver gave somewhere else")
     s.add_argument("id")
-    g = s.add_mutually_exclusive_group(required=True)
+    g = s.add_mutually_exclusive_group()
     g.add_argument("--approved", action="store_true")
     g.add_argument("--declined", action="store_true")
     s.add_argument("--words", required=True, help="his exact words")
     s.add_argument("--where", required=True, help="where he said it, e.g. 'ChatGPT relay' or 'agent chat'")
+    s.add_argument("--part", type=int, help="the row of a set he answered (1, 2, 3); without it, every open row")
+    s.add_argument("--choice", help="the option he picked, by its name")
     s.set_defaults(fn=cmd_record)
+
+    s = sub.add_parser("status", help="keep a posted card true in place, with no new version: where it stands after the yes, or what it's part of")
+    s.add_argument("id")
+    s.add_argument("text", nargs="?", help="what happened, e.g. 'Built, and live for half of new users'")
+    s.add_argument("--part", type=int, help="the row of a set it is about")
+    k = s.add_mutually_exclusive_group()
+    k.add_argument("--next", action="store_true", help="what comes next, shown with ⏳ until a later line")
+    k.add_argument("--on-you", action="store_true", help="a condition only the approver can clear; the card waits on him")
+    k.add_argument("--their-answer", action="store_true", help="the reply to a message sent as him")
+    s.add_argument("--headline", help="the answered card's title, e.g. 'Released: three lesson fixes'")
+    f = s.add_mutually_exclusive_group()
+    f.add_argument("--part-of", help="the initiative the card belongs to, in the approver's words; sets its frame line in place")
+    f.add_argument("--stands-alone", action="store_true", help="say on the card that it belongs to no initiative")
+    s.set_defaults(fn=cmd_status)
 
     s = sub.add_parser("inbox", help="answers waiting for you")
     s.add_argument("--agent")

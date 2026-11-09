@@ -94,6 +94,14 @@ def message_url(ts):
     return f"{_team_url()}archives/{channel()}/p{ts.replace('.', '')}"
 
 
+def views_open(trigger_id, view):
+    client().views_open(trigger_id=trigger_id, view=view)
+
+
+def views_update(view_id, view, hash_=None):
+    client().views_update(view_id=view_id, view=view, **({"hash": hash_} if hash_ else {}))
+
+
 def delete(ts):
     client().chat_delete(channel=channel(), ts=ts)
 
@@ -102,6 +110,25 @@ def upload_private_image(path, title):
     """Upload without sharing anywhere; the card shows it through an image block."""
     r = client().files_upload_v2(file=str(path), title=title[:200])
     return r["file"]["id"]
+
+
+def upload_pictures_to_thread(items, thread_ts, comment):
+    """Post pictures in a thread, in one message: items are (path, title). Slack shows a picture inside a carousel
+    card only once it's shared where the card is, so a card's pictures go in its thread, full size, which is also
+    where the approver can open them. Returns [{"id", "url"}] in order, once Slack has processed them."""
+    r = client().files_upload_v2(file_uploads=[{"file": str(p), "title": t[:200]} for p, t in items],
+                                 channel=channel(), thread_ts=thread_ts, initial_comment=comment)
+    files = r.get("files") or [r["file"]]
+    out = [{"id": f["id"], "url": f.get("permalink")} for f in files]
+    deadline = time.monotonic() + 30
+    for f in out:
+        while time.monotonic() < deadline:
+            info = client().files_info(file=f["id"])["file"]
+            f["url"] = info.get("permalink") or f["url"]
+            if info.get("original_w") or info.get("thumb_360"):
+                break
+            time.sleep(1)
+    return out
 
 
 def upload_to_thread(path, thread_ts, title, comment=None):

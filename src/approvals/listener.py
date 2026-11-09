@@ -90,13 +90,17 @@ class Listener:
     # ----- buttons -----
 
     def on_socket(self, client, req):
-        if req.type == "interactive" and (req.payload or {}).get("type") == "block_actions":
-            follow_up = None
+        kind = (req.payload or {}).get("type")
+        if req.type == "interactive" and kind in ("block_actions", "view_submission"):
+            follow_up, answer = None, None
             try:
-                follow_up = self.handle_click(req.payload)
+                if kind == "block_actions":
+                    follow_up = self.handle_click(req.payload)
+                else:
+                    answer, follow_up = self.handle_submission(req.payload)
             except Exception:
-                log.exception("button press failed")
-            client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
+                log.exception("%s failed", kind)
+            client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id, payload=answer))
             if follow_up:
                 threading.Thread(target=follow_up, daemon=True).start()
             return
@@ -107,29 +111,124 @@ class Listener:
                 with self.poke_lock:
                     self.poke.add(ev["thread_ts"])
 
+    REFUSED = {
+        "stale": "That version was replaced; use the newest card's buttons.",
+        "already": "This one is already decided.",
+        "withdrawn": "The agent withdrew this one, so there's nothing to decide.",
+        "gone": "That button doesn't match the card any more; use the newest card's buttons.",
+    }
+
     def handle_click(self, payload):
-        """Save the decision and the agent's message before acking; card and notes follow."""
+        """Save the decision and the agent's message before acking; card and notes follow. A button that opens a
+        pop-up opens it right after the ack, inside the 3 seconds Slack allows."""
         user = (payload.get("user") or {}).get("id")
         action = (payload.get("actions") or [{}])[0]
+        if (payload.get("view") or {}).get("callback_id") == "approvals" and action.get("action_id") == "items":
+            return lambda: self.recount_items(payload)
         try:
-            rid, n, what = action.get("value", "").split("|")
+            rid, n, what = action.get("value", "").split("|", 2)
             n = int(n)
         except ValueError:
-            return None
+            return None   # a link button: Slack opens it
         thread_ts = ((payload.get("container") or {}).get("thread_ts")
                      or (payload.get("message") or {}).get("thread_ts"))
+        trigger = payload.get("trigger_id")
+        if what == "see" or what.startswith(("read:", "pic:")):
+            return lambda: self.open_view(rid, n, what, trigger, user, thread_ts)
         if user != self.s["approver"]:
             return lambda: slackapi.ephemeral(user, f"Only {self.s['approver_name']} can decide approvals.", thread_ts)
-        verdict = "approved" if what == "approve" else "declined"
-        r = store.update(rid, lambda rec: core.decide(rec, n, verdict, by=user))
-        log.info("click %s v%s %s -> %s", rid, n, verdict, r)
-        if r == "stale":
-            return lambda: slackapi.ephemeral(user, "That version was replaced; use the newest card's buttons.", thread_ts)
-        if r == "already":
-            return lambda: slackapi.ephemeral(user, "This one is already decided.", thread_ts)
-        if r == "withdrawn":
-            return lambda: slackapi.ephemeral(user, "The agent withdrew this one, so there's nothing to decide.", thread_ts)
+        if what in ("change", "edit", "items") or what.endswith(":change"):
+            return lambda: self.open_view(rid, n, what, trigger, user, thread_ts)
+        r = store.update(rid, lambda rec: core.press(rec, n, what, by=user))
+        log.info("click %s v%s %s -> %s", rid, n, what, r)
+        if r in self.REFUSED:
+            return lambda: slackapi.ephemeral(user, self.REFUSED[r], thread_ts)
         return lambda: self.try_refresh(rid)
+
+    def open_view(self, rid, n, what, trigger, user, thread_ts):
+        """Open the pop-up a button asks for, unless the card moved on since it was drawn."""
+        rec = store.load(rid)
+        if what != "see" and not what.startswith(("read:", "pic:")):
+            bad = core._check(rec, n)
+            j = int(what[1:].split(":")[0]) if what.startswith("p") else None
+            if not bad and j and cards.part_id(rec["versions"][-1]["card"]["parts"][j - 1], j) in (rec.get("answers") or {}):
+                bad = "already"
+            if not bad and not j and (rec.get("decision") or {}).get("version") == n:
+                bad = "already"
+            if bad:
+                return slackapi.ephemeral(user, self.REFUSED[bad], thread_ts)
+        if what == "see":
+            view = cards.see_view(rec, n)
+        elif what.startswith("read:"):
+            view = cards.read_view(rec, n, int(what.split(":")[1]))
+        elif what.startswith("pic:"):
+            view = cards.picture_view(rec, n, what[4:])
+        elif what == "edit":
+            view = cards.edit_view(rec, n)
+        elif what == "items":
+            view = cards.items_view(rec, n)
+        else:
+            view = cards.change_view(rec, n, int(what[1:].split(":")[0]) if what.startswith("p") else None)
+        slackapi.views_open(trigger, view)
+
+    def recount_items(self, payload):
+        """A tick in the Pick which pop-up: its button says how many it sends."""
+        view = payload["view"]
+        rid, n, _ = view["private_metadata"].split("|", 2)
+        ticked = self._ticked(view)
+        slackapi.views_update(view["id"], cards.items_view(store.load(rid), int(n), ticked), view.get("hash"))
+
+    @staticmethod
+    def _ticked(view):
+        return sorted(int(o["value"]) for block in (view.get("state") or {}).get("values", {}).values()
+                      for o in (block.get("items") or {}).get("selected_options") or [])
+
+    def handle_submission(self, payload):
+        """A pop-up's button: the approver's change, his own words, or the items he ticked. Returns the answer for
+        Slack (errors keep the pop-up open) and what to do after the ack."""
+        user = (payload.get("user") or {}).get("id")
+        view = payload.get("view") or {}
+        if view.get("callback_id") != "approvals":
+            return None, None
+        rid, n, what = view["private_metadata"].split("|", 2)
+        n = int(n)
+        values = (view.get("state") or {}).get("values") or {}
+        if what == "see" or what.startswith(("read:", "pic:")):
+            return None, None
+        first = next(iter(values), "words")
+        if user != self.s["approver"]:
+            return {"response_action": "errors", "errors": {first: f"Only {self.s['approver_name']} can decide approvals."}}, None
+        words = ((values.get("words") or {}).get("words") or {}).get("value") or ""
+        if what == "items":
+            ticked = self._ticked(view)
+            if not ticked:
+                return {"response_action": "errors", "errors": {first: "Tick at least one, or press No on the card."}}, None
+            r = store.update(rid, lambda rec: core.decide(rec, n, "approved", by=user, where="pop-up", items=ticked))
+        elif what == "edit":
+            if not words.strip():
+                return {"response_action": "errors", "errors": {"words": "The words can't be empty."}}, None
+            r = store.update(rid, lambda rec: core.decide(rec, n, "approved", by=user, where="pop-up", edited=words))
+        else:
+            j = int(what[1:].split(":")[0]) if what.startswith("p") else None
+            r = store.update(rid, lambda rec: core.ask_change(rec, n, words, by=user, j=j))
+        log.info("pop-up %s v%s %s -> %s", rid, n, what, r)
+        if r in self.REFUSED:
+            return {"response_action": "errors", "errors": {first: self.REFUSED[r]}}, None
+        return None, lambda: self.after_submission(rid, what, words)
+
+    def after_submission(self, rid, what, words):
+        """His words from a pop-up go in the thread too, so the thread keeps the whole record."""
+        self.try_refresh(rid)
+        rec = store.load(rid)
+        who = self.s["approver_name"]
+        try:
+            if what == "edit":
+                slackapi.note(rec["thread_ts"], f"✍️ {who} approved it with these words:\n{cards.quoted(words)}")
+            elif what.endswith("change"):
+                row = f" to part {what[1:].split(':')[0]}" if what.startswith("p") else ""
+                slackapi.note(rec["thread_ts"], f"✏️ {who} asked for a change{row}:\n{cards.quoted(words)}")
+        except Exception as e:
+            log.warning("thread note for %s failed: %s", rid, e)
 
     def try_refresh(self, rid):
         try:

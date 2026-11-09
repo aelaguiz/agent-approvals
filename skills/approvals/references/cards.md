@@ -1,8 +1,8 @@
-# Card types
+# Cards
 
-Read the section for the type you're writing. Each one says what the approver is judging when they look at that kind of card, what the card must include, and gives a full example. The examples show the shape; your facts come from your own work.
+Two things shape a card. Its **type** says what the action is: read the section for your type below for what the approver judges and what the card must include. Its **kind** is how he'll judge it and answer it: a yes or no, today beside after, a row each, a pick, a batch. The kinds are combinations of the fields below and work with any type. The examples show the shape; your facts come from your own work.
 
-Contents: [Fields](#fields) · [What goes on the card](#what-goes-on-the-card-and-what-goes-in-the-thread) · [creative](#creative) · [reply](#reply) · [budget](#budget) · [purchase](#purchase) · [money](#money) · [player_message](#player_message) · [price](#price) · [experiment](#experiment) · [page](#page) · [content](#content) · [email](#email) · [account](#account)
+Contents: [Fields](#fields) · [What goes on the card](#what-goes-on-the-card-and-what-goes-in-the-thread) · [Kinds](#kinds-how-he-judges-it-and-answers-it) · [creative](#creative) · [reply](#reply) · [budget](#budget) · [purchase](#purchase) · [money](#money) · [player_message](#player_message) · [price](#price) · [experiment](#experiment) · [page](#page) · [content](#content) · [email](#email) · [account](#account)
 
 ## Fields
 
@@ -17,7 +17,22 @@ Contents: [Fields](#fields) · [What goes on the card](#what-goes-on-the-card-an
 | `image`, `video` | An absolute path to the thing being approved. A video gets a link that plays it. |
 | `evidence` | A list of notes, links and file paths (or one block of text), posted in the card's thread: checks run, sources, research, full lists, screenshots. A file path, alone or after a label (`"Recipe: /abs/path/recipe.json"`, or a path relative to your folder), is attached so it opens in Slack. |
 | `changes` | Required on a revision: what changed from the last version, in the approver's terms ("Japan dropped, per your reply"). |
-| `deadline_hours`, `yes_label`, `no_label` | Optional overrides. |
+| `deadline_hours`, `yes_label`, `no_label` | Optional overrides. Name buttons for what happens ("Release all 3", "Send as you", "Run the read"). |
+| `part_of` | Required. The initiative the card belongs to, in the approver's words for it, or `null` when it stands alone. Shown under the title. |
+| `if_no_answer` | What happens if the deadline passes with no answer ("it stops at 72 hours"). Shown with the deadline near the top and on the notification line; told back to you if it expires. |
+| `gallery` | Pictures, each `{"image": "/abs/path.png", "label": "…", "note": "…", "mark": [x, y, w, h], "video": "/abs/clip.mp4"}`. The label says what it is: today or after, real or mock, which phone and build (under 150 characters). `mark` outlines what changed, in the picture's pixels; mark the same place on the today picture so the two line up. `video` adds a Play button (a clip of motion). One picture shows full width; two to ten are a swipeable carousel, each slide zoomed onto its mark (or showing the whole picture) with a Full size button. The pictures also go in the card's thread, full size. |
+| `sections` | Titled groups of lines: `{"title": "What the reads found", "lines": [...]}`. A line is text, `[label, value]`, or `{"text": "…", "tag": "Updaters"}`. Start a line with ✅, ⚪ or ⏳ when that helps him read it. |
+| `links` | Up to 5 `[label, "https://…"]` buttons that open a page, near the top: the deck, the reads, the clips. |
+| `parts` | Rows answered one by one: `{"title", "note", "image", "yes_label", "no_label", "options", "pick", "own_yes", "id"}`. Up to 10. Each row gets its own buttons (Approve and No unless you name them), and a row with a picture gets a See it button. Approve all appears while two or more plain rows are open; `own_yes: true` keeps a row out of it. A revision keeps the answer of every row you leave exactly as it was (matched by `id`, else position). |
+| `options`, `pick` | A choice: `{"name": "A", "title": "a panel from the hand count", "image": "/abs/a.png"}`, and the name of your pick. On the card, options with pictures sit side by side, each with its own Pick button; on a row, they're buttons named by `name`. `no_label` adds a decline ("Neither"). |
+| `items`, `pick_label` | A batch: each item its name or `[name, what differs]`. A yes covers all of them; Pick which opens a checklist whose button (`pick_label`, like `"Send {n}"`) sends the ticked ones. |
+| `change_label` | Adds a button ("Change", "Change this fix") that opens a box for what should change; on a set, one on every row. His words reach you as feedback and go in the thread. |
+| `from` | Who it goes out as ("your X account @handle"), shown first. |
+| quote `edit: true`, `hint` | The words that go out. Adds Edit the words, which opens them in a box (`hint` under it); what he sends from there is his yes, with his words. One per card, under 3,000 characters. |
+| quote `button` | Puts the quote behind a button with that label ("Read the email") instead of on the card. |
+| `offer` | After a yes, asks whether to stop asking for this kind: say exactly what would stop ("first emails to creators with a free year of Plus"). His answer comes back to you. Never on money: he wants to approve each spend. |
+
+One card is answered one way: plain yes or no, `options`, `parts` or `items`. Slack holds 50 blocks a message, so a card with too much on it is refused with a count; move detail to `evidence`.
 
 ## What goes on the card, and what goes in the thread
 
@@ -38,6 +53,165 @@ After, on the card:
 
 And the paragraph moves to `evidence`, with the link to its source. The approver still sees why, and can open the research when they want it.
 
+## Kinds: how he judges it and answers it
+
+Each example is made up, modelled on a real card that failed in its old shape.
+
+### Before and after
+
+Anything users will see change: a screen, words in the app, a lesson, a store listing. He judges it by comparing, so each change is today's real screen beside the after, the change outlined.
+
+```json
+{"type": "content", "title": "Release three lesson fixes to every user", "part_of": "Today's lessons teach what users need",
+ "gallery": [
+   {"image": "/abs/fix1-today.png", "label": "Fix 1 of 3 · TODAY · real screen, iPhone, 2.1.65", "mark": [220, 200, 455, 225]},
+   {"image": "/abs/fix1-after.png", "label": "Fix 1 of 3 · AFTER · real screen, staging", "note": "New: this step comes between step 4 and the board-only question.", "mark": [220, 200, 455, 225]},
+   {"image": "/abs/fix2-today.png", "label": "Fix 2 of 3 · TODAY · real screen, iPhone, 2.1.65"},
+   {"image": "/abs/fix2-after.png", "label": "Fix 2 of 3 · AFTER · real screen, staging"}],
+ "facts": [["Who gets it", "every user on today's lessons, app versions back to 2.1.38, in all seven languages"]],
+ "yes_label": "Release all 3", "change_label": "Change this fix", "no_label": "No",
+ "approves": "these three fixes to today's lessons.", "does_not_approve": "the new Learn path test."}
+```
+
+### A set of related changes, each with its own answer
+
+Several changes toward one initiative, ready around the same time. One card, a row each, so he can approve two, decline one and send one back in the same minute.
+
+```json
+{"type": "content", "title": "Payers keep using what they paid for: 4 changes", "part_of": "Payers keep using what they paid for (your ask, 7:21 am)",
+ "facts": [["Done looks like", "payers active in more of their first two weeks, read against the 30% held back"]],
+ "links": [["Open the deck", "https://docs.google.com/presentation/d/…"]], "change_label": "Change",
+ "parts": [
+   {"title": "Right after paying, take payers to what they came for", "note": "Everyone who starts Plus", "image": "/abs/after-paying-before-after.png"},
+   {"title": "Practice vs AI stops calling itself a beta", "note": "Everyone who opens Play", "image": "/abs/no-beta-before-after.png"},
+   {"title": "The paywall stops promising \"no ads\"", "note": "Every paywall, and 14 App Store subscription descriptions", "image": "/abs/paywall-before-after.png"},
+   {"title": "Tickets stops selling Plus to people who have it", "note": "Plus users who open Tickets", "image": "/abs/tickets-before-after.png"}],
+ "approves": "each row you approve, as shown.", "does_not_approve": "rows you decline or change, or anything else in this work."}
+```
+
+When he asks for a change on row 3, post the next version with only row 3 changed (and `changes` saying so): rows 1, 2 and 4 keep their answers, and row 3 comes back marked new with its buttons.
+
+### A call on spend, with the reads behind it
+
+Money where the call turns on reads. Lead with what the reads found, put the clock on it, and give each decision its own row named for what happens.
+
+```json
+{"type": "budget", "title": "Keep training the run past 72 hours, for a policy with fewer holes?", "part_of": "Five players, trained in a week",
+ "if_no_answer": "it stops at 72 hours.",
+ "sections": [{"title": "What the reads found", "lines": [
+   ["✅ Strength", "about as fast as plain training (0.96 to 1.27 times)"],
+   ["✅ Holes", "cut games with a hole by 23% and 41%, against plain training at equal hours"],
+   "⏳ Do the near-even moves give up money? The read below answers it by about 7 am"]}],
+ "facts": [["The run has cost", "about $500 at list price"]],
+ "parts": [
+   {"title": "The near-even moves read · $80 to $90", "yes_label": "Run the read", "no_label": "Don't"},
+   {"title": "The run past 72 hours · about $200 a day", "note": "Training on until the read: about $100 per 12 hours. Stopping and resuming: about 45 minutes.",
+    "options": [{"name": "Stop at 72 h, resume if the read says so"}, {"name": "Keep training"}], "pick": "Stop at 72 h, resume if the read says so"}],
+ "approves": "the read, and what you choose for the run.", "does_not_approve": "any other run or more money."}
+```
+
+### A batch of the same thing
+
+Many asks of one kind. One card; a yes covers all, and he can hold some back.
+
+```json
+{"type": "email", "title": "Send 10 emails as you, each with a free year of Plus", "part_of": "Poker creators use Poker Skill",
+ "facts": [["From", "your company address. The same email to each, with their name and their own link, every link tested on iPhone and Android"]],
+ "items": [["River Rat Poker", "Instagram Reels · follow-up"], ["Two Pair Tom", "YouTube vlog"], "The Grind Podcast (Sam)", "…"],
+ "quotes": [{"label": "The email", "text": "Hi {name}, …", "button": "Read the email"}],
+ "yes_label": "Send all 10", "pick_label": "Send {n}",
+ "offer": "You've said yes to all 48 creator messages you've answered this month. Stop asking for first emails to creators with a free year of Plus?",
+ "approves": "sending these emails once each.", "does_not_approve": "follow-ups or other creators."}
+```
+
+### Something going public
+
+An ad, a Short, a Reel, a post. He judges the whole thing as people will see it, and what it costs to find out whether it works.
+
+```json
+{"type": "creative", "title": "Run a new ad: \"You're not unlucky. You were never taught why.\"", "part_of": "A second ad that brings paying iOS users",
+ "video": "/abs/ad.mp4", "image": "/abs/ad-first-frame.png",
+ "facts": [["To read it", "about $10. It's a finalist at 0.5 or more installs per dollar"],
+           ["🟠 Still open", "nobody has listened to it yet"], ["Competing with", "the newscast, for the second finalist place"]],
+ "approves": "running this ad in the iOS test at its $10 read.", "does_not_approve": "more money or other placements."}
+```
+
+### Words to users, as they'll see them
+
+A push, an email, an in-app message: the words as they land, the designed render at phone width, who gets it and when.
+
+```json
+{"type": "player_message", "title": "Tell people on a year of Plus when their iPhone trial's charge fails", "part_of": "Payers keep using what they paid for",
+ "quotes": [{"label": "The push, on their lock screen", "text": "Your trial's charge didn't go through\nYour year of Plus is still on. …"}],
+ "gallery": [{"image": "/abs/email-iphone-width.png", "label": "The email, as designed · real render at iPhone width"}],
+ "facts": [["Who gets it", "anyone on a year of Plus whose iPhone trial charge failed in the last 60 days"],
+           ["When", "the email an hour after the failure; the push after it, 9 am to 9 pm their time"], ["Where a tap goes", "the subscription screen"]],
+ "approves": "this push and email, in every language.", "does_not_approve": "other messages to payers."}
+```
+
+### A release
+
+Grouped by initiative, each change saying who gets it when, each store its own yes.
+
+```json
+{"type": "content", "title": "Release 2.1.65", "part_of": null,
+ "sections": [
+   {"title": "Coaching at the table · feature and product pods", "lines": [{"text": "Your move shows the moment you tap. (AP-0544)", "tag": "Updaters"}]},
+   {"title": "Fixes", "lines": [{"text": "The evening Missions push stops reaching users who already finished.", "tag": "Everyone at deploy"}]}],
+ "facts": [["QA", "ship it"], ["⚠️ Known and going out", "after sign-in, Home can offer the wrong next lesson for half a second (#9818)"],
+           ["🛑 Can't be undone", "an hourly sweep deletes finished hand records older than a day"]],
+ "parts": [{"title": "Server", "own_yes": true},
+           {"title": "iPhone, to App Review", "own_yes": true, "note": "Manual release: when Apple approves, this row asks again."},
+           {"title": "Google Play, 100%, live in minutes", "own_yes": true, "note": "QA tried Play's own build against production"}],
+ "approves": "each store you approve, as listed.", "does_not_approve": "anything not in the list."}
+```
+
+### A message sent as him
+
+The chat as it will look, sent as him, with the words his to edit.
+
+```json
+{"type": "email", "title": "Send this X message as you to River Rat Poker", "part_of": "Poker creators use Poker Skill",
+ "from": "your X account",
+ "quotes": [{"label": "River Rat Poker", "note": "Nov 3, 11:29 AM", "text": "Appreciate you setting that up, I'll take a look and see how it works."},
+            {"label": "Your reply", "text": "Good news, no email needed anymore. …\n[their own free-year link]\nNo strings on it.", "edit": true, "hint": "Their link goes where the brackets are."}],
+ "facts": [["✅ Their link tested", "App Store on iPhone, Google Play on Android"]], "yes_label": "Send as you",
+ "approves": "sending this reply once.", "does_not_approve": "follow-ups."}
+```
+
+When they reply, `approvals status AP-0013 --their-answer "<their reply>"` puts it on the card.
+
+### A choice between options
+
+Two or three designs or wordings. Each option as a picture with its own button, your pick marked, and why in a line.
+
+```json
+{"type": "content", "title": "Pick how users see the hand they just played", "part_of": "Coaching at the table feels smooth",
+ "options": [{"name": "A", "title": "a panel from the hand count", "image": "/abs/option-a.png"},
+             {"name": "B", "title": "a rail of past hands", "image": "/abs/option-b.png"}],
+ "pick": "A", "no_label": "Neither", "links": [["Play both at real speed", "https://…"]],
+ "facts": [["Our pick is A", "it answers a tap users already make, and keeps every hand; B's strength is each result at a glance"]],
+ "approves": "building the option you pick.", "does_not_approve": "the other options, or releasing it."}
+```
+
+If he picks A "but I'll play it myself before it merges", that condition is `approvals status AP-0013 --on-you "you play it yourself before it merges"`.
+
+### A test to build and read
+
+Only where your repository's rules send a build decision to a card that links its deck. What users see in each half, what decides it, what stops it, and what it holds up.
+
+```json
+{"type": "experiment", "title": "Build and test two screens on the onboarding paywall", "part_of": "More new users pay when they first see Plus",
+ "gallery": [{"image": "/abs/test-half.png", "label": "TEST HALF · mock"}, {"image": "/abs/today.png", "label": "Today · real"}],
+ "facts": [["Who", "half of new users"], ["Decides it", "payers by day 8: about 17 to 35 days, early reads at about 3 and 10"],
+           ["Stops it", "about 1.1 fewer trials per 100 users shown, visible in about 9 days"], ["Holds", "this screen until about mid-December"],
+           ["Replaces", "the design you sent back at 7:23 pm"]],
+ "links": [["Open the deck", "https://…"]], "yes_label": "Build and test", "change_label": "Change",
+ "approves": "building and running this test, and acting on its read within the deck's bar.", "does_not_approve": "ad spend or any other paywall."}
+```
+
+Every read then lands on the same card: `approvals status AP-0013 "Early read, day 3: no harm to trials"`.
+
 ## creative
 
 An ad, video, image or social post going out. The approver judges it by looking: does it look and sound like us, and is it where it should be?
@@ -46,7 +220,7 @@ An ad, video, image or social post going out. The approver judges it by looking:
 - **Good facts:** the placement, the audience or country, and the budget it sits inside. Say whether it's new money. Say what was checked (for example, the text in the video is legible and the app screens are real).
 
 ```json
-{"type": "creative", "title": "Run this video ad in the spring creative test",
+{"type": "creative", "title": "Run this video ad in the spring creative test", "part_of": "Ads that bring paying users",
  "video": "/abs/path/ad-v3.mp4", "image": "/abs/path/ad-v3-thumb.png",
  "facts": [["Ad", "\"Learn the game in five minutes a day\" · 21 seconds · 9:16"],
            ["Runs on", "Instagram Reels and Stories · US only"],
@@ -63,7 +237,7 @@ Words going out publicly as the approver or the brand: a forum or Reddit reply, 
 - **Good facts:** what's already been said in the thread, what was checked, and why this one needs a yes and isn't covered by a standing rule.
 
 ```json
-{"type": "reply", "title": "Post this reply on r/poker as our founder account",
+{"type": "reply", "title": "Post this reply on r/poker as our founder account", "part_of": "People who ask how to improve find us",
  "quotes": [{"label": "They asked", "text": "I can't afford coaching. What should I study to stop losing at 1/2?", "link": "https://www.reddit.com/r/poker/comments/abc123/", "link_text": "How to stop losing at 1/2", "note": "3 hours ago · 9 comments"},
             {"label": "We'd reply", "text": "Pick one spot you play often and drill only that for a week..."}],
  "facts": [["Already said", "two people recommended books; nobody suggested practicing decisions"],
@@ -80,7 +254,7 @@ Spend on ads or tests. The approver judges how much, for how long, what it buys 
 - **Good facts:** spend and results so far, with their comparison, and how to stop it early.
 
 ```json
-{"type": "budget", "title": "Add $250 to the search ads learning budget",
+{"type": "budget", "title": "Add $250 to the search ads learning budget", "part_of": "Search ads that pay for themselves",
  "table": {"columns": ["Budget", "Today", "After a yes"],
            "rows": [["Learning cap", "$450", "$700"], ["Spent so far", "$431", "$431"], ["Stop early if cost per trial is over", "not set", "$20"]]},
  "facts": [["What it buys", "about two more weeks of new ad tests at today's pace"], ["Undo", "stop any time; unspent money stays unspent"]],
@@ -95,7 +269,7 @@ Buying a tool, subscription, credits, domains or a paid listing. The approver ju
 - **Good facts:** a cheaper option you considered, any catch (a locked card, an annual commitment), and how to cancel.
 
 ```json
-{"type": "purchase", "title": "Buy 3 domains that point to our site: $45",
+{"type": "purchase", "title": "Buy 3 domains that point to our site: $45", "part_of": null,
  "facts": [["Cost", "$45 one time; $45 a year to renew"], ["What they do", "each redirects to our main site"], ["Card", "the company card for web costs"]],
  "approves": "these 3 domains, up to $45.", "does_not_approve": "other domains or premium names."}
 ```
@@ -108,7 +282,7 @@ Moving money, running payroll, paying or refusing a bill. The approver judges th
 - **Good facts:** what the money is for, and how it compares to last time ("same people and amounts as the last payroll").
 
 ```json
-{"type": "money", "title": "Move $20,000 from savings to operating",
+{"type": "money", "title": "Move $20,000 from savings to operating", "part_of": null,
  "facts": [["From", "savings"], ["To", "operating, which bills and payroll come out of"], ["Next out of operating", "payroll on the 15th, about $18,000"]],
  "approves": "this one transfer.", "does_not_approve": "any later transfer."}
 ```
@@ -121,7 +295,7 @@ A push, email, in-app message or survey that reaches players or customers. The a
 - **Good facts:** who gets it and roughly how many, when and how often, what tapping it does, and what today's message does by comparison.
 
 ```json
-{"type": "player_message", "title": "Add a first-year offer to the trial-ending message",
+{"type": "player_message", "title": "Add a first-year offer to the trial-ending message", "part_of": "More trial users keep Plus",
  "quotes": [{"label": "What they'd see (push, the day before the trial ends)", "text": "Your trial ends Thursday. Keep it: your first year at 40% off."}],
  "facts": [["Who gets it", "people who cancelled their trial · about 40 a week"], ["Today", "the same message at full price; 0 of 300 renewed"]],
  "approves": "this offer in this message, in English.", "does_not_approve": "other languages or other offers."}
@@ -135,7 +309,7 @@ Prices, offers, discounts, or the words on a paywall. The approver judges each c
 - **Good facts:** why, what it's expected to bring with its range, which stores, and how to undo it.
 
 ```json
-{"type": "price", "title": "Lower the yearly price in Brazil and Mexico",
+{"type": "price", "title": "Lower the yearly price in Brazil and Mexico", "part_of": "Prices that fit each country",
  "table": {"columns": ["Country", "Yearly today", "Yearly new"], "rows": [["Brazil", "R$399.90", "R$219.90"], ["Mexico", "MX$1,299", "MX$899"]]},
  "facts": [["Why", "today's price is above what local competitors charge"], ["Brings", "about 2 more payers a month; money about level"], ["Undo", "today's prices are saved"]],
  "approves": "these two countries at these prices, on both stores.", "does_not_approve": "other countries or the free trial."}
@@ -143,13 +317,13 @@ Prices, offers, discounts, or the words on a paywall. The approver judges each c
 
 ## experiment
 
-Turning a test or feature flag on or off, or changing who's in it, when everything it switches is already built. An experiment that needs app or server work before it can run is a decision to build, which never goes on a card. The approver judges what players will see, how many, and how to undo it.
+Turning a test or feature flag on or off, or changing who's in it, when everything it switches is already built. An experiment that needs app or server work before it can run is a decision to build, which goes on a card only when your repository's rules send it there with its deck ([A test to build and read](#a-test-to-build-and-read)). The approver judges what players will see, how many, and how to undo it.
 
 - **Must include:** facts for what's being tested, the split, the exact flag, what players see, and how to undo it.
 - **Good facts:** why now, and what goes wrong if nothing is done.
 
 ```json
-{"type": "experiment", "title": "Keep version 2.5 users in the home screen test, 50/50",
+{"type": "experiment", "title": "Keep version 2.5 users in the home screen test, 50/50", "part_of": "A home screen that brings users back",
  "facts": [["Testing", "the new home screen vs today's · 50/50 · flag home_enabled"], ["The problem", "2.5 isn't on the flag's version list, so its users leave the test when it ships"], ["Undo", "take the builds off the flag"]],
  "approves": "adding 2.5 to the test at 50%.", "does_not_approve": "releasing 2.5 to the stores."}
 ```
@@ -162,7 +336,7 @@ A store listing, website page, directory listing or public profile. The approver
 - **Good facts:** why, what it's worth, and when it goes live.
 
 ```json
-{"type": "page", "title": "Test a new store listing title",
+{"type": "page", "title": "Test a new store listing title", "part_of": "More store visitors install",
  "table": {"columns": ["Where", "Today", "Proposed"], "rows": [["Store title", "Example - Learn", "Example - Play Hold'em"]]},
  "facts": [["Why", "Hold'em searches convert 2x better than our other terms"], ["When", "as soon as approved"]],
  "approves": "this title.", "does_not_approve": "the description or keywords."}
@@ -176,7 +350,7 @@ Puzzles, lessons or other content going live to players. The approver judges wha
 - **Good facts:** the dates, a sample in `evidence`, and how to pull it back.
 
 ```json
-{"type": "content", "title": "Put 20 daily puzzles live for next month",
+{"type": "content", "title": "Put 20 daily puzzles live for next month", "part_of": "A daily puzzle worth coming back for",
  "facts": [["What", "20 daily puzzles, one a day, the 1st to the 20th"], ["Tested", "all 20 played on staging"], ["Undo", "any day can be unscheduled before it goes out"]],
  "approves": "these 20 puzzles on these dates.", "does_not_approve": "changes to existing puzzles."}
 ```
@@ -189,7 +363,7 @@ An email or Slack message sent in the approver's name. The approver judges the e
 - **Good facts:** what the message answers, and whether a follow-up is planned.
 
 ```json
-{"type": "email", "title": "Send this email as you to our accountants",
+{"type": "email", "title": "Send this email as you to our accountants", "part_of": null,
  "quotes": [{"label": "The email", "text": "Hi,\nCould you send us last year's full record, including the workpapers?\nThanks"}],
  "facts": [["From", "your mailbox"], ["To", "our outside accountants"], ["Subject", "Last year's records"]],
  "approves": "sending this exact email once.", "does_not_approve": "follow-ups."}
@@ -203,7 +377,7 @@ Deleting an account, removing someone's access, or cutting a seat. The approver 
 - **Good facts:** how the request was checked.
 
 ```json
-{"type": "account", "title": "Delete a player's account, as they asked",
+{"type": "account", "title": "Delete a player's account, as they asked", "part_of": null,
  "facts": [["Asked", "by email, 3 days ago"], ["Checked", "the request came from the account's own address"], ["What goes", "sign-in and all progress. This can't be undone."]],
  "approves": "deleting this one account and confirming by email.", "does_not_approve": "refunds or other accounts."}
 ```

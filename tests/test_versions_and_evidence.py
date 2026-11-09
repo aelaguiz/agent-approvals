@@ -77,7 +77,8 @@ def test_withdrawing_takes_the_buttons_away_and_presses_say_why(slack):
     cli.main(["withdraw", "AP-0001", "I dropped this version; a new script is coming as a new card."])
     rec = store.load("AP-0001")
     blocks = cards.card_blocks(rec, 1, core.mode_for(rec))
-    assert rec["status"] == "withdrawn" and not [b for b in blocks if b["type"] == "actions"]
+    values = [e.get("value", "") for b in blocks if b["type"] == "actions" for e in b["elements"]]
+    assert rec["status"] == "withdrawn" and values == ["AP-0001|1|see"]   # only the button that shows the card as asked
     assert blocks[0]["text"]["text"].startswith("↩️ Withdrawn:")
     assert "a new script is coming" in json.dumps(blocks)
     assert core.decide(rec, 1, "approved", "UAPPROVER") == "withdrawn"
