@@ -29,7 +29,7 @@ When an action needs your approver's yes first, put one card in front of them th
 
 ## Asking
 
-1. **Write the card as JSON.** Before writing, read [references/cards.md](references/cards.md) for the type you need: what the approver judges it by, what it must include, and a full example.
+1. **Write the card as JSON.** Before writing, read [references/cards.md](references/cards.md) for the type and the kind you need (below): what the approver judges it by, what it must include, and a full example.
 2. **Submit it** from your own session, on the machine you run on: `approvals submit card.json --agent "<your name as the approver knows you>"`. The command learns from your session where to type the answer, so a card posted from another shell, such as over ssh to another machine, could never be answered to you, and the command refuses it. It prints the request number (for example AP-0013) and a link. If it refuses the card, it says why; fix that and submit again.
 3. **Carry on.** Do other work, or end your turn.
 

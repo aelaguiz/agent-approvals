@@ -146,6 +146,7 @@ Built for issue #7. Unit tests: 141 of 141. Then the live run above, on the inst
 | The offer to stop asking | Pass. Shown only after the yes; his answer reached the agent, which acknowledged it. |
 | Status lines and the reply box | Pass. Agents posted what happened and what comes next, per row where there were rows; the cards redrew in place. |
 | Each card against its mock | Pass after the fixes below. Screenshots of every kind beside its mock are listed in issue #7. |
+| Six machines, after the install | Pass. `make install` and `make verify_install` passed on the hub, the M5 (Cratejoy's service included, reconnected), Mini 1, the M3 Max, the M3 36 GB and the home server, all on the same commit. A fresh Claude agent on Mini 1 then posted a two-row card; each row's answer, pressed in Slack and recorded on the hub, reached the session on Mini 1 4 and 13 seconds after the press, and the agent acknowledged both. |
 
 **Found and fixed during the run:** picture labels cut to one line; "(optional)" on a one-group checklist; a batch's answer saying "picked in Slack" twice; the reply box showing on a batch; a next step posted in the same second as `done` showing above it; a title past Slack's 150-character headline being cut instead of refused; an answered card's timeline out of order when lines came after done; rows numbered twice when the agent numbered its titles. Agents also wrote paragraph-long status lines, so the skill now says each is one short sentence.
 

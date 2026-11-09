@@ -439,7 +439,6 @@ def card_blocks(rec, n, mode="open"):
     card = v["card"]
     if mode == "final" and not card.get("parts"):
         return _final_blocks(rec, n)
-    t = TYPES[card["type"]]
     blocks = [test_tag()] if rec.get("test") else []
     title = card["title"]
     if mode == "final":   # a set of rows: the rows are the card, so it stays whole
@@ -500,7 +499,6 @@ def _version_note(rec, n, card):
 def _body(rec, n, mode):
     v = rec["versions"][n - 1]
     card = v["card"]
-    files = v.get("files") or {}
     blocks = []
     if card.get("from"):
         blocks.append(md(f"👤 *From {esc(card['from'])}*"))
@@ -649,7 +647,6 @@ def _row_buttons(rec, n, j, p):
         if p.get("no_label"):
             row.append(button(p["no_label"], f"{base}:decline", "danger"))
         return row
-    t = TYPES[card["type"]]
     row = [button(p.get("yes_label") or card.get("yes_label") or "Approve", f"{base}:approve", "primary")]
     if card.get("change_label"):
         row.append(button(card["change_label"], f"{base}:change"))
