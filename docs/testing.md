@@ -104,6 +104,19 @@ A test hub must not connect to Slack: a second connection with the workspace's a
 
 ## Results
 
+### November 8, 2026: answers wait for a stopped agent
+
+Live in Fun Country's #approvals on the published code, every machine updated, hub on the Studio, agent on the M5. A sandbox Claude agent given S3 posted a TEST `budget` card for $250, and its session was closed.
+
+| Check | Result |
+| --- | --- |
+| Unit tests | Pass, 103 of 103. A closed session gets no resume, no tab, no workspace and no Herdr start; a running one is typed into; one stopped at its usage limit waits for its work to continue; two waiting answers on a request post one note; the inbox hands a waiting answer over once and marks it 📨; a later run of the same job takes an answer waiting for a run that stopped. agent-email's 78 tests pass against the change. |
+| An answer for a stopped agent | Pass. A `[test reply]` asking for $200 waited: the M5 logged "waiting (its session isn't running)", no process ran the session, the M5 had the same 41 Herdr workspaces before and after, and the thread got one 💤 note. |
+| The agent back, told only "Carry on." | Pass. Its first command was `approvals inbox --agent` on its own; 3 seconds later it had the reply, 📨 was on it, and it acknowledged ("you want $200 added instead of $250, so the learning cap goes from $450 to $650") and posted v2. Nothing was typed in by the service. |
+| An answer while it runs | Pass. "[test reply] $200 is right, go ahead." was typed in 5 seconds after the hub saw it; the agent acknowledged a second later, recorded the yes, wrote the change to `outbox.md` and marked the card done. |
+
+The hub saw each `[test reply]` only on its regular pass over the threads, 15 to 17 minutes after it was posted: Slack sends no live notice of the bot's own posts, and a restart puts every thread back in line. The approver's own replies come with a live notice.
+
 ### November 8, 2026: the Slack connection after a dead connection
 
 At 6:45 pm the hub's connection went quiet for 46 seconds on an overloaded machine, and for the next 42 minutes every new connection failed on its first read with a broken pipe, every 5 seconds, until the service was restarted. The checks below ran Slack's own client against a fake Slack server on a laptop, over TLS, on Python 3.13 and 3.14.
