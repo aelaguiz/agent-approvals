@@ -6,6 +6,7 @@ to the other machines. On every other machine it only delivers to the sessions t
 import logging
 import logging.handlers
 import queue
+import ssl
 import threading
 import time
 from datetime import datetime, timedelta
@@ -16,6 +17,33 @@ from slack_sdk.socket_mode.response import SocketModeResponse
 from . import cards, config, core, digest, router, slackapi, store, transcripts
 
 log = logging.getLogger("approvals")
+
+_TLS = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+
+
+def clear_tls_errors():
+    """Empty this thread's OpenSSL error queue.
+
+    When a TLS write fails with a system error such as a broken pipe, Python's ssl module raises it but leaves it
+    queued on the thread, and it doesn't clear the queue before reading. On that thread, every later read that has
+    to wait for data then fails with the same broken pipe, on any connection. Python clears the queue whenever it
+    makes a TLS object, so making a throwaway one empties it.
+    """
+    _TLS.wrap_bio(ssl.MemoryBIO(), ssl.MemoryBIO(), server_hostname="slack.com")
+
+
+class SlackConnection(SocketModeClient):
+    """Slack's built-in Socket Mode client, with each connection read from a clean TLS error queue.
+
+    The client opens connections on one thread and reads all of them on another, answering Slack's pings as it
+    reads. On November 8, 2026 a ping went to a connection that had already died, and from then on every new
+    connection failed on its first read: the hub reconnected every 5 seconds for 42 minutes and heard no button
+    presses until the service restarted.
+    """
+
+    def _run_current_session(self):
+        clear_tls_errors()
+        super()._run_current_session()
 
 WATCH_DAYS = 14          # threads stay watched this long after their last activity
 POLL_BUDGET_PER_MIN = 40
@@ -326,7 +354,7 @@ class Listener:
         if config.settings().get("hub"):
             from . import hub
             hub.serve()
-        sm = SocketModeClient(app_token=config.app_token(), web_client=slackapi.client())
+        sm = SlackConnection(app_token=config.app_token(), web_client=slackapi.client())
         sm.socket_mode_request_listeners.append(self.on_socket)
         sm.connect()
         log.info("connected to Slack; watching %s", self.s["channel"])

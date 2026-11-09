@@ -17,6 +17,8 @@
 - **Each card names the machine it was asked from** (`reach.machine`, from `~/.approvals/machine.json`). That machine's service asks the hub every 10 seconds for the messages due for its sessions, and delivers them as below. A card from before machines had names belongs to the hub, and without a hub every card belongs to the one machine.
 - **The machine follows the agent.** Any command the asker runs updates the card's reach, its machine included. A message the named machine can't deliver because the session's transcript isn't there is marked a stray: every machine looks for that session's transcript about once a minute, and the one that has it takes the message and the card's later ones.
 
+**The Slack connection.** The hub holds it with Slack's built-in Socket Mode client, which opens a new connection by itself when one dies. That client reads every connection, and answers Slack's pings, on one long-lived thread. When a TLS write fails with a system error such as a broken pipe, Python's `ssl` module leaves that error queued on the thread, and the next read there that has to wait for data reports it again, on whatever connection it's reading. So one ping answered on a dead connection made every later connection fail on its first read. On November 8, 2026 that left the hub reconnecting every 5 seconds for 42 minutes, hearing no button presses, until the service restarted. `listener.SlackConnection` empties that thread's error queue before it reads each connection.
+
 ## One thread per request
 
 The card is the first post. Everything about the request stays in its thread:
