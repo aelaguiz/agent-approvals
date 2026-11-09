@@ -418,6 +418,12 @@ class Listener:
         res = router.deliver(rec.get("reach") or {}, item["text"], ref, request_id=rid, resume=False)
         log.info("%s %s: %s (%s)", rid, ref, res.status, res.reason)
         note = store.update(rid, lambda r: self._after(r, ref, res))
+        if res.status == "delivered":
+            # The approver's next reply on this card goes in now rather than on the next pass, so corrections typed
+            # in a row land one right after another. A decision is left to the pass, which spaces them out.
+            nxt = core.next_item(store.load(rid))
+            if nxt and nxt["kind"] != "decision" and core.due(nxt):
+                self.queue([[rid, nxt["ref"]]])
         if res.status == "delivered" and item.get("react_ts"):
             try:
                 slackapi.react(item["react_ts"], "incoming_envelope")

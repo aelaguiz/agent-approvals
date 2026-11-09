@@ -124,3 +124,16 @@ def test_a_thread_the_approver_just_posted_in_is_read_before_the_overdue_ones(mo
     read.clear()
     L.poll_once()
     assert read[0] == "253.1" and "254.1" not in read   # the flag that didn't fit keeps its place; the bot's post never flags
+
+
+def test_a_reply_that_lands_sends_the_next_one_on_the_card_straight_away(monkeypatch):
+    monkeypatch.setattr(listener.slackapi, "react", lambda ts, name: None)
+    monkeypatch.setattr(listener.router, "deliver", lambda *a, **k: listener.router.Result("delivered"))
+    card("AP-0001", "sid-a", "1.1")
+    for ts, words in (("5.0", "cap it at $25"), ("6.0", "sorry, $28")):
+        store.update("AP-0001", lambda r, ts=ts, words=words: core.take_replies(r, [(ts, words)]))
+    first, second = (i["ref"] for i in store.load("AP-0001")["outbox"])
+    L = listener.Listener.__new__(listener.Listener)
+    L.in_flight, L.deliveries = set(), __import__("queue").Queue()
+    L.deliver_one("AP-0001", first)
+    assert L.deliveries.get_nowait() == ("AP-0001", second)
