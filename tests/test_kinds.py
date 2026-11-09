@@ -422,3 +422,14 @@ def test_a_new_cards_pictures_go_in_its_thread_and_then_into_the_card(tmp_path, 
     redrawn = [x for x in slack if x.get("update") == "100.0"][-1]["blocks"]
     slides = next(b for b in redrawn if b["type"] == "carousel")["elements"]
     assert slides[1]["hero_image"]["slack_file"] == {"url": "https://slack/f"} and not any(b["type"] == "carousel" for b in root["blocks"])
+
+
+def test_a_next_step_posted_before_done_drops_away():
+    rec = rec_for(KINDS["test"])
+    core.decide(rec, 1, "approved", "U")
+    core.add_status(rec, "First read at about day 3", kind="next")
+    rec["done"] = {"text": "Built and running", "at": rec["timeline"][-1]["at"]}   # the same second, as agents do
+    text = txt(cards.card_blocks(rec, 1, "final"))
+    assert "First read at about day 3" not in text and "Done" in text
+    core.add_status(rec, "Early read, day 3: no harm to trials")
+    assert "✅ Early read, day 3" in txt(cards.card_blocks(rec, 1, "final"))

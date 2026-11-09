@@ -394,7 +394,7 @@ def pending_lines(rec, part=None):
     last_done = max([i for i, e in enumerate(lines) if e["kind"] == "done"] or [-1])
     out = {}
     for i, e in enumerate(lines):
-        if i > last_done and e["kind"] in ("next", "on_you") and e["at"] >= done_at:
+        if i > last_done and e["kind"] in ("next", "on_you") and e["at"] > done_at:
             out[e["kind"]] = e
     return out
 
