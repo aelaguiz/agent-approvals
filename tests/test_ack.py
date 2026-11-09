@@ -26,10 +26,12 @@ def test_every_answer_tells_the_agent_to_acknowledge_first():
     assert rec_with("expired")["outbox"][-1]["needs_ack"] is False
 
 
-def test_acknowledging_marks_every_open_answer():
-    rec = rec_with("feedback", "feedback")
+def test_acknowledging_marks_every_answer_sent_so_far():
+    rec = rec_with("feedback", "feedback", "feedback")
+    rec["outbox"][0]["delivered_at"] = store.iso()
+    rec["outbox"][1]["sent_at"] = store.iso()   # typed, not yet seen in the transcript: agents often ack first
     kinds = core.acknowledge(rec, "Got it: cutting it to half and dropping the product mention.", "3.0")
-    assert kinds == ["feedback", "feedback"] and all(i["acked_at"] for i in rec["outbox"])
+    assert kinds == ["feedback", "feedback"] and [bool(i["acked_at"]) for i in rec["outbox"]] == [True, True, False]
     assert rec["events"][-1]["kind"] == "ack"
 
 

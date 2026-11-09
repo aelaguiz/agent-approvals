@@ -131,7 +131,7 @@ def test_an_answer_whose_session_moved_is_delivered_where_the_session_is(hubbox,
     as_hub(monkeypatch)
     monkeypatch.setattr(transcripts, "transcript", lambda runtime, sid: None)
     H = listener.Listener()
-    H.sweep()
+    H.deliver_due()
     H.deliver_one(*H.deliveries.get_nowait())
     item = store.load(rid)["outbox"][0]
     assert item["stray"] and item["inbox_only"] and not item["delivered_at"]

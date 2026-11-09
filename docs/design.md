@@ -98,6 +98,8 @@ When there's a message for the agent, the listener:
 
 A request's messages arrive in the order they were sent: a later one waits until the earlier one has landed. One waiting for an agent that wasn't running doesn't hold up the next: an answer that comes once the agent is running again is typed in, and the waiting ones are in its inbox.
 
+**Approvals pressed in a row go one at a time.** Without this, a run of yeses landed within seconds of each other, before the agent had reacted to the first: on November 8, 2026 nine Instagram approvals pressed within 23 seconds were all typed into one agent within 29. Now a decision (a button or a pop-up that decides: approve, decline, a pick, Approve all, a row's answer, Pick which, Edit the words) waits while its agent, the session that asked, has an answer typed in during the last 2 minutes that it hasn't acknowledged. The agent's waiting decisions go oldest first, one at a time, each once the one before is acknowledged, or 2 minutes after it was typed if no acknowledgement comes. Agents usually acknowledge within seconds (half within 10, 9 in 10 within 48, over November 2 to 9). Decisions for different agents don't wait on each other. While a card's decision waits, the card has ⏳, which goes when the decision is released; 📨 still marks it landing. A thread reply, or the words in a Change pop-up, never waits: the approver correcting himself should reach the agent at once, even mid-task. Each reply is its own message.
+
 **Resuming, for agent-email.** `router.deliver` can still resume a closed session, and agent-email, which imports it, does, so a reply to an email reaches a session that has closed. It finds the newest session that can still work (the newest moved copy or continuation, or the asker, skipping any stopped at its usage limit); opens a tab in the agent's Herdr workspace, or in a new workspace if that's gone, starting `default_herdr_session` headless if no Herdr session is running; runs `aim claude resume <id>` or `aim codex resume <id>`; waits until the pane is ready (closing it if it lands on Claude's usage-limit menu); records the id the resumed session reports; and sends the message. Approvals calls it with `resume=False`.
 
 Only the asker, a moved copy or a continuation of it can change where a request's answers go. A continuation's `approvals inbox` also shows the request's waiting answers. If another session runs a command on the request, that's noted on the record and changes nothing.
@@ -111,13 +113,15 @@ Every message starts with `[Approvals]` and the request number, quotes the appro
 **The agent's acknowledgement:**
 - Every answer tells the agent to acknowledge first. Deadlines are the exception.
 - The agent posts in the thread with `approvals ack`, in its own words: what it understood and what it's about to do. For example: "Got it: you approved v2. Posting the reply now, then I'll mark it done."
+- An acknowledgement covers every answer on the card that has gone to the agent (typed in, or read from its inbox), not one still waiting its turn. Answers are counted as gone the moment typing starts, since agents often acknowledge before their transcript shows the message.
 - The thread then shows, from the agent itself, what will happen. Any later difference between the acknowledgement and the action is visible there.
 
 **The warning.** A delivered answer that hasn't been acknowledged after 10 minutes gets one ⚠️ note in the thread. It names the agent and says nothing confirms the answer was understood or acted on.
 
 ## Polling and deadlines
 
-- **Replies:** the listener polls each open request's thread directly, capped at about 40 Slack calls a minute, so an old card's thread is still checked. Socket Mode message events, when the app receives them, trigger an immediate check.
+- **Replies:** when the approver posts in a card's thread, Slack's message event has that thread read in the next round, within 5 seconds, ahead of everything else. Other posts (agents' acknowledgements, the service's own notes) don't. The hub hands the reply to its own sessions within 5 seconds, and the other machines ask for theirs every 5 seconds.
+- **The safety net:** the listener also reads every watched thread in turn (any card with activity in the last 14 days), 3 every 5 seconds. With hundreds of cards a full pass takes about 15 minutes, so this only catches replies Slack didn't flag, such as while the connection is down.
 - **Deadlines:** at its deadline a request is marked "No answer: not approved" and the agent is told. A reply after that reopens it.
 
 ## The morning list

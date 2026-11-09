@@ -35,11 +35,18 @@ def ack_step(rec, what):
 ACK_LABELS = {"decision": "answer", "feedback": "reply", "answer": "answer to your question", "comment": "reply"}
 
 
+def sent(item):
+    """It has gone to the agent: typed into its session (stamped as typing starts, since agents often acknowledge
+    before the service has seen the message in their transcript), or read from its inbox."""
+    return bool(item.get("sent_at") or item.get("delivered_at") or item.get("seen_by_agent"))
+
+
 def acknowledge(rec, text, ts):
-    """The agent posted its acknowledgement; every answer it had been sent so far counts as acknowledged."""
+    """The agent posted its acknowledgement; every answer it had been sent so far counts as acknowledged. One still
+    waiting to go doesn't, so it gets an acknowledgement of its own."""
     kinds = []
     for item in rec.get("outbox", []):
-        if item.get("needs_ack") and not item.get("acked_at"):
+        if item.get("needs_ack") and not item.get("acked_at") and sent(item):
             item["acked_at"] = store.iso()
             kinds.append(item["kind"])
     store.event(rec, "ack", text=text, ts=ts, acknowledges=kinds)
@@ -432,18 +439,49 @@ def next_item(rec):
     return next((i for i in rec.get("outbox", []) if not i.get("delivered_at") and not i.get("inbox_only")), None)
 
 
+PACE_SECONDS = 120   # the longest a decision waits for its agent to acknowledge the answer before it
+
+
+def held(records):
+    """Decisions waiting for their agent to catch up, as {(request id, ref)}. Approvals pressed in a row would
+    otherwise land in the agent within seconds of each other, before it has reacted to the first. So an agent (the
+    session that asked) gets one decision at a time, oldest first, once it has acknowledged what it was sent last,
+    or PACE_SECONDS after that if it never does. Replies in a thread never wait: the approver correcting himself
+    should reach the agent at once, even mid-task."""
+    cutoff = store.now() - timedelta(seconds=PACE_SECONDS)
+    busy, waiting = set(), {}
+    for rec in records:
+        sid = (rec.get("reach") or {}).get("session_id")
+        if not sid or not rec.get("thread_ts"):
+            continue
+        for i in rec.get("outbox", []):
+            at = i.get("sent_at") or i.get("delivered_at")
+            if i.get("needs_ack") and not i.get("acked_at") and at and datetime.fromisoformat(at) >= cutoff:
+                busy.add(sid)
+        item = next_item(rec)
+        if item and item["kind"] == "decision" and due(item) and not item.get("sent_at"):
+            waiting.setdefault(sid, []).append((item["created"], rec["id"], item["ref"]))
+    out = set()
+    for sid, items in waiting.items():
+        items.sort()
+        out |= {(rid, ref) for _, rid, ref in (items if sid in busy else items[1:])}
+    return out
+
+
 def to_deliver(records, machine):
     """What one machine delivers now: [request id, ref] of each request's next message that is due, for sessions
-    on that machine; and [request id, ref, reach] of strays, messages the machine on the card couldn't deliver because
-    the session wasn't there, for whichever machine has it to take."""
+    on that machine, except decisions held for their agent to catch up; and [request id, ref, reach] of strays,
+    messages the machine on the card couldn't deliver because the session wasn't there, for whichever machine has it
+    to take. Pass every record: holding a decision depends on the agent's other cards."""
     due_now, strays = [], []
     cutoff = store.now() - timedelta(days=STRAY_DAYS)
     one_machine = not config.settings().get("hub")   # every card is this machine's, whatever name it gave then
+    hold = held(records)
     for rec in records:
         if not rec.get("thread_ts"):
             continue
         item = next_item(rec)
-        if item and due(item) and (one_machine or machine_of(rec) == machine):
+        if item and due(item) and (rec["id"], item["ref"]) not in hold and (one_machine or machine_of(rec) == machine):
             due_now.append([rec["id"], item["ref"]])
         for i in rec.get("outbox", []):
             if (i.get("stray") and not i.get("delivered_at") and not i.get("seen_by_agent")

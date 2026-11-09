@@ -303,7 +303,8 @@ def test_the_approvers_own_post_in_the_channel_asks_for_a_list(monkeypatch):
     assert seen == {"since": "100.1", "asked": True}
 
 
-def test_polling_turns_replies_into_one_message(monkeypatch):
+def test_polling_sends_each_reply_as_its_own_message(monkeypatch):
+    """The approver correcting himself in a row reaches the agent every time, never joined or held back."""
     rec = make_rec(SAMPLES["price"])
     put(rec)
     s = config.settings()
@@ -317,8 +318,9 @@ def test_polling_turns_replies_into_one_message(monkeypatch):
     L.poll_thread(store.load("AP-0001"))
     L.poll_thread(store.load("AP-0001"))   # second pass finds nothing new
     saved = store.load("AP-0001")
-    assert len(saved["outbox"]) == 1 and saved["last_seen"] == "3.5"
-    assert '"Do Brazil and Mexico." / "Leave Japan."' in saved["outbox"][0]["text"]
+    assert len(saved["outbox"]) == 2 and saved["last_seen"] == "3.5"
+    assert '"Do Brazil and Mexico."' in saved["outbox"][0]["text"] and '"Leave Japan."' in saved["outbox"][1]["text"]
+    assert core.to_deliver([saved], config.machine())[0] == [["AP-0001", saved["outbox"][0]["ref"]]]
 
 
 def test_a_herdr_session_that_isnt_running_is_started_for_the_resume(reach, world):

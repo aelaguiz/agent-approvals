@@ -62,6 +62,14 @@ def react(ts, name):
             raise
 
 
+def unreact(ts, name):
+    try:
+        client().reactions_remove(channel=channel(), timestamp=ts, name=name)
+    except Exception as e:  # no_reaction is fine
+        if "no_reaction" not in str(e):
+            raise
+
+
 def ephemeral(user, text, thread_ts=None):
     kw = dict(channel=channel(), user=user, text=text)
     if thread_ts:

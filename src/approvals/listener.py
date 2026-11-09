@@ -49,7 +49,8 @@ WATCH_DAYS = 14          # threads stay watched this long after their last activ
 POLL_BUDGET_PER_MIN = 40
 FAILURE_NOTE_AFTER = 3
 ACK_MINUTES = 10         # a delivered answer the agent hasn't acknowledged by then gets a warning in the thread
-FETCH_SECONDS = 10       # how often a machine other than the hub asks it for answers to deliver
+FETCH_SECONDS = 5        # how often a machine other than the hub asks it for answers to deliver
+WAITING = "hourglass_flowing_sand"   # ⏳ on a card while its decision waits for the agent to catch up
 STRAY_SECONDS = 60       # how often a machine looks for answers whose session turned up on it
 
 
@@ -107,7 +108,10 @@ class Listener:
         client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
         if req.type == "events_api":
             ev = (req.payload or {}).get("event") or {}
-            if ev.get("type") == "message" and ev.get("channel") == self.s["channel"] and ev.get("thread_ts"):
+            # Only the approver's own posts: the agents' acknowledgements and our notes would take his turn.
+            who = ev.get("user")
+            if (ev.get("type") == "message" and ev.get("channel") == self.s["channel"] and ev.get("thread_ts")
+                    and who and who in (self.s["approver"], config.test_approver())):
                 with self.poke_lock:
                     self.poke.add(ev["thread_ts"])
 
@@ -255,13 +259,18 @@ class Listener:
             return
         now = time.monotonic()
         with self.poke_lock:
-            poked, self.poke = self.poke & set(recs), set()
+            self.poke &= set(recs)
+            poked = set(self.poke)
         interval = max(15.0, len(recs) * 60.0 / POLL_BUDGET_PER_MIN)
         due = [ts for ts in recs if ts in poked or self.next_poll.get(ts, 0) <= now]
-        due.sort(key=lambda ts: self.next_poll.get(ts, 0))
+        # A thread Slack says the approver just posted in goes first. With hundreds of cards watched, the scheduled
+        # reads are always behind, so a flagged thread sorted by its schedule would never get a turn.
+        due.sort(key=lambda ts: (ts not in poked, self.next_poll.get(ts, 0)))
         per_cycle = max(1, POLL_BUDGET_PER_MIN * 5 // 60)   # this loop runs every 5 seconds
         for ts in due[:per_cycle]:
             self.next_poll[ts] = now + interval
+            with self.poke_lock:
+                self.poke.discard(ts)   # a flag that didn't fit this round keeps its place for the next
             try:
                 self.poll_thread(recs[ts])
             except Exception:
@@ -279,9 +288,11 @@ class Listener:
             if float(newest) <= float(r.get("last_seen") or 0):
                 return None
             r["last_seen"] = newest
-            if mine:
-                return core.take_replies(r, [x for x in mine if float(x[0]) > float(last)])
-            return None
+            kind = None
+            for reply in mine:   # each its own message: the approver correcting himself should reach the agent every time
+                if float(reply[0]) > float(last):
+                    kind = core.take_replies(r, [reply])
+            return kind
         kind = store.update(rec["id"], apply)
         if kind:
             log.info("%s: %d repl%s from the approver -> %s", rec["id"], len(mine), "y" if len(mine) == 1 else "ies", kind)
@@ -298,7 +309,6 @@ class Listener:
     # ----- deadlines, card refreshes, deliveries -----
 
     def sweep(self):
-        strays = []
         for rec in store.all_records():
             if not rec.get("thread_ts"):
                 continue
@@ -309,10 +319,31 @@ class Listener:
             if rec.get("card_dirty"):
                 self.try_refresh(rec["id"])
             self.warn_unacknowledged(rec)
-            due, lost = core.to_deliver([rec], self.me)
-            self.queue(due)
-            strays += lost
+
+    def deliver_due(self):
+        """On the hub, every few seconds: what's due for this machine's sessions, and ⏳ kept true on the cards."""
+        recs = [r for r in store.all_records() if r.get("thread_ts")]
+        due, strays = core.to_deliver(recs, self.me)
+        self.queue(due)
         self.take_strays(strays)
+        self.show_waiting(recs, core.held(recs))
+
+    def show_waiting(self, recs, hold):
+        """⏳ on a card while one of its decisions waits for the agent to catch up; gone once none does."""
+        for rec in recs:
+            on = sorted({i["react_ts"] for i in rec.get("outbox", []) if i.get("react_ts") and (rec["id"], i["ref"]) in hold})
+            was = rec.get("waiting_shown") or []
+            if on == was:
+                continue
+            try:
+                for ts in set(on) - set(was):
+                    slackapi.react(ts, WAITING)
+                for ts in set(was) - set(on):
+                    slackapi.unreact(ts, WAITING)
+            except Exception as e:
+                log.warning("the waiting mark on %s failed, will retry: %s", rec["id"], e)
+                continue
+            store.update(rec["id"], lambda r, on=on: r.update(waiting_shown=on))
 
     # ----- deliveries to this machine's sessions -----
 
@@ -383,6 +414,7 @@ class Listener:
         item = next(i for i in rec["outbox"] if i["ref"] == ref)
         if item.get("delivered_at"):
             return
+        store.update(rid, lambda r: self._sending(r, ref))
         res = router.deliver(rec.get("reach") or {}, item["text"], ref, request_id=rid, resume=False)
         log.info("%s %s: %s (%s)", rid, ref, res.status, res.reason)
         note = store.update(rid, lambda r: self._after(r, ref, res))
@@ -396,6 +428,10 @@ class Listener:
                 slackapi.note(rec["thread_ts"], note)
             except Exception as e:
                 log.warning("failure note failed: %s", e)
+
+    @staticmethod
+    def _sending(r, ref):
+        next(i for i in r["outbox"] if i["ref"] == ref)["sent_at"] = store.iso()
 
     @staticmethod
     def _after(r, ref, res):
@@ -416,6 +452,8 @@ class Listener:
             item["delivered_at"] = store.iso()
             store.event(r, "delivered", ref=ref)
             return None
+        if res.status in ("waiting", "inbox"):
+            item.pop("sent_at", None)   # nothing was typed
         if res.status == "waiting":
             # The approver decides when an agent runs, so a stopped one isn't started for an answer, and isn't
             # typed into when it's back either: it finds the answer itself, with `approvals inbox`.
@@ -470,6 +508,7 @@ class Listener:
         threads = [
             threading.Thread(target=self.loop, args=(5, self.poll_once), daemon=True),
             threading.Thread(target=self.loop, args=(self.s["sweep_seconds"], self.sweep), daemon=True),
+            threading.Thread(target=self.loop, args=(5, self.deliver_due), daemon=True),
             threading.Thread(target=self.loop, args=(5, self.lists), daemon=True),   # answers an ask within seconds
             threading.Thread(target=self.delivery_worker, daemon=True),
         ]

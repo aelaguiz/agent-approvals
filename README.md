@@ -10,11 +10,12 @@ agent ──approvals submit──▶ card in #approvals ──▶ you: ✅ / �
 
 - **One card per request, shaped to how you'll judge it.** Its type (creative, public reply, budget, purchase, money, player message, price, experiment, store or web page, content, email in your name, account action) says what the action is. Its shape says how you answer: a yes or no; today's screen beside the after, swipeable, with the change outlined; a set of related changes with a yes, a change or a no on each row and Approve all; a pick between options shown side by side; a batch with Pick which; words in your name you can edit before they go. Every card says what it's part of, what a yes covers, and what happens with no answer.
 - **The card keeps going after the yes.** The agent posts each step on it (built, waiting at Apple, live, the first read) until the thing is really out, and a condition only you can clear shows as waiting on you, on the card and in the morning list. These redraw the card in place, without a notification.
-- **One thread per request.** Your replies are feedback. The agent's questions and its next versions arrive in the same thread, and the first post always shows the newest version with working buttons.
+- **One thread per request.** Your replies are feedback, and each reaches the agent within seconds as its own message, even mid-task, so a correction is never held back. The agent's questions and its next versions arrive in the same thread, and the first post always shows the newest version with working buttons.
 - **Answers reach the exact session that asked.**
   - A running session gets the answer typed into its terminal pane.
   - A session that isn't running is never started for an answer: you decide when an agent runs. The thread says the answer is waiting, and the agent picks it up with `approvals inbox` when it's back, which the skill tells it to run whenever it picks work back up. Answers that came while it was stopped aren't typed in when it returns either.
   - A session that moved to another account, or whose work continued in a new session after a usage limit, is found by its content, and the newest one that can still work gets the answer. Nothing is typed into a session stopped at its usage limit.
+  - Approvals pressed in a row reach an agent one at a time: each goes once the agent has acknowledged the one before, or 2 minutes after it if no acknowledgement comes. A card whose answer is waiting its turn shows ⏳. Replies in a thread never wait.
   - Every answer is checked in the session's transcript and marked 📨 in Slack. 📨 means it was typed into the session, or the agent took it from its inbox, nothing more.
   - The agent then acknowledges in the thread in its own words: what it understood and what it's going to do. If it doesn't within 10 minutes, the thread gets a warning, so a delivery never looks like a handled answer.
 - **A morning list of what's waiting on you.** At 8 am each day the service posts one message in the channel that mentions you and lists every card waiting on your answer, grouped by when it closes (today, tomorrow, later), each linked to its card. It also lists cards that closed with no answer since the last list, since a reply reopens them. All day it keeps that message current: each line is struck through, with what happened, once the card stops waiting on you.
@@ -28,6 +29,7 @@ agent ──approvals submit──▶ card in #approvals ──▶ you: ✅ / �
 - A Slack app, with:
   - Socket Mode on, and an app-level token with `connections:write`;
   - Interactivity on, which Socket Mode carries;
+  - the bot event `message.channels` (`message.groups` for a private channel), so a reply in a thread is read within seconds rather than on the next pass through every card's thread;
   - bot scopes `chat:write`, `channels:history` (`groups:history` for a private channel), `channels:read`, `reactions:write`, `files:write`, `files:read` and `users:read`;
   - the bot invited to the approvals channel.
 - To deliver into agent sessions: [Herdr](https://herdr.dev), with agents running in Herdr panes. Without it, answers wait in each agent's `approvals inbox`.
@@ -70,7 +72,7 @@ Tokens stay in their own files; the config only points at them.
 Agents on several machines can share one approvals channel, each getting its answers in its own session.
 
 - **One machine is the hub.** Name it in `hub`, with the address the others reach it at in `hub_url` (`http://<hub>:8790`), and give every machine the same config. Slack hands each button press to only one connected listener, so only the hub connects. It keeps the records, watches the threads, posts the morning list, and serves the records to the other machines over HTTP on that port.
-- **Every machine runs the service.** On the hub it does everything. On the others it asks the hub every 10 seconds for answers waiting on the sessions there and types them in, the same way the hub does for its own.
+- **Every machine runs the service.** On the hub it does everything. On the others it asks the hub every 5 seconds for answers waiting on the sessions there and types them in, the same way the hub does for its own.
 - **Each card names the machine it was asked from**, the name `make install MACHINE=<name>` gave, and follows the agent when it runs a command from another machine. An answer the named machine can't deliver because the session isn't there goes to whichever machine has the session's transcript.
 - **Only machines that can post as the bot reach the hub.** They post to Slack themselves, and the hub accepts calls signed with a key derived from the bot token. A workspace whose bot token this machine can't read gets no service here, and its commands stop with that error before saving anything.
 - **When the hub is down,** commands on the other machines fail with that error, and answers wait until it's back.

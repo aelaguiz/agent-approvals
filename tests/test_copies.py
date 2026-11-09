@@ -78,11 +78,11 @@ def test_R8_a_later_message_waits_for_an_earlier_retry(monkeypatch):
     L.in_flight, L.deliveries = set(), __import__("queue").Queue()
     L.me, L.next_stray_look = config.machine(), 0.0
     monkeypatch.setattr(listener.Listener, "try_refresh", lambda self, rid: None)
-    L.sweep()
+    L.deliver_due()
     assert L.deliveries.empty()
     rec["outbox"][0]["next_try"] = store.iso(store.now())
     store.save(rec)
-    L.sweep()
+    L.deliver_due()
     assert L.deliveries.get_nowait() == ("AP-0001", rec["outbox"][0]["ref"]) and L.deliveries.empty()
 
 
