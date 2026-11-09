@@ -441,3 +441,11 @@ def test_a_row_numbered_by_the_agent_isnt_numbered_twice():
     card = dict(KINDS["set"], parts=[{"title": "1. Under the Plus badge, one line"}, {"title": "2 · The streak moves"}])
     text = txt(cards.card_blocks(rec_for(card), 1, "open"))
     assert "*1 · Under the Plus badge" in text and "*2 · The streak moves" in text
+
+
+def test_his_reply_after_a_pick_is_quoted_on_the_answered_card():
+    rec = rec_for(KINDS["choice"])
+    core.press(rec, 1, "pick:0", "U")
+    core.take_replies(rec, [("9.0", "Yes, A, but the cards slide out from under the name label")])
+    text = txt(cards.card_blocks(rec, 1, "final"))
+    assert "> Yes, A, but the cards slide out" in text and rec["status"] == "approved"

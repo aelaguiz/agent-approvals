@@ -750,7 +750,9 @@ def _timeline_blocks(rec, card):
     d = rec.get("decision") or {}
     who = config.settings()["approver_name"]
     blocks = []
-    words = d.get("edited") or d.get("words")
+    # His words on it: what he sent with the yes, else his latest reply in the thread since (a change, a condition).
+    after = [e["text"] for e in rec.get("events") or [] if e["kind"] == "comment" and e.get("text") and e["at"] >= (d.get("at") or "")]
+    words = d.get("edited") or d.get("words") or (after[-1] if after else None)
     if words:
         blocks.append(md(("*Your words:*\n" if d.get("edited") else "") + quoted(words)))
     wait = on_you(rec)

@@ -2,7 +2,7 @@
 
 ## Unit tests
 
-`make test` runs 141 tests, with no network. They cover:
+`make test` runs 142 tests, with no network. They cover:
 - every card type rendering, required fields, escaping;
 - 20 processes submitting at once and getting distinct numbers;
 - the first button press winning, and old versions refusing;
@@ -126,7 +126,7 @@ A test hub must not connect to Slack: a second connection with the workspace's a
 
 ### November 8, 2026: the kinds of card
 
-Built for issue #7. Unit tests: 141 of 141. Then the live run above, on the installed package on the hub (the Studio) and on the M5, where three Claude agents ran in their own Herdr session. Every answer was a real press or pop-up in Slack by the approver's account on a TEST card, except one condition given as a `[test reply]`.
+Built for issue #7. Unit tests: 142 of 142. Then the live run above, on the installed package on the hub (the Studio) and on the M5, where three Claude agents ran in their own Herdr session. Every answer was a real press or pop-up in Slack by the approver's account on a TEST card, except one condition given as a `[test reply]`.
 
 **What real Slack showed before the agents ran** (TEST-tagged render checks with no record behind them, deleted after):
 - A carousel card shows a picture only once its file is shared where the card is; a privately uploaded file is a broken image there, though it works in an image block. A new card now posts its pictures in its thread and is redrawn with them.
