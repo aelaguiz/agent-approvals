@@ -125,6 +125,17 @@ A test hub must not connect to Slack: a second connection with the workspace's a
 
 ## Results
 
+### November 9, 2026: replies within seconds, approvals one at a time
+
+Built for issues #3 and #8. Unit tests: 150 of 150. Then a live run on the installed package on all six machines, with the hub on the Studio. One Claude agent in the sandbox on the M5 got a brief with three unrelated budget top-ups and posted three TEST cards. Thread replies were `[test reply]` posts by the bot, the stand-in for the approver. The approvals went through `core.press`, the function the Approve button calls, three within one second, because only the approver's own presses count in Slack.
+
+| Check | Result |
+| --- | --- |
+| Three approvals pressed within one second | Pass. The first was typed in 5 seconds after its press, and the other two cards showed ⏳. The agent acknowledged the first 2 seconds after it landed. The second was typed in 4 seconds after that acknowledgement, and its ⏳ cleared. The third went in at the second's acknowledgement. All three were acted on in order, each written to `outbox.md`. |
+| One reply in a thread | Pass. Posted at 13:19:38, read by the service 5 seconds later, typed in at 13:19:45 and in the agent's transcript (📨) at 13:19:52: 14 seconds in all. Before the fix the median was 9 minutes. |
+| Six corrections two seconds apart, on a thread just read | Pass. Each was read within 1 to 5 seconds of being posted, though that thread's next scheduled read was 13 minutes away, so Slack's message event is what had it read. Six separate messages, in order, none held for an acknowledgement, no ⏳. In the first run each waited for the next 5-second pass after the one before it landed, so the last landed 31 seconds after it was posted. With the next reply sent the moment one lands, the six landed 9, 11, 17, 19, 22 and 24 seconds after each was posted. |
+| An acknowledgement before the transcript shows the message | Pass. The agent acknowledged two of the corrections a second before the service saw them in its transcript; both counted as acknowledged. |
+
 ### November 8, 2026: the kinds of card
 
 Built for issue #7. Unit tests: 142 of 142. Then the live run above, on the installed package on the hub (the Studio) and on the M5, where three Claude agents ran in their own Herdr session. Every answer was a real press or pop-up in Slack by the approver's account on a TEST card, except one condition given as a `[test reply]`.
