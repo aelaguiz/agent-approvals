@@ -40,15 +40,14 @@ def _prepare_media(card, version):
 def _share_pictures(rid, n):
     """The card's pictures go in its thread, one post, full size; Slack then shows them in the card too, which is
     redrawn with them. A carousel picture is fitted to the card's landscape frame (zoomed onto what changed when
-    it's marked, and then also posted whole, outlined)."""
+    it's marked) and also posted whole, at its own resolution, for its Full size button."""
     rec = store.load(rid)
     card = rec["versions"][n - 1]["card"]
     todo = []
     for key, path, mark in cards.pictures(card):
         if cards.in_carousel(card, key):
             todo.append((key + ":card", pictures.card_frame(path, mark)))
-            if mark:
-                todo.append((key, pictures.outlined(path, mark)))
+            todo.append((key, pictures.outlined(path, mark) if mark else path))
         else:
             todo.append((key, pictures.outlined(path, mark) if mark else path))
     if not todo:
@@ -56,8 +55,6 @@ def _share_pictures(rid, n):
     what = "The pictures on this card" if n == 1 else f"The pictures on {cards.version_label(n)}"
     refs = slackapi.upload_pictures_to_thread([(path, card["title"]) for _, path in todo], rec["thread_ts"], f"🖼 {what}, full size.")
     files = {key: ref for (key, _), ref in zip(todo, refs)}
-    for key in [k[:-5] for k in files if k.endswith(":card")]:
-        files.setdefault(key, files[key + ":card"])   # whole already: the frame is the full picture
     store.update(rid, lambda r: r["versions"][n - 1].__setitem__("files", files))
 
 

@@ -187,7 +187,9 @@ def test_a_change_on_a_row_goes_back_to_the_agent_and_the_others_keep_their_answ
     rec = store.load("AP-0001")
     assert set(rec["answers"]) == {"1", "2", "4"} and rec["status"] == "pending"
     blocks = cards.card_blocks(rec, 2, "open")
-    assert values(blocks)[-4:] == ["AP-0001|2|p3:approve", "AP-0001|2|p3:change", "AP-0001|2|p3:decline", "AP-0001|2|pic:part:3"]
+    assert values(blocks)[-3:] == ["AP-0001|2|p3:approve", "AP-0001|2|p3:change", "AP-0001|2|p3:decline"]
+    see = [e for b in blocks if b.get("block_id") == "ap|AP-0001|2|p3" for e in b["elements"]][-1]
+    assert see["text"]["text"] == "See it" and see["url"].startswith("https://")   # opens the picture itself, full resolution
     assert "🆕 *3 ·" in txt(blocks) and "Version 2" in txt(blocks)
     assert any(x.get("broadcast") and "Row 3 has new words" in txt(x["blocks"]) for x in slack)
     assert core.press(rec, 1, "p3:approve", "U") == "stale"
@@ -417,7 +419,7 @@ def test_a_new_cards_pictures_go_in_its_thread_and_then_into_the_card(tmp_path, 
     cli.main(["submit", str(p), "--agent", "Lessons"])
     root = next(x for x in slack if "text" in x and x.get("thread") is None)
     shared = next(x for x in slack if "pictures" in x)
-    assert shared["thread"] == "100.0" and len(shared["pictures"]) == 3   # two frames, and the marked one whole
+    assert shared["thread"] == "100.0" and len(shared["pictures"]) == 4   # two frames, and each picture whole for its Full size button
     rec = store.load("AP-0001")
     assert set(rec["versions"][0]["files"]) == {"gallery:0", "gallery:0:card", "gallery:1", "gallery:1:card"}
     redrawn = [x for x in slack if x.get("update") == "100.0"][-1]["blocks"]

@@ -354,6 +354,16 @@ def table_block(table):
     }
 
 
+def full_size(text, rec, n, key):
+    """A button to one picture at its own resolution. Pictures posted in the thread open there, in Slack's own viewer,
+    where they show at full resolution and zoom; a pop-up shrinks every picture to its width (about 500 pixels), so
+    a slide or a phone screen in one couldn't be read. An older card's pictures have no link and still open a pop-up."""
+    ref = (rec["versions"][n - 1].get("files") or {}).get(key)
+    if isinstance(ref, dict) and ref.get("url"):
+        return button(text, url=ref["url"], action_id=f"full:{key}")
+    return button(text, f"{rec['id']}|{n}|pic:{key}")
+
+
 def picture(ref, alt, hero=False):
     """An uploaded picture: an older card's file id, or {"id", "url"}. A carousel card's picture only shows when
     named by its URL."""
@@ -563,7 +573,7 @@ def _gallery(rec, n, stacked=False):
              "body": {"type": "mrkdwn", "text": f"*{esc(g['label'])}*"[:NOTE_MAX]}}
         if g.get("note"):
             c["subtext"] = {"type": "mrkdwn", "text": esc(g["note"])[:NOTE_MAX]}
-        c["actions"] = [button("Full size", f"{rec['id']}|{n}|pic:{key}")]
+        c["actions"] = [full_size("Full size", rec, n, key)]
         if videos.get(key):
             c["actions"].append(button("▶ Play it", url=videos[key], action_id=f"play{i}"))
         slides.append(c)
@@ -585,7 +595,7 @@ def _option_cards(rec, n, mode):
             c["subtext"] = {"type": "mrkdwn", "text": esc(o["note"])[:NOTE_MAX]}
         c["actions"] = [button(option_button(o), f"{rec['id']}|{n}|pick:{i}", "primary" if o["name"] == card.get("pick") else None)] if mode == "open" else []
         if files.get(f"option:{i}"):
-            c["actions"].append(button("Full size", f"{rec['id']}|{n}|pic:option:{i}"))
+            c["actions"].append(full_size("Full size", rec, n, f"option:{i}"))
         if not c["actions"]:
             del c["actions"]
         slides.append(c)
@@ -652,7 +662,7 @@ def _row_buttons(rec, n, j, p):
         row.append(button(card["change_label"], f"{base}:change"))
     row.append(button(p.get("no_label") or card.get("no_label") or "No", f"{base}:decline", "danger"))
     if (rec["versions"][n - 1].get("files") or {}).get(f"part:{j}"):
-        row.append(button("See it", f"{rec['id']}|{n}|pic:part:{j}"))
+        row.append(full_size("See it", rec, n, f"part:{j}"))
     return row
 
 
