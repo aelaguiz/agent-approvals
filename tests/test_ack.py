@@ -18,12 +18,20 @@ def rec_with(*kinds):
     return rec
 
 
-def test_every_answer_tells_the_agent_to_acknowledge_first():
-    for kind in ("feedback", "decision"):
-        text = rec_with(kind)["outbox"][-1]["text"]
-        assert "First acknowledge it in the thread" in text and "approvals ack AP-0001" in text
-        assert text.index("approvals ack") < text.index("approvals done" if kind == "decision" else "approvals revise")
+def test_a_decision_is_acknowledged_first_and_a_reply_is_answered_once():
+    text = rec_with("decision")["outbox"][-1]["text"]
+    assert "First acknowledge it in the thread" in text and text.index("approvals ack") < text.index("approvals done")
+    text = rec_with("feedback")["outbox"][-1]["text"]
+    assert "approvals answer AP-0001" in text and "approvals revise AP-0001" in text
+    assert "Your reply is your acknowledgement" in text and "First acknowledge" not in text
     assert rec_with("expired")["outbox"][-1]["needs_ack"] is False
+
+
+def test_any_post_of_the_agents_counts_as_its_acknowledgement():
+    rec = rec_with("feedback")
+    rec["outbox"][-1]["delivered_at"] = store.iso()
+    assert core.mark_acked(rec) == ["feedback"] and rec["outbox"][-1]["acked_at"]
+    assert core.mark_acked(rec) == []
 
 
 def test_acknowledging_marks_every_answer_sent_so_far():

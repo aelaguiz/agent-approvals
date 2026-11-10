@@ -136,3 +136,59 @@ def test_files_named_in_evidence_are_uploaded_so_they_open_in_slack(tmp_path, mo
 def test_evidence_in_another_shape_is_refused():
     assert any("evidence" in e for e in cards.validate(dict(SAMPLES["money"], evidence={"a": 1})))
     assert cards.validate(dict(SAMPLES["money"], evidence="one block of text")) == []
+
+
+def test_an_answer_hands_the_card_back_as_it_stands_and_acknowledges(slack):
+    rec = saved()
+    core.take_replies(rec, [("9.0", "is this for every payer or just puzzles?")])
+    rec["outbox"][-1]["delivered_at"] = store.iso()
+    store.save(rec)
+    cli.main(["answer", "AP-0001", "Every payer, not just puzzles. Wherever someone buys Plus, the next screen takes them to it."])
+    rec = store.load("AP-0001")
+    assert rec["status"] == "pending" and len(rec["versions"]) == 1 and rec["outbox"][-1]["acked_at"]
+    assert slack[-1]["thread"] == rec["thread_ts"] and not slack[-1]["broadcast"]
+    blocks = cards.answer_blocks(rec, "Every payer, not just puzzles. More below.\n- one\n- two", store.now())
+    assert blocks[0]["text"]["text"].startswith("*Every payer, not just puzzles.*") and "• one\n• two" in blocks[0]["text"]["text"]
+    colon = cards.answer_blocks(rec, "It doesn't change it: testers keep press-and-hold. More.", store.now())
+    assert colon[0]["text"]["text"].startswith("*It doesn't change it: testers keep press-and-hold.*")
+
+
+def test_an_answer_on_an_approved_card_changes_nothing_else(slack):
+    rec = saved()
+    core.decide(rec, 1, "approved", "UAPPROVER")
+    store.save(rec)
+    cli.main(["answer", "AP-0001", "Correction: the size is about a third smaller. Your yes stands unless you say otherwise."])
+    assert store.load("AP-0001")["status"] == "approved"
+
+
+def test_waiting_on_someone_else_shows_on_the_card_and_keeps_it_off_the_morning_list(slack):
+    from approvals import digest
+    saved()
+    cli.main(["status", "AP-0001", "Joey's design note, by Tuesday", "--waiting-on"])
+    rec = store.load("AP-0001")
+    assert "Waiting on:* Joey's design note" in json.dumps(cards.card_blocks(rec, 1, "open"))
+    assert not digest.waiting(rec)
+    cli.main(["status", "AP-0001", "Joey said yes to the design"])
+    assert digest.waiting(store.load("AP-0001"))
+
+
+def test_a_card_without_a_why_is_refused_and_says_what_goes_in_it():
+    card = dict(SAMPLES["money"]); card.pop("why")
+    errs = cards.validate(card)
+    assert any(e.startswith("why is required") and "what the business gets" in e for e in errs)
+
+
+def test_a_row_can_be_named_by_its_id(slack):
+    from kinds import KINDS
+    from test_kinds import rec_for
+    store.save(rec_for(KINDS["set"]))
+    rec = store.load("AP-0001")
+    pid = cards.part_id(rec["versions"][0]["card"]["parts"][1], 2)
+    assert cli._row(rec, pid) == 2 and cli._row(rec, "2") == 2 and cli._row(rec, "nope") == 0
+
+
+def test_a_card_too_long_for_a_block_per_fact_keeps_its_facts_together():
+    card = dict(SAMPLES["money"], facts=[[f"Fact {i}", "a line"] for i in range(48)])
+    rec = make_rec(card)
+    blocks = cards.card_blocks(rec, 1, "open")
+    assert len(blocks) <= cards.BLOCKS_MAX and any("*Fact 0:* a line" in json.dumps(b) for b in blocks)

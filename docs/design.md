@@ -45,7 +45,11 @@ When the approver decides:
 
 ## The card's shape, and its answers
 
-A card's `type` says what the action is; its fields say how the approver judges it and answers it. The renderer is `cards.py`; what an answer does to the record is `core.py`. One card is answered one way:
+A card's `type` says what the action is; its fields say how the approver judges it and answers it. The renderer is `cards.py`; what an answer does to the record is `core.py`.
+
+**The layout** follows how the approver reads, cold and on a phone (Amir, November 10, 2026: "It's just a bunch of text all jammed together"). Top to bottom: the action as the title; one small line with what it belongs to and who sent it; the required `why` line, what the business gets and why now; the version note; the picture; a divider; each fact as its own block with its label above it, and lines starting "- " drawn as bullets; quotes, tables, options and rows; a divider; what a yes covers and doesn't, at full size; the link buttons and the answer buttons; and one small line with the card number, its version, the deadline and what no answer means. A card that would pass Slack's 50 blocks that way draws its facts in one block instead. Cards from before the why line draw without one.
+
+One card is answered one way:
 
 - **A yes or no**, as before, with buttons named for what happens. `change_label` adds a Change button; quotes marked `edit` add Edit the words.
 - **A pick** among `options`. With pictures, the options are carousel cards side by side, each with its own Pick button and the sender's pick marked; without, they're buttons. The decision records the `choice`.
@@ -112,8 +116,10 @@ Every message starts with `[Approvals]` and the request number, quotes the appro
 📨 means one thing: the service saw its message in the agent's transcript. That proves delivery, not understanding.
 
 **The agent's acknowledgement:**
-- Every answer tells the agent to acknowledge first. Deadlines are the exception.
-- The agent posts in the thread with `approvals ack`, in its own words: what it understood and what it's about to do. For example: "Got it: you approved v2. Posting the reply now, then I'll mark it done."
+- A decision (a yes, a no, a pick, items) tells the agent to acknowledge first with `approvals ack`, in its own words: what it understood and what it's doing now. For example: "Got it: you approved v2. Posting the reply now, then I'll mark it done."
+- A reply or a question in the thread doesn't: the agent's answer (`approvals answer`) or its next version is the acknowledgement, so the approver meets the answer first and no "Got it, I'm checking" post (November 10, 2026: "Please stop sending me the same approvals and just ... talk to me"). Every post of the agent's on the card counts: an answer, a new version, a status line, a question, a withdrawal, done. A separate `ack` is only for a reply that will take more than a few minutes, saying what's coming and when.
+- `approvals answer` posts the answer with its first sentence in bold and the agent's name in the small line under it. On a card waiting on the agent after a reply, it hands the card back to the approver as it stands (status pending, so it's on his list again) with no new version. On an approved or withdrawn card it posts and changes nothing else.
+- Deadlines need no acknowledgement.
 - An acknowledgement covers every answer on the card that has gone to the agent (typed in, or read from its inbox), not one still waiting its turn. Answers are counted as gone the moment typing starts, since agents often acknowledge before their transcript shows the message.
 - The thread then shows, from the agent itself, what will happen. Any later difference between the acknowledgement and the action is visible there.
 
@@ -131,7 +137,7 @@ Cards arrive all day and night, and a card nobody answers closes as a no, so its
 
 - **When:** at 8:00 am in the workspace's `timezone`, the listener posts one message in the channel, mentioning the approver. A service that was down at 8 posts when it comes back that day. `digest.json` in the workspace's folder records the newest list's message and what it lists.
 - **On demand:** any post of the approver's own in the channel, outside a card's thread, asks for a fresh list. The channel holds only cards, so nothing else is posted there that way. Every 5 seconds the listener reads the channel's posts since the newest list and, if one asks, posts a new list at the bottom, without the mention. An ask before 8 am doesn't replace the morning list.
-- **What's on it:** every card waiting on the approver's answer: new cards, new versions, and agents' questions (status `pending` or `question`). Cards waiting on their agent (revising after a reply, or acting on a yes) stay off, and so do TEST cards.
+- **What's on it:** every card waiting on the approver's answer: new cards, new versions, and agents' questions (status `pending` or `question`). Cards waiting on their agent (revising after a reply, or acting on a yes) stay off, and so do cards waiting on someone else (`approvals status --waiting-on`, until a later line) and TEST cards.
 - **Order:** grouped by the day the card closes (today, tomorrow, later), soonest first. Each line links the request number to the card's first post, which always shows the newest version, and says the agent, when the card last came to the approver, and when it closes.
 - **Closed with no answer:** cards that hit their deadline since the last list get their own section. A reply in a closed card's thread reopens it, and nothing new is posted in the channel when a card closes, so this is where the approver learns of it.
 - **Kept current:** every 5 seconds, the listener renders the newest list again from the records and edits the message when anything changed. A card that stops waiting on the approver is struck through with what happened: approved, declined, replied to, withdrawn, or closed with no answer. A card that comes back with a new version is shown as waiting again. Cards that arrive after the list is posted are left to the next list.

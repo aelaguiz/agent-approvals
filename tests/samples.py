@@ -2,7 +2,8 @@
 from pathlib import Path
 
 SCREEN = str(Path(__file__).parent / "screen.png")   # a small picture that exists
-BASE = {"approves": "this exact thing.", "does_not_approve": "anything else.", "part_of": None}
+BASE = {"approves": "this exact thing.", "does_not_approve": "anything else.", "part_of": None,
+        "why": "It moves the number this initiative is for, and waiting costs a day."}
 
 
 def s(**kw):

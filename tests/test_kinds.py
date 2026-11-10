@@ -67,7 +67,7 @@ def test_every_kind_validates_and_renders_within_slacks_limits(kind):
     assert len(cards.see_view(rec, 1)["blocks"]) <= 100
     text = txt(cards.card_blocks(rec, 1, "open"))
     frame = f"Part of: {card['part_of']}" if card["part_of"] else "Stands alone"
-    assert frame in text and "A yes covers" in text
+    assert frame in text and "Your yes covers" in text and "*Why:*" in text
 
 
 def test_several_pictures_are_a_carousel_and_one_is_full_width():
@@ -349,7 +349,7 @@ def test_a_change_on_a_whole_card_is_feedback_like_a_thread_reply(slack):
     answer, follow = L.handle_submission(submit_payload("AP-0001|1|change", {"words": {"words": {"value": "fix 2's outline is on the wrong line"}}}))
     run(follow)
     rec = store.load("AP-0001")
-    assert rec["status"] == "revising" and "This is feedback on the card" in rec["outbox"][-1]["text"]
+    assert rec["status"] == "revising" and "approvals revise AP-0001" in rec["outbox"][-1]["text"]
     assert rec["outbox"][-1]["react_ts"] == rec["thread_ts"]
 
 

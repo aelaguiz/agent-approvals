@@ -2,7 +2,7 @@
 
 ## Unit tests
 
-`make test` runs 158 tests, with no network. They cover:
+`make test` runs 165 tests, with no network. They cover:
 - every card type rendering, required fields, escaping;
 - 20 processes submitting at once and getting distinct numbers;
 - the first button press winning, and old versions refusing;
@@ -10,7 +10,7 @@
 - routing decisions with fake `herdr` and `aim`: live pane, focused pane (sent straight away), a closed session left alone with its answer waiting (and resumed only when a caller asks, as agent-email does), moved session, a different session in the pane, an already delivered message, another machine, this machine under a changed name;
 - sessions stopped at their usage limit: the answer goes to a session continuing the work, nothing is typed into the stopped one or into the usage-limit menu, and a resume that lands on that menu closes its pane;
 - continuations and moved copies against real transcript files, including copies whose session ids were rewritten;
-- new versions: approvable after an earlier yes, refused after a decline, announced in the channel, posted once with the old version never posted again, an older copy shrunk to a line that opens it, the new card linking back, and the older version's line in the channel taken down; withdrawn cards;
+- new versions: approvable after an earlier yes, refused after a decline, announced in the channel, posted once with the old version never posted again, an older copy shrunk to a line that opens it, the new card linking back, and the older version's line in the channel taken down; answers: verdict first in bold, the card handed back with no new version, nothing changed on an approved card; any post of the agent's counting as its acknowledgement; a card waiting on someone else shown on its face and kept off the morning list; the why line required; rows named by id; a card too long for a block per fact keeping its facts together; withdrawn cards;
 - evidence: one block of text is one post, and files named in evidence are uploaded;
 - the failure note posting once;
 - replies and approvals in a row: each reply its own message, in order, the next one on a card typed right behind the last before either shows up in the transcript; a typed message delivered and 📨 once it shows up, tried again if it doesn't within 90 seconds, and the next waiting when one can't be typed; a thread the approver just posted in read before hundreds of overdue ones, a flag that didn't fit one round kept for the next, and other people's posts never flagging; approvals pressed in a row reaching one agent one at a time, each after the agent acknowledged the last or 2 minutes without it; different agents not waiting on each other; a reply going straight through while the agent reacts to a yes; a reply on a card whose yes is waiting sending both now; rows of one card each waiting for their own acknowledgement; ⏳ on a waiting card and gone once it's released;

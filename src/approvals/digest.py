@@ -43,7 +43,7 @@ def _save_state(st):
 
 def waiting(rec):
     """Waiting on the approver: a card or question he hasn't answered, or a yes with a condition only he can clear."""
-    return rec["status"] in WAITING or bool(cards.on_you(rec))
+    return (rec["status"] in WAITING and not cards.waiting_on(rec)) or bool(cards.on_you(rec))
 
 
 def _ours(rec):

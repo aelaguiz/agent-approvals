@@ -36,7 +36,7 @@ NEED_TEXT = {
 # Slack's limits: a carousel holds 10 cards; a card's title 150 characters and its body 200; a button 75; a pop-up's
 # text box 3,000; a message 50 blocks.
 GALLERY_MAX, PARTS_MAX, OPTIONS_MAX, ITEMS_MAX, LINKS_MAX = 10, 10, 10, 100, 5
-LABEL_MAX, NOTE_MAX, BUTTON_MAX, EDIT_MAX, BLOCKS_MAX = 150, 200, 75, 3000, 50
+LABEL_MAX, NOTE_MAX, BUTTON_MAX, EDIT_MAX, BLOCKS_MAX, WHY_MAX = 150, 200, 75, 3000, 50, 400
 SHAPES = ("parts", "options", "items")
 
 
@@ -107,6 +107,10 @@ def validate(card, revision=False):
             errs.append(f"{key} is required")
     if len(str(card.get("title", ""))) > LABEL_MAX:
         errs.append(f"title is the card's headline, which Slack cuts at {LABEL_MAX} characters: say the action, and put the rest in facts")
+    if not _text(card.get("why"), WHY_MAX):
+        errs.append(f"why is required, under {WHY_MAX} characters: one or two sentences, first on the card, saying what the "
+                    "business gets and why now, in the approver's words. For a test, say what its result decides. If you "
+                    "can't write it, or don't believe it, the card isn't ready to send")
     if "part_of" not in card or not (card["part_of"] is None or _text(card["part_of"], 120)):
         errs.append("part_of is required: the initiative this card belongs to, in the approver's words "
                     "(\"Payers keep using what they paid for\"), or null if it stands alone")
@@ -407,9 +411,16 @@ def pending_lines(rec, part=None):
     last_done = max([i for i, e in enumerate(lines) if e["kind"] == "done"] or [-1])
     out = {}
     for i, e in enumerate(lines):
-        if i > last_done and e["kind"] in ("next", "on_you") and e["at"] > done_at:
+        if i > last_done and e["kind"] in ("next", "on_you", "waiting") and e["at"] > done_at:
             out[e["kind"]] = e
     return out
+
+
+def waiting_on(rec):
+    """Someone other than the approver the card waits on, until a later line of what happened."""
+    if rec.get("status") in ("withdrawn", "done", "declined"):
+        return None
+    return pending_lines(rec).get("waiting")
 
 
 def on_you(rec):
@@ -451,6 +462,14 @@ def card_blocks(rec, n, mode="open"):
         return _final_blocks(rec, n)
     if mode == "replaced":
         return _replaced_blocks(rec, n)
+    blocks = _card_blocks(rec, n, mode)
+    # Each fact gets a block of its own, for room between them; a card that would pass Slack's limit that way keeps
+    # its facts in one block instead.
+    return blocks if len(blocks) <= BLOCKS_MAX else _card_blocks(rec, n, mode, compact=True)
+
+
+def _card_blocks(rec, n, mode, compact=False):
+    card = rec["versions"][n - 1]["card"]
     blocks = [test_tag()] if rec.get("test") else []
     title = card["title"]
     if mode == "final":   # a set of rows: the rows are the card, so it stays whole
@@ -460,12 +479,15 @@ def card_blocks(rec, n, mode="open"):
     frame = frame_line(rec, card)
     if frame:
         blocks.append(frame)
+    if card.get("why"):
+        blocks.append(md(f"*Why:* {esc(card['why'])}"))
     if n > 1 and card.get("changes"):
         blocks += _version_note(rec, n, card, mode)
     open_ = mode == "open"
-    if open_ and card.get("if_no_answer"):
-        blocks.append(md(f"⏰ *Answer by {when(datetime.fromisoformat(rec['deadline']))}.* With no answer, {esc(card['if_no_answer'])}"))
-    blocks += _body(rec, n, mode)
+    waits = waiting_on(rec)
+    if waits and mode != "view":
+        blocks.append(md(f"⏳ *Waiting on:* {esc(waits['text'])}"))
+    blocks += _body(rec, n, mode, compact)
     if card.get("parts"):
         blocks += _rows(rec, n, mode)
     if mode == "final":
@@ -473,7 +495,11 @@ def card_blocks(rec, n, mode="open"):
     elif mode == "open" and status_lines(rec):
         blocks.append(ctx("\n".join(status_lines(rec))))
     if mode != "final":
-        blocks.append(ctx(f"*A yes covers:* {esc(card['approves'])}   *Not:* {esc(card['does_not_approve'])}"))
+        blocks.append({"type": "divider"})
+        blocks.append(md(f"*Your yes covers:* {esc(card['approves'])}\n*It doesn't cover:* {esc(card['does_not_approve'])}"))
+        if card.get("links"):
+            blocks.append({"type": "actions", "block_id": "links", "elements": [
+                button(label, url=url, action_id=f"link{i}") for i, (label, url) in enumerate(card["links"])]})
     if open_:
         row = _buttons(rec, n)
         if row:
@@ -518,7 +544,7 @@ def _version_note(rec, n, card, mode):
     return out
 
 
-def _body(rec, n, mode):
+def _body(rec, n, mode, compact=False):
     v = rec["versions"][n - 1]
     card = v["card"]
     blocks = []
@@ -545,14 +571,15 @@ def _body(rec, n, mode):
             else:
                 lines.append(f"*{esc(line[0])}:* {esc(line[1])}")
         blocks.append(md("\n".join(lines)))
-    blocks.append(md("\n".join(f"*{esc(k)}:* {esc(val)}" for k, val in card["facts"])))
+    blocks.append({"type": "divider"})
+    if compact:
+        blocks.append(md("\n".join(f"*{esc(k)}:* {esc(val)}" for k, val in card["facts"])))
+    else:
+        blocks += [md(f"*{esc(k)}*\n{bullets(esc(val))}") for k, val in card["facts"]]
     if card.get("table"):
         blocks.append(table_block(card["table"]))
     if card.get("items"):
         blocks += _items(card, rec.get("decision") if mode == "final" else None)
-    if card.get("links"):
-        blocks.append({"type": "actions", "block_id": "links", "elements": [
-            button(label, url=url, action_id=f"link{i}") for i, (label, url) in enumerate(card["links"])]})
     if mode == "view" and card.get("options") and not any(o.get("image") for o in card["options"]):
         blocks.append(md("\n".join(f"• {esc(option_button(o))}" + (" · *our pick*" if o["name"] == card.get("pick") else "")
                                for o in card["options"])))
@@ -724,8 +751,9 @@ def _footer(rec, n, mode):
     card = rec["versions"][n - 1]["card"]
     base = f"{rec['id']} · {version_label(n)}" + ("" if has_frame(rec, card) else f" · From {esc(rec['agent'])}")
     if mode == "open":
-        late = "" if card.get("if_no_answer") else f" · No answer by {when(datetime.fromisoformat(rec['deadline']))} means no"
-        return ctx(f"💬 Feedback? Reply in the thread · {base}{late}")
+        by = when(datetime.fromisoformat(rec["deadline"]))
+        late = f"With no answer by {by}, {esc(card['if_no_answer'])}" if card.get("if_no_answer") else f"No answer by {by} means no"
+        return ctx(f"{base} · {late} · 💬 Reply in the thread")
     return ctx(f"💬 Reply in the thread with anything else · {base}")
 
 
@@ -939,6 +967,22 @@ def new_version_blocks(rec, n):
                      + (f"\n{esc(card['changes'])}" if card.get("changes") else "")))
     blocks.append(ctx(f"Waiting for you in this thread, with its buttons · {rec['id']}"))
     return blocks
+
+
+def bullets(text):
+    """Lines the agent started with "- " or "* " read as Slack's bullets."""
+    return re.sub(r"(?m)^[ \t]*[-*][ \t]+", "• ", text)
+
+
+def answer_blocks(rec, text, at):
+    """An answer in the thread: its first sentence, the verdict, in bold, then the facts behind it, and who answered
+    in the small line under it."""
+    body = bullets(esc(text.strip()))
+    first = re.match(r"([^\n]+?[.!?])(\s|$)", body)
+    if first and not body.startswith("*"):
+        body = f"*{first.group(1)}*" + body[first.end(1):]
+    blocks = [test_tag()] if rec.get("test") else []
+    return blocks + [md(body), ctx(f"{esc(rec['agent'])} · answered · {rec['id']} · {when(at)}")]
 
 
 def question_blocks(rec, question):

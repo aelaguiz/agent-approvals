@@ -146,6 +146,7 @@ def cmd_ask(a):
         reach.refresh(rec, reach.capture())
         rec["open_question"] = {"text": a.question, "at": store.iso()}
         rec["status"] = "question"
+        core.mark_acked(rec)
         store.event(rec, "question", text=a.question)
         return rec
     rec = store.update(a.id, fn)
@@ -169,6 +170,7 @@ def cmd_revise(a):
 
     def add(r):
         reach.refresh(r, reach.capture())
+        core.mark_acked(r)
         r["versions"].append(version)
         r["status"] = "pending"
         r["open_question"] = None
@@ -230,6 +232,7 @@ def cmd_done(a):
             return rec["status"] + (f" with {len(cards.open_rows(rec))} part(s) still open" if cards.open_rows(rec) else "")
         rec["done"] = {"text": a.readback, "at": store.iso()}
         rec["status"] = "done"
+        core.mark_acked(rec)
         store.event(rec, "done", text=a.readback)
         return "ok"
     r = store.update(a.id, fn)
@@ -246,6 +249,7 @@ def cmd_withdraw(a):
             return rec["status"]
         rec["status"] = "withdrawn"
         rec["withdrawn"] = {"text": a.why, "at": store.iso()}
+        core.mark_acked(rec)
         rec["open_question"] = None
         rec["card_dirty"] = True
         store.event(rec, "withdrawn", text=a.why)
@@ -266,7 +270,10 @@ def cmd_record(a):
     def fn(rec):
         n = len(rec["versions"])
         if a.part:
-            return core.answer_part(rec, n, a.part, "chose" if a.choice else verdict, by, where=a.where, words=a.words,
+            j = _row(rec, a.part)
+            if not j:
+                return f"there is no row {a.part}"
+            return core.answer_part(rec, n, j, "chose" if a.choice else verdict, by, where=a.where, words=a.words,
                                     choice=a.choice, tell=False)
         if a.choice and a.choice not in [o["name"] for o in rec["versions"][-1]["card"].get("options") or []]:
             return f"{a.choice} isn't one of this card's options"
@@ -283,7 +290,8 @@ def cmd_status(a):
     if not a.text and not a.headline and a.part_of is None and not a.stands_alone:
         _die("Say what happened, or give a --headline, --part-of or --stands-alone.")
     frame = a.part_of if a.part_of is not None else (None if a.stands_alone else core.UNSET)
-    kind = "next" if a.next else "on_you" if a.on_you else "their_answer" if a.their_answer else "done"
+    kind = ("next" if a.next else "on_you" if a.on_you else "waiting" if a.waiting_on else
+            "their_answer" if a.their_answer else "done")
 
     def fn(rec):
         reach.refresh(rec, reach.capture())
@@ -291,10 +299,11 @@ def cmd_status(a):
             return "withdrawn"
         part = None
         if a.part:
-            parts = rec["versions"][-1]["card"].get("parts") or []
-            if not 1 <= a.part <= len(parts):
+            j = _row(rec, a.part)
+            if not j:
                 return f"has no part {a.part}"
-            part = cards.part_id(parts[a.part - 1], a.part)
+            part = cards.part_id(rec["versions"][-1]["card"]["parts"][j - 1], j)
+        core.mark_acked(rec)
         core.add_status(rec, a.text, kind, part, a.headline, frame)
         return "ok"
     r = store.update(a.id, fn)
@@ -305,7 +314,38 @@ def cmd_status(a):
     if kind == "on_you":
         # It waits on the approver: the thread says so, as a question would.
         slackapi.note(rec["thread_ts"], f"⏳ {rec['agent']} is waiting on you: {a.text}")
-    print(f"{a.id}: the card shows it" + (" and the morning list counts it as waiting on the approver." if kind == "on_you" else "."))
+    print(f"{a.id}: the card shows it" + (" and the morning list counts it as waiting on the approver." if kind == "on_you" else
+                                          " and keeps it off the approver's morning list until a later line." if kind == "waiting" else "."))
+
+
+def _row(rec, part):
+    """A row of the newest version by its number (1, 2, 3) or its id; 0 when there's no such row."""
+    parts = rec["versions"][-1]["card"].get("parts") or []
+    if str(part).isdigit():
+        return int(part) if 1 <= int(part) <= len(parts) else 0
+    return next((j for j, p in enumerate(parts, 1) if cards.part_id(p, j) == part), 0)
+
+
+def cmd_answer(a):
+    """An answer to the approver's question, in the thread: the verdict first. It counts as the acknowledgement and
+    hands a card that was back with the agent to him again as it stands, with no new version."""
+    rec = store.load(a.id)
+    me = reach.capture(a.agent)
+    ts = slackapi.post(cards.answer_blocks(rec, a.text, store.now()), f"{rec['agent']}: {a.text}", thread_ts=rec["thread_ts"])
+
+    def fn(r):
+        reach.refresh(r, me)
+        kinds = core.acknowledge(r, a.text, ts)
+        back = r["status"] == "revising"
+        if back:
+            r["status"] = "pending"
+            r["card_dirty"] = True
+        store.event(r, "answered", text=a.text, ts=ts, back=back)
+        return back
+    back = store.update(a.id, fn)
+    if back:
+        core.refresh_and_clear(a.id)
+    print(f"Answered in the thread of {a.id}" + ("; the card is back with the approver as it stands." if back else "."))
 
 
 def cmd_inbox(a):
@@ -402,7 +442,7 @@ def cmd_role(a):
 
 
 # Commands that post to Slack check first that this machine can, so nothing is saved for a card it can't post.
-POSTS = {"submit", "ask", "revise", "ack", "done", "withdraw", "record", "status"}
+POSTS = {"submit", "ask", "revise", "answer", "ack", "done", "withdraw", "record", "status"}
 
 
 def main(argv=None):
@@ -426,7 +466,13 @@ def main(argv=None):
     s.add_argument("card")
     s.set_defaults(fn=cmd_revise)
 
-    s = sub.add_parser("ack", help="acknowledge an answer in the thread: what you understood and what you'll do")
+    s = sub.add_parser("answer", help="answer the approver's question in the thread, verdict first; hands the card back to him without a new version")
+    s.add_argument("id")
+    s.add_argument("text")
+    s.add_argument("--agent")
+    s.set_defaults(fn=cmd_answer)
+
+    s = sub.add_parser("ack", help="one line, only when your reply will take a while: what is coming and when")
     s.add_argument("id")
     s.add_argument("text")
     s.add_argument("--agent")
@@ -449,18 +495,19 @@ def main(argv=None):
     g.add_argument("--declined", action="store_true")
     s.add_argument("--words", required=True, help="his exact words")
     s.add_argument("--where", required=True, help="where he said it, e.g. 'ChatGPT relay' or 'agent chat'")
-    s.add_argument("--part", type=int, help="the row of a set he answered (1, 2, 3); without it, every open row")
+    s.add_argument("--part", help="the row of a set he answered, by number (1, 2, 3) or id; without it, every open row")
     s.add_argument("--choice", help="the option he picked, by its name")
     s.set_defaults(fn=cmd_record)
 
     s = sub.add_parser("status", help="keep a posted card true in place, with no new version: where it stands after the yes, or what it's part of")
     s.add_argument("id")
     s.add_argument("text", nargs="?", help="what happened, e.g. 'Built, and live for half of new users'")
-    s.add_argument("--part", type=int, help="the row of a set it is about")
+    s.add_argument("--part", help="the row of a set it is about, by number (1, 2, 3) or id")
     k = s.add_mutually_exclusive_group()
     k.add_argument("--next", action="store_true", help="what comes next, shown with ⏳ until a later line")
     k.add_argument("--on-you", action="store_true", help="a condition only the approver can clear; the card waits on him")
     k.add_argument("--their-answer", action="store_true", help="the reply to a message sent as him")
+    k.add_argument("--waiting-on", action="store_true", help="it waits on someone other than the approver; the text says who, for what, by when. Off his morning list until a later line")
     s.add_argument("--headline", help="the answered card's title, e.g. 'Released: three lesson fixes'")
     f = s.add_mutually_exclusive_group()
     f.add_argument("--part-of", help="the initiative the card belongs to, in the approver's words; sets its frame line in place")

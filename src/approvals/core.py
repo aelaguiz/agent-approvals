@@ -41,14 +41,21 @@ def sent(item):
     return bool(item.get("sent_at") or item.get("delivered_at") or item.get("seen_by_agent"))
 
 
-def acknowledge(rec, text, ts):
-    """The agent posted its acknowledgement; every answer it had been sent so far counts as acknowledged. One still
-    waiting to go doesn't, so it gets an acknowledgement of its own."""
+def mark_acked(rec):
+    """Any post of the agent's on the card (an answer, a new version, a status line, a question, a withdrawal, done)
+    shows it read what it was sent, so everything sent so far counts as acknowledged."""
     kinds = []
     for item in rec.get("outbox", []):
         if item.get("needs_ack") and not item.get("acked_at") and sent(item):
             item["acked_at"] = store.iso()
             kinds.append(item["kind"])
+    return kinds
+
+
+def acknowledge(rec, text, ts):
+    """The agent posted its acknowledgement; every answer it had been sent so far counts as acknowledged. One still
+    waiting to go doesn't, so it gets an acknowledgement of its own."""
+    kinds = mark_acked(rec)
     store.event(rec, "ack", text=text, ts=ts, acknowledges=kinds)
     return kinds
 
@@ -163,15 +170,19 @@ def msg_replies(rec, kind, texts, question=None):
     t = cards.when(store.now())
     said = " / ".join(f'"{one_line(x)}"' for x in texts)
     rid = rec["id"]
+    one_reply = (f'Your reply is your acknowledgement: post nothing before it, and if it needs more than a few minutes of '
+                 f'work, say first in one line what is coming and when, with `approvals ack {rid} "<what and when>"`.')
     if kind == "answer":
         return (f'{head(rec)} {who()} answered your question ("{one_line(question)}") in Slack at {t}: {said}. '
-                f'{ack_step(rec, "what you will do next")} Then carry on, usually with `approvals revise {rid} <card.json>`.')
+                f'Carry on, usually with `approvals revise {rid} <card.json>`. {one_reply}')
     if kind == "comment":
         return (f'{head(rec)} {who()} replied in Slack at {t}, after the decision: {said}. '
-                f'{ack_step(rec, "what, if anything, you will change")} Take it into account; no new card unless asked for one.')
-    return (f'{head(rec)} {who()} replied in Slack at {t}: {said}. This is feedback on the card. '
-            f'{ack_step(rec, "what you will change or do as a result")} Then post a revised card with `approvals revise {rid} <card.json>` (say what changed in "changes"), '
-            f'or ask one question with `approvals ask {rid} "<question>"`. '
+                f'If it asks something, answer it with `approvals answer {rid} "<the answer, verdict first>"`. '
+                f'If it changes what you do, say so in one line with `approvals ack {rid} "<what changes>"`. No new card unless asked for one.')
+    return (f'{head(rec)} {who()} replied in Slack at {t}: {said}. '
+            f'If it asks a question, answer it with `approvals answer {rid} "<the answer, verdict first>"`: that hands the card back as it stands, with no new version. '
+            f'If it asks for a change, post the next version with `approvals revise {rid} <card.json>` (say what changed in "changes"). '
+            f'If you truly cannot go on without one fact, ask it with `approvals ask {rid} "<question>"`. {one_reply} '
             f'If the reply plainly approves the card as it stands, record it with `approvals record {rid} --approved --words "<their words>" --where "Slack thread"`, do it, then run `approvals done {rid} "<readback>"`. '
             f'If it plainly declines, record it with `approvals record {rid} --declined --words "<their words>" --where "Slack thread"` and drop it.')
 
