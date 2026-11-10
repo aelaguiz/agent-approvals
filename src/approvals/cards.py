@@ -941,7 +941,7 @@ def question_blocks(rec, question):
 def card_text(rec, n):
     """The message's own text: the one line an iPhone notification shows."""
     card = rec["versions"][n - 1]["card"]
-    text = f"{TYPES[card['type']]['emoji']} {card['title']}" + (f" ({version_label(n)})" if n > 1 else "")
+    text = f"{TYPES[card['type']]['emoji']} {rec['agent']}: {card['title']}" + (f" ({version_label(n)})" if n > 1 else "")
     if card.get("parts") and (left := len(open_rows(rec, card))) and rec.get("status") not in ("withdrawn", "done"):
         text += f" · {left} to answer"
     if card.get("if_no_answer") and rec.get("status") in ("pending", "question"):

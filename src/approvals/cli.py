@@ -108,7 +108,7 @@ def cmd_submit(a):
     errs = cards.validate(card)
     if errs:
         _die("Card refused:\n- " + "\n- ".join(errs))
-    who = reach.capture(a.agent)
+    who = reach.capture(card.get("agent") or a.agent)
     if not who["session_id"]:
         # A card with no asker can never have its answer typed back: every reply would wait in an inbox. The way
         # this happened was posting over ssh from another machine, whose shell carries no session.
@@ -119,7 +119,7 @@ def cmd_submit(a):
     version = {"n": 1, "card": card, "posted_at": store.iso()}
     _prepare_media(card, version)
     rec = store.create({
-        "type": card["type"], "title": card["title"], "agent": card.get("agent") or who["agent"],
+        "type": card["type"], "title": card["title"], "agent": who["agent"],
         "created": store.iso(), "deadline": store.iso(deadline), "status": "pending",
         "test": bool(a.test or card.get("test") or config.is_test_run()), "versions": [version], "thread_ts": None,
         "last_seen": None, "open_question": None, "decision": None, "done": None,
@@ -301,7 +301,7 @@ def cmd_status(a):
     rec = store.load(a.id)
     if kind == "on_you":
         # It waits on the approver: the thread says so, as a question would.
-        slackapi.note(rec["thread_ts"], f"⏳ Waiting on you: {a.text}")
+        slackapi.note(rec["thread_ts"], f"⏳ {rec['agent']} is waiting on you: {a.text}")
     print(f"{a.id}: the card shows it" + (" and the morning list counts it as waiting on the approver." if kind == "on_you" else "."))
 
 

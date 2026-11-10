@@ -6,6 +6,8 @@ from . import config, store, transcripts
 
 
 def capture(agent_name=None):
+    """APPROVALS_FROM is set by whatever starts the agent (a team's launcher) and wins over the name the agent gives,
+    so every card and reply says which team and member sent it, however the agent signs itself."""
     env = os.environ
     if env.get("CLAUDE_CODE_SESSION_ID"):
         runtime, sid = "claude", env["CLAUDE_CODE_SESSION_ID"]
@@ -15,7 +17,7 @@ def capture(agent_name=None):
         runtime, sid = None, None
     cwd = os.getcwd()
     return {
-        "agent": agent_name or env.get("APPROVALS_AGENT") or Path(cwd).name,
+        "agent": env.get("APPROVALS_FROM") or agent_name or env.get("APPROVALS_AGENT") or Path(cwd).name,
         "runtime": runtime,
         "session_id": sid,
         "cwd": cwd,

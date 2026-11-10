@@ -412,6 +412,16 @@ def test_a_posted_card_gets_its_frame_and_status_lines_in_place(slack):
     assert "Stands alone · Tester" in txt(cards.card_blocks(store.load("AP-0001"), 1, "open"))
 
 
+def test_the_launchers_name_wins_over_the_agents_own(tmp_path, monkeypatch, slack):
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sid-from")
+    monkeypatch.setenv("APPROVALS_FROM", "AI pod · lead")
+    p = tmp_path / "card.json"
+    p.write_text(json.dumps(KINDS["before_after"]))
+    cli.main(["submit", str(p), "--agent", "lead"])
+    rec = store.load("AP-0001")
+    assert rec["agent"] == "AI pod · lead" and "AI pod · lead" in txt(cards.card_blocks(rec, 1, "open"))
+
+
 def test_a_new_cards_pictures_go_in_its_thread_and_then_into_the_card(tmp_path, monkeypatch, slack):
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sid-kinds")
     p = tmp_path / "card.json"
