@@ -25,12 +25,13 @@ The card is the first post. Everything about the request stays in its thread:
 - the agent's evidence, one post per item, with any file it names attached so it opens in Slack;
 - the approver's replies, which count as feedback;
 - the agent's questions, marked ❓;
-- each new version as a full card.
+- each new version as a full card, at the bottom where the approver reads.
 
 When a version is replaced:
 - the first post turns into the newest version, so it can be approved from the channel;
-- older versions show "replaced", and their buttons stop working;
-- a one-line post in the channel says the new version is waiting, since the thread may be days old. Questions are sent to the channel the same way.
+- the old version is never posted again, and an earlier copy of it in the thread shrinks to one line with a See button, so the thread holds one whole card at a time and what's new is plain. The new card opens with what changed and a See button for the version before it. (Amir, November 10, 2026, when each version re-posted the one before it in full: "I see an accumulating set of copies ... and can't figure out what is new.");
+- older versions' buttons stop working;
+- a one-line post in the channel says the new version is waiting, since the thread may be days old, and the one that announced the version before it is taken down. Questions are sent to the channel the same way.
 
 Slack drops buttons from a thread reply that is also sent to the channel. That's why the first post carries the newest version, and the channel gets a line pointing to it rather than the card.
 

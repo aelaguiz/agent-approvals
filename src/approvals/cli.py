@@ -191,17 +191,20 @@ def cmd_revise(a):
         store.event(r, "revised", version=n)
         return r
     rec = store.update(a.id, add)
-    # Keep the replaced version readable in the thread, then post the new one there too.
-    if not prev.get("copy_ts"):
-        ts_old = slackapi.post(cards.card_blocks(rec, prev["n"], "replaced"), cards.card_text(rec, prev["n"]), thread_ts=rec["thread_ts"])
-        store.update(a.id, lambda r: r["versions"][prev["n"] - 1].__setitem__("copy_ts", ts_old))
+    # The new version goes at the bottom of the thread, where he reads; an earlier copy there shrinks to a line.
     _share_pictures(a.id, n)
     rec = store.load(a.id)
     ts_new = slackapi.post(cards.card_blocks(rec, n, "open"), cards.card_text(rec, n), thread_ts=rec["thread_ts"])
     store.update(a.id, lambda r: r["versions"][n - 1].__setitem__("copy_ts", ts_new))
     core.refresh_and_clear(a.id)
     _video_in_thread(a.id, n)
-    slackapi.post(cards.new_version_blocks(rec, n), f"{rec['agent']} posted v{n}: {card['title']}", thread_ts=rec["thread_ts"], broadcast=True)
+    ts_line = slackapi.post(cards.new_version_blocks(rec, n), f"{rec['agent']} posted v{n}: {card['title']}", thread_ts=rec["thread_ts"], broadcast=True)
+    store.update(a.id, lambda r: r["versions"][n - 1].__setitem__("line_ts", ts_line))
+    if prev.get("line_ts"):   # only the newest version is announced, in the channel and the thread
+        try:
+            slackapi.delete(prev["line_ts"])
+        except Exception as e:
+            print(f"(couldn't take down v{prev['n']}'s line in the channel: {e})", file=sys.stderr)
     print(f"{a.id} v{n} posted in the thread, with a line in the channel; the first post now shows v{n}.")
 
 

@@ -22,7 +22,7 @@ def test_every_type_validates_and_renders(t):
     card = dict(SAMPLES[t])
     assert cards.validate(card) == []
     rec = make_rec(card)
-    for mode in ("open", "final", "replaced"):
+    for mode in ("open", "final"):
         blocks = cards.card_blocks(rec, 1, mode)
         assert blocks[0]["type"] == "header"
         for b in blocks:

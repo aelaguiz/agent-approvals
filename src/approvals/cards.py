@@ -442,26 +442,26 @@ def their_answer(rec):
 def card_blocks(rec, n, mode="open"):
     """Blocks for version n of a request.
 
-    mode: "open" (buttons), "final" (answered or closed: the timeline), "replaced" (a later version exists), or
+    mode: "open" (buttons), "final" (answered or closed: the timeline), "replaced" (a later version exists: one line), or
     "view" (the whole card in a pop-up, without buttons).
     """
     v = rec["versions"][n - 1]
     card = v["card"]
     if mode == "final" and not card.get("parts"):
         return _final_blocks(rec, n)
+    if mode == "replaced":
+        return _replaced_blocks(rec, n)
     blocks = [test_tag()] if rec.get("test") else []
     title = card["title"]
     if mode == "final":   # a set of rows: the rows are the card, so it stays whole
         blocks.append(header(_final_head(rec, card)))
-    elif mode == "replaced":
-        blocks.append(header(f"{version_label(n)} (replaced) · {title}"))
     else:
         blocks.append(header(title))
     frame = frame_line(rec, card)
     if frame:
         blocks.append(frame)
-    if n > 1 and card.get("changes") and mode != "replaced":
-        blocks += _version_note(rec, n, card)
+    if n > 1 and card.get("changes"):
+        blocks += _version_note(rec, n, card, mode)
     open_ = mode == "open"
     if open_ and card.get("if_no_answer"):
         blocks.append(md(f"⏰ *Answer by {when(datetime.fromisoformat(rec['deadline']))}.* With no answer, {esc(card['if_no_answer'])}"))
@@ -496,11 +496,23 @@ def frame_line(rec, card):
     return ctx(f"Part of: {esc(part_of)} · {who}" if part_of else f"Stands alone · {who}")
 
 
-def _version_note(rec, n, card):
-    """What changed, and the approver's words that led to it."""
+def _replaced_blocks(rec, n):
+    """A version a later one replaced shrinks to one line, so the thread holds one whole card, the newest, and what's
+    new is plain to see. The version as it was opens from its button."""
+    blocks = [test_tag()] if rec.get("test") else []
+    line = md(f"{version_label(n)}, replaced by {version_label(len(rec['versions']))} below.")
+    line["accessory"] = button(f"See {version_label(n)}", f"{rec['id']}|{n}|see")
+    return blocks + [line]
+
+
+def _version_note(rec, n, card, mode):
+    """What changed, the approver's words that led to it, and a button to the version before."""
     prev_at = rec["versions"][n - 2].get("posted_at") or ""
     said = [e for e in rec.get("events") or [] if e["kind"] in ("feedback", "answer") and e["at"] >= prev_at and e.get("text")]
-    out = [md(f"🔄 *Version {n}* · {esc(card['changes'])}")]
+    note = md(f"🔄 *Version {n}* · {esc(card['changes'])}")
+    if mode != "view":   # a pop-up can't open another
+        note["accessory"] = button(f"See {version_label(n - 1)}", f"{rec['id']}|{n - 1}|see")
+    out = [note]
     if said:
         out.append(md(quoted(said[-1]["text"])))
     return out
@@ -630,7 +642,7 @@ def _rows(rec, n, mode):
     for j, p in enumerate(card["parts"], 1):
         pid = part_id(p, j)
         a = answers.get(pid)
-        new = n > 1 and prev_by_id.get(pid) != p and mode != "replaced"
+        new = n > 1 and prev_by_id.get(pid) != p
         title = re.sub(rf"^{j}\s*[.·:)]\s*", "", p["title"])   # the card numbers its rows; drop a number the agent wrote too
         text = f"{'🆕 ' if new else ''}*{j} · {esc(title)}*" + (f"\n{esc(p['note'])}" if p.get("note") else "")
         sec = md(text)
@@ -714,8 +726,6 @@ def _footer(rec, n, mode):
     if mode == "open":
         late = "" if card.get("if_no_answer") else f" · No answer by {when(datetime.fromisoformat(rec['deadline']))} means no"
         return ctx(f"💬 Feedback? Reply in the thread · {base}{late}")
-    if mode == "replaced":
-        return ctx(f"Replaced by {version_label(len(rec['versions']))} in this thread; these buttons no longer act · {base}")
     return ctx(f"💬 Reply in the thread with anything else · {base}")
 
 

@@ -62,6 +62,29 @@ def test_a_new_version_after_an_approval_can_be_approved(tmp_path, slack):
     assert core.mode_for(rec) == "open"
     assert core.decide(rec, 2, "approved", "UAPPROVER") == "ok"
     assert any(p.get("broadcast") and "posted v2" in p["text"] for p in slack)   # the channel shows it
+    cards_in_thread = [p["text"] for p in slack if "text" in p and not p["broadcast"]]
+    assert cards_in_thread == [cards.card_text(rec, 2)]   # the new version only; v1 isn't posted again
+
+
+def test_a_third_version_takes_down_the_second_ones_line_in_the_channel(tmp_path, slack, monkeypatch):
+    saved()
+    deleted = []
+    monkeypatch.setattr(slackapi, "delete", deleted.append)
+    cli.main(["revise", "AP-0001", card_file(tmp_path, changes="first change")])
+    line_v2 = store.load("AP-0001")["versions"][1]["line_ts"]
+    cli.main(["revise", "AP-0001", card_file(tmp_path, changes="second change")])
+    assert deleted == [line_v2]
+
+
+def test_a_replaced_version_shrinks_to_a_line_that_opens_it_and_the_new_one_links_back():
+    rec = make_rec(dict(SAMPLES["money"]))
+    rec["versions"][0]["copy_ts"] = "1.4"
+    rec["versions"].append({"n": 2, "card": dict(SAMPLES["money"], changes="Japan dropped, per your reply"), "copy_ts": "1.5"})
+    old = cards.card_blocks(rec, 1, "replaced")
+    assert len(old) == 1 and old[0]["accessory"]["value"] == "AP-0001|1|see" and "replaced by v2" in old[0]["text"]["text"]
+    new = cards.card_blocks(rec, 2, "open")
+    assert any(b.get("accessory", {}).get("value") == "AP-0001|1|see" for b in new)
+    assert not any(b.get("accessory") for b in cards.card_blocks(rec, 2, "view"))
 
 
 def test_a_declined_card_gets_a_new_card_not_a_new_version(tmp_path, slack):

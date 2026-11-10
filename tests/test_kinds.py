@@ -60,7 +60,7 @@ def test_every_kind_validates_and_renders_within_slacks_limits(kind):
     card = KINDS[kind]
     assert cards.validate(card) == []
     rec = rec_for(card)
-    for mode in ("open", "final", "replaced", "view"):
+    for mode in ("open", "final", "view"):
         blocks = cards.card_blocks(rec, 1, mode)
         assert blocks[0]["type"] == "header" and len(blocks) <= cards.BLOCKS_MAX
         txt(blocks)

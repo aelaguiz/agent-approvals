@@ -16,7 +16,7 @@ Contents: [Fields](#fields) · [What goes on the card](#what-goes-on-the-card-an
 | `table` | `{"columns": [...], "rows": [[...], ...]}`, for today beside proposed, or several items compared. No empty cells: write why a value is missing. |
 | `image`, `video` | An absolute path to the thing being approved. A video gets a link that plays it. Pictures go up at their own resolution, and See it and Full size open them in Slack's viewer, so a small picture stays small there. |
 | `evidence` | A list of notes, links and file paths (or one block of text), posted in the card's thread: checks run, sources, research, full lists, screenshots. A file path, alone or after a label (`"Recipe: /abs/path/recipe.json"`, or a path relative to your folder), is attached so it opens in Slack. |
-| `changes` | Required on a revision: what changed from the last version, in the approver's terms ("Japan dropped, per your reply"). |
+| `changes` | Required on a revision: what changed from the version he saw, in the approver's terms ("Japan dropped, per your reply"). It opens the new card, and the old version shrinks to a line, so it is how he learns what is new. |
 | `deadline_hours`, `yes_label`, `no_label` | Optional overrides. Name buttons for what happens ("Release all 3", "Send as you", "Run the read"). |
 | `part_of` | Required. The initiative the card belongs to, in the approver's words for it, or `null` when it stands alone. Shown under the title. |
 | `if_no_answer` | What happens if the deadline passes with no answer ("it stops at 72 hours"). Shown with the deadline near the top and on the notification line; told back to you if it expires. |
