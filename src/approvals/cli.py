@@ -7,7 +7,7 @@ import sys
 from datetime import timedelta
 from pathlib import Path
 
-from . import cards, config, core, pictures, reach, slackapi, store, transcripts
+from . import basecamp, cards, config, core, pictures, reach, slackapi, store, transcripts
 
 
 def _load_card(path):
@@ -111,7 +111,7 @@ def cmd_submit(a):
         _die(f"A set holds up to {cards.SET_MAX} cards; more than that won't be read as one piece of work.")
     loaded = [_load_card(p) for p in a.card]
     for i, card in enumerate(loaded, 1):
-        errs = cards.validate(card)
+        errs = cards.validate(card) + basecamp.problems(basecamp.urls(card.get("basecamp")) + (a.basecamp or []))
         if errs:
             which = f"Card {i} of {len(loaded)} ({a.card[i - 1]}) refused; nothing was posted" if len(loaded) > 1 else "Card refused"
             _die(which + ":\n- " + "\n- ".join(errs))
@@ -139,11 +139,17 @@ def _submit_one(card, a, set_pos):
     }
     if set_pos:
         rec["set"] = set_pos
+    bc = basecamp.entries(basecamp.urls(card.get("basecamp")) + (a.basecamp or []))
+    if bc:
+        rec["basecamp"] = bc
     rec = store.create(rec)
     reach.refresh(rec, who)
     ts = slackapi.post(cards.card_blocks(rec, 1, "open"), cards.card_text(rec, 1))
     rec["thread_ts"] = ts
     rec["last_seen"] = ts
+    link = slackapi.permalink(ts)
+    if bc:
+        rec["link"] = link
     version["ts"] = ts
     store.event(rec, "submitted")
     core.tell_reviewer(rec, f"{rec['agent']} posted it for {core.who()}'s answer. Your read goes in its thread with "
@@ -154,8 +160,9 @@ def _submit_one(card, a, set_pos):
         core.refresh_and_clear(rec["id"])
     _video_in_thread(rec["id"], 1)
     _post_evidence(rec, card.get("evidence"))
+    basecamp.sync(rec["id"])
     print(rec["id"])
-    print(slackapi.permalink(ts))
+    print(link)
 
 
 def cmd_ask(a):
@@ -478,7 +485,10 @@ def cmd_inbox(a):
             own = transcripts.is_copy(r.get("runtime"), r.get("session_id"), me["session_id"], rec["id"])   # it continues the asker
         theirs = own or a.all or r.get("agent") == me["agent"]
         if theirs or reviewing:
-            for text, react_ts in store.update(rec["id"], lambda x, own=own, theirs=theirs: take(x, own or a.all, theirs)):
+            taken = store.update(rec["id"], lambda x, own=own, theirs=theirs: take(x, own or a.all, theirs))
+            if taken and rec.get("basecamp"):
+                basecamp.sync(rec["id"])
+            for text, react_ts in taken:
                 print(text)
                 shown += 1
                 if react_ts:   # 📨, as when the service types an answer in: the agent has it
@@ -544,6 +554,8 @@ def cmd_role(a):
 
 # Commands that post to Slack check first that this machine can, so nothing is saved for a card it can't post.
 POSTS = {"submit", "ask", "revise", "answer", "ack", "done", "withdraw", "record", "status", "note", "review"}
+# Commands that can change what a request's Basecamp steps say.
+CHANGES = {"ask", "revise", "answer", "ack", "done", "withdraw", "record", "status"}
 
 
 def main(argv=None):
@@ -555,6 +567,8 @@ def main(argv=None):
     s.add_argument("--agent", help="your agent name, as the approver knows it (e.g. Monetization)")
     s.add_argument("--test", action="store_true", help=argparse.SUPPRESS)
     s.add_argument("--deadline-minutes", type=int, help=argparse.SUPPRESS)
+    s.add_argument("--basecamp", action="append", metavar="URL",
+                   help="a Basecamp card or to-do this card serves; repeatable. 'Part of:' links to the first, and each card gets a step showing where the approval stands")
     s.set_defaults(fn=cmd_submit)
 
     s = sub.add_parser("ask", help="ask the approver one question in the request's thread")
@@ -673,6 +687,8 @@ def main(argv=None):
         a.fn(a)
     except store.StoreError as e:
         _die(str(e))
+    if a.cmd in CHANGES:
+        basecamp.sync(a.id)
 
 
 if __name__ == "__main__":

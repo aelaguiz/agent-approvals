@@ -15,7 +15,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import config, core, store
+from . import basecamp, config, core, store
 
 log = logging.getLogger("approvals")
 
@@ -66,7 +66,7 @@ class Client:
 
     def due(self, machine):
         body = self.call("GET", f"/due?machine={machine}")[1]
-        return body["due"], body["strays"]
+        return body["due"], body["strays"], body.get("basecamp", [])
 
     def reviewer(self):
         return self.call("GET", "/reviewer")[1].get("reviewer")   # a hub from before reviewers has none
@@ -104,8 +104,9 @@ class Handler(BaseHTTPRequestHandler):
             if method == "GET" and parts == ["health"]:
                 return self._send(200, {"machine": config.machine(), "id_prefix": config.settings()["id_prefix"]})
             if method == "GET" and parts == ["due"]:
-                due, strays = core.to_deliver(store.local_all(), q.get("machine", [""])[0], store.local_reviewer())
-                return self._send(200, {"due": due, "strays": strays})
+                recs, machine = store.local_all(), q.get("machine", [""])[0]
+                due, strays = core.to_deliver(recs, machine, store.local_reviewer())
+                return self._send(200, {"due": due, "strays": strays, "basecamp": basecamp.due(recs, machine)})
             if parts == ["reviewer"]:
                 if method == "GET":
                     return self._send(200, {"reviewer": store.local_reviewer()})

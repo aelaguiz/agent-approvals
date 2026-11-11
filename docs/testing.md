@@ -2,7 +2,7 @@
 
 ## Unit tests
 
-`make test` runs 180 tests, with no network. They cover:
+`make test` runs 193 tests, with no network. They cover:
 - every card type rendering, required fields, escaping;
 - 20 processes submitting at once and getting distinct numbers;
 - the first button press winning, and old versions refusing;
@@ -18,6 +18,7 @@
 - the morning list: posted once a day from 8 am and again the next day; only cards waiting on the approver, without TEST cards, grouped by closing day; cards closed with no answer since the last list; each way a card stops waiting (approved, declined, replied to, withdrawn, closed) struck through with what happened, and a new version bringing it back; an edit only when something changed; a failed post tried again; one line and no mention when nothing waits; a list asked for in the channel, which mentions no one, includes cards that came after the morning list, shrinks the list it replaces to a link and is the one kept current from then on; an ask before 8 am still getting the morning list; only the approver's own posts outside a card's thread counting as asks (thread replies, other people and joins don't);
 - the kinds of card: each kind validates and renders within Slack's limits in every state (open, answered, replaced, in a pop-up); old records without the new fields still render with their old buttons; each refusal (no `part_of`, a missing picture, mixed answer shapes, a pick that names no option, two editable quotes, a link that isn't https, a title past Slack's headline, a card over 50 blocks); each row of a set answered on its own with one message naming it and where the others stand; Approve all skipping rows that need their own yes; a pick, a batch picked in a pop-up and edited words each reaching the agent exactly; a change on a row, a revision keeping unchanged rows' answers and asking again about the changed one; only open rows closing at the deadline; the offer to stop asking; status lines, a condition waiting on the approver (and on the morning list), a next step dropping away once a later line or done comes; the frame line set in place on an old card with nothing reposted; presses and pop-ups through the listener (saved before the ack, refused on a replaced version or from someone else, the Pick which count kept current); a new card's pictures posted in its thread and the card redrawn with them;
 - a reviewer for money cards: only cards of its types reach it, and none with no reviewer, a TEST card none but a test reviewer, its own cards never; the approver's answers reach it too; its messages typed into its own session, on its own machine, never waiting for the asker's, releasing an asker's paced yes or moving the asker's answers, and nothing posted in the thread when it isn't running; each side's `approvals inbox` handing out only its own; the role moving to the session that runs `approvals review` or takes over in `approvals repoint`, and kept on the hub; only its session posting a note, which changes nothing on the card;
+- Basecamp steps, with a fake `basecamp`: a posted card's step says it waits on the approver, as the asker's own login from its folder (or one above it); "Part of:" links to the first URL; two cards each get the step and a to-do gets only the link; a link that isn't Basecamp's refuses the card before anything is posted; an approval, a decline and a reply each show with their time and "not yet seen by" the asker, which goes once the answer lands or the asker acknowledges; done, withdrawn and expired check the step; a folder with no Basecamp login skipped; Basecamp failing never stops the card or the answer, is noted on the record and tried again later, at most 5 times; the machine's credentials file used when it keeps one;
 - more than one Slack workspace: each numbers and lists only its own requests, a request number finds its workspace from any folder, an agent's folder picks the workspace for new requests (a folder inside a listed one counts; one whose name only starts the same doesn't), and with one workspace every folder uses it.
 
 ## Live end-to-end test
@@ -126,6 +127,16 @@ A test hub must not connect to Slack: a second connection with the workspace's a
 **Clean-up:** `approvals purge-tests --only <ids>` with the test folder's settings, then stop both services, close the agent and any Herdr session the test started, and delete the scratch folders.
 
 ## Results
+
+### November 11, 2026: Basecamp steps
+
+Built for the leads' Basecamp plan (Amir's go, November 11). Unit tests: 193 of 193. The Slack half wasn't run live: the only Slack is Amir's own #approvals, and nothing here may post a card there or answer a real one. The Basecamp half was run live by calling the step code directly (`basecamp.wanted` and `basecamp.write`, the same calls the service and the command make) against a scratch card in a Basecamp project, as the CFO's login read from its folder's `.basecamp/config.json`: the step created waiting on the approver, retitled with an approval and "not yet seen by CFO", retitled without it, checked, read back, and the card trashed.
+
+| Where it ran | Result |
+| --- | --- |
+| The M5, with the service's own environment (its PATH and HOME only), in the desktop session | Pass: every stage, read back as written and checked. The M5 keeps its Basecamp logins in the keychain. |
+| The M5, over `ssh localhost` | Fails as expected: the keychain is locked over ssh and the M5 keeps no credentials file, so "Not authenticated for profile:cfo". The card posts all the same, the step is noted on the record as failed, and the M5's service, which runs in the desktop session, writes it on its next try about a minute later (unit-tested; not seen live). |
+| Mini 1 and Mini 3, over ssh | Pass: every stage. Every machine but the M5 keeps its logins in `~/.config/basecamp/credentials.json`, which the step code uses (`BASECAMP_NO_KEYRING=1`) whenever it exists, so a service in a desktop session there doesn't look in an empty keychain. |
 
 ### November 11, 2026: a reviewer for money cards
 

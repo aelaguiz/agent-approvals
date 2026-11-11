@@ -90,7 +90,7 @@ def test_each_machine_is_given_only_its_own_sessions_answers(hubbox):
     client = store.hub_client()
     assert [x[0] for x in client.due("laptop")[0]] == [a]
     assert sorted(x[0] for x in client.due("hubbox")[0]) == sorted([b, c])
-    assert client.due("elsewhere") == ([], [])
+    assert client.due("elsewhere") == ([], [], [])
 
 
 def test_the_reviewer_is_kept_on_the_hub_and_hears_on_its_own_machine(hubbox):

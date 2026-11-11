@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from slack_sdk.socket_mode import SocketModeClient
 from slack_sdk.socket_mode.response import SocketModeResponse
 
-from . import cards, config, core, digest, router, slackapi, store, transcripts
+from . import basecamp, cards, config, core, digest, router, slackapi, store, transcripts
 
 log = logging.getLogger("approvals")
 
@@ -88,6 +88,8 @@ class Listener:
         self.stop = threading.Event()
         self.me = config.machine()
         self.next_stray_look = 0.0
+        self.steps = queue.Queue()        # requests whose Basecamp steps this machine should write
+        self.steps_queued = set()
 
     # ----- buttons -----
 
@@ -325,6 +327,7 @@ class Listener:
         """On the hub, every few seconds: what's due for this machine's sessions, and ⏳ kept true on the cards."""
         recs = [r for r in store.all_records() if r.get("thread_ts")]
         due, strays = core.to_deliver(recs, self.me, store.reviewer())
+        self.queue_steps(basecamp.due(recs, self.me))
         self.queue(due)
         self.take_strays(strays)
         self.show_waiting(recs, core.held(recs))
@@ -354,6 +357,28 @@ class Listener:
                 self.in_flight.add((rid, ref))
                 self.deliveries.put((rid, ref))
 
+    def queue_steps(self, rids):
+        """The approver's answers, and their delivery, show on the Basecamp cards the card serves. Written on their own
+        thread, queued before the answer is, so they show even when typing it in fails, and a slow or failing Basecamp
+        never holds up an answer."""
+        for rid in rids:
+            if rid not in self.steps_queued:
+                self.steps_queued.add(rid)
+                self.steps.put(rid)
+
+    def step_writer(self):
+        while not self.stop.is_set():
+            try:
+                rid = self.steps.get(timeout=1)
+            except queue.Empty:
+                continue
+            try:
+                basecamp.sync(rid)
+            except Exception:
+                log.exception("Basecamp step for %s crashed", rid)
+            finally:
+                self.steps_queued.discard(rid)
+
     def take_strays(self, strays, force=False):
         """An answer the card's machine couldn't deliver goes to the machine that has the session's transcript."""
         if not strays or not (force or time.monotonic() >= self.next_stray_look):
@@ -369,7 +394,8 @@ class Listener:
 
     def fetch(self):
         """Off the hub: what's due for this machine's sessions."""
-        due, strays = store.hub_client().due(self.me)
+        due, strays, steps = store.hub_client().due(self.me)
+        self.queue_steps(steps)
         self.queue(due)
         self.take_strays(strays)
 
@@ -554,6 +580,7 @@ class Listener:
             threading.Thread(target=self.loop, args=(5, self.lists), daemon=True),   # answers an ask within seconds
             threading.Thread(target=self.delivery_worker, daemon=True),
             threading.Thread(target=self.loop, args=(3, self.confirm_typed), daemon=True),
+            threading.Thread(target=self.step_writer, daemon=True),
         ]
         for t in threads:
             t.start()
@@ -568,7 +595,8 @@ class Listener:
         log.info("delivering answers to the sessions on %s; the records and Slack connection are on %s", self.me, config.hub())
         threads = [threading.Thread(target=self.loop, args=(FETCH_SECONDS, self.fetch), daemon=True),
                    threading.Thread(target=self.delivery_worker, daemon=True),
-                   threading.Thread(target=self.loop, args=(3, self.confirm_typed), daemon=True)]
+                   threading.Thread(target=self.loop, args=(3, self.confirm_typed), daemon=True),
+                   threading.Thread(target=self.step_writer, daemon=True)]
         for t in threads:
             t.start()
         try:

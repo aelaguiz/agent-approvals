@@ -533,10 +533,14 @@ def frame_line(rec, card):
     """What the card belongs to, where it sits in its set, and who sent it. Part of is set in place on the record
     (`approvals status --part-of`), else the card's own. A card from before the frame line, never given one, has none."""
     pos = set_pos(rec)
-    if not has_frame(rec, card) and not pos:
+    if not has_frame(rec, card) and not pos and not rec.get("basecamp"):
         return None
     part_of = (rec["frame"] if "frame" in rec else card["part_of"]) if has_frame(rec, card) else None
-    head = [f"Part of: {esc(part_of)}"] if part_of else [] if pos else ["Stands alone"]
+    bc = (rec.get("basecamp") or [{}])[0].get("url")
+    if bc:   # the work's picture is in Basecamp: one tap from his decision to it
+        head = [f"Part of: <{bc}|{esc(part_of or 'the work in Basecamp')}>"]
+    else:
+        head = [f"Part of: {esc(part_of)}"] if part_of else [] if pos else ["Stands alone"]
     return ctx(" · ".join(head + ([pos] if pos else []) + [esc(rec["agent"])]))
 
 
