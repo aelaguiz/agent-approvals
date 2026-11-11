@@ -20,6 +20,7 @@ agent ──approvals submit──▶ card in #approvals ──▶ you: ✅ / �
   - The agent then replies in the thread: after a decision, one line on what it understood and what it's doing now; after a reply or a question, its answer (`approvals answer`, verdict first) or its next version, with nothing before it. If nothing comes within 10 minutes, the thread gets a warning, so a delivery never looks like a handled answer.
 - **A morning list of what's waiting on you.** At 8 am each day the service posts one message in the channel that mentions you and lists every card waiting on your answer, grouped by when it closes (today, tomorrow, later), each linked to its card. It also lists cards that closed with no answer since the last list, since a reply reopens them. All day it keeps that message current: each line is struck through, with what happened, once the card stops waiting on you.
 - **The same list whenever you ask.** Post anything in the channel itself, not in a card's thread ("what's waiting?"), and within seconds the service posts a fresh list at the bottom, without mentioning you. Only the newest list is kept current; the one it replaces shrinks to a link to it.
+- **A second reader for money.** One agent session, the CFO, can review every budget, purchase and money card. It hears each one as it's posted, each new version and each of your answers, and puts its read in the card's thread with `approvals note`, so it sits beside the ask when you decide. Nothing waits on it, the asker's side doesn't change, and with no reviewer set up nothing changes at all.
 - **Agents learn it from a skill.** The `approvals` skill teaches when to ask (only when a yes is required, and once), how to write a card someone can decide from at a glance, and what to do with each kind of answer.
 
 ## Requirements
@@ -103,6 +104,8 @@ approvals record AP-0001 --approved --words "yes do it" --where "phone call"   #
 approvals repoint <old session> <new session>   # a launcher that starts an agent again in a fresh session (a pod restore) hands it the old one's open cards
 approvals list --open
 approvals doctor
+approvals review --types budget,purchase,money --agent "CFO"   # this session reviews those cards; again from a new session moves it there; --off ends it
+approvals note AP-0001 --file read.md          # the reviewer's read, in the card's thread
 ```
 
 The name a card and its replies show is `--agent`, unless whatever started the agent set `APPROVALS_FROM` (a team's launcher, say "AI pod · lead"): that wins, so the approver can always tell which team and member sent it.
@@ -116,6 +119,7 @@ A card is JSON. [skills/approvals/references/cards.md](skills/approvals/referenc
 - **Records:** one JSON file per request in `~/.approvals/requests/`, on the hub.
 - **Log:** `~/.approvals/logs/listener.log`, on each machine.
 - **The list:** the newest list's message and what it lists, in `~/.approvals/digest.json`, on the hub.
+- **The reviewer:** which session reviews which card types, in `~/.approvals/reviewer.json`, on the hub.
 - **Restart the service:** `launchctl kickstart -k gui/$(id -u)/com.agent-approvals.listener`, or `systemctl --user restart agent-approvals` on Linux.
 - Another workspace's records, log and service are the same paths in its own folder, and `com.agent-approvals.listener.<folder name>`.
 

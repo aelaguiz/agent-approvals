@@ -327,9 +327,11 @@ def test_repoint_hands_open_cards_from_a_saved_session_to_the_restored_one(slack
     store.save(rec_for(SAMPLES["creative"], reach=dict(asked)))
     store.save(rec_for(SAMPLES["creative"], id="AP-0002", reach=dict(asked), status="done"))
     store.save(rec_for(SAMPLES["creative"], id="AP-0003", reach=dict(asked, session_id=other)))
+    store.set_reviewer({"types": ["money"], "reach": dict(asked)})   # a restored reviewer keeps its role too
     cli.main(["repoint", old, new])
     r = store.load("AP-0001")["reach"]
     assert (r["session_id"], r["herdr_pane"], r["agent"], r["earlier_ids"]) == (new, "w9:p1", "AI lead", [old])
+    assert (store.reviewer()["reach"]["session_id"], store.reviewer()["reach"]["agent"]) == (new, "AI lead")
     assert store.load("AP-0002")["reach"]["session_id"] == old       # a finished card is left as it was
     assert store.load("AP-0003")["reach"]["session_id"] == other     # someone else's card too
     assert "AP-0001" in capsys.readouterr().out

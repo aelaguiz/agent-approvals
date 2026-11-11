@@ -131,6 +131,8 @@ def cmd_submit(a):
     rec["last_seen"] = ts
     version["ts"] = ts
     store.event(rec, "submitted")
+    core.tell_reviewer(rec, f"{rec['agent']} posted it for {core.who()}'s answer. Your read goes in its thread with "
+                            f"`approvals note {rec['id']} --file <note.md>`; he may answer first, and nothing waits on it.")
     store.save(rec)
     if cards.pictures(card):
         _share_pictures(rec["id"], 1)
@@ -191,6 +193,8 @@ def cmd_revise(a):
         r["deadline"] = store.iso(store.now() + timedelta(hours=hours))
         r["title"] = card["title"]
         store.event(r, "revised", version=n)
+        core.tell_reviewer(r, f"{r['agent']} posted v{n}" + (f' ("{core.one_line(card["changes"])}")' if card.get("changes") else "")
+                              + f". If it changes your read, post it with `approvals note {r['id']} --file <note.md>`.")
         return r
     rec = store.update(a.id, add)
     # The new version goes at the bottom of the thread, where he reads; an earlier copy there shrinks to a line.
@@ -370,8 +374,58 @@ def cmd_repoint(a):
             if rec["status"] in store.OPEN and (rec.get("reach") or {}).get("session_id") == a.old:
                 if store.update(rec["id"], lambda r: reach.take_over(r, a.old, new)):
                     moved.append(rec["id"])
+        rv = store.reviewer()
+        if rv and rv["reach"].get("session_id") == a.old:   # the reviewer's role moves with it too
+            store.set_reviewer(dict(rv, reach=dict(new, agent=rv["reach"].get("agent"))))
+            moved.append(f"the {', '.join(rv['types'])} cards it reviews")
     print(f"Answers to {', '.join(moved)} now go to session {a.new}." if moved else
           f"No open request was waiting on session {a.old}.")
+
+
+def cmd_review(a):
+    """This session becomes the one reviewer of the workspace's cards of some types; running it again from another
+    session moves the role there. --off: nobody reviews. Neither: say who does."""
+    if a.off:
+        store.set_reviewer(None)
+        print("No session reviews cards now.")
+        return
+    if not a.types:
+        rv = store.reviewer()
+        print(f"{rv['reach']['agent']} reviews {', '.join(rv['types'])} cards, from session {rv['reach']['session_id']} "
+              f"on {rv['reach']['machine']}." if rv else "No session reviews cards.")
+        return
+    types = [t.strip() for t in a.types.split(",") if t.strip()]
+    unknown = [t for t in types if t not in cards.TYPES]
+    if unknown:
+        _die(f"Not a card type: {', '.join(unknown)}. The types are {', '.join(cards.TYPES)}.")
+    who = reach.capture(a.agent)
+    if not who["session_id"]:
+        _die("This shell isn't a Claude or Codex session, so nothing could reach you. Run `approvals review` in your own session.")
+    store.set_reviewer({"types": types, "reach": who, "test": config.is_test_run(), "since": store.iso()})
+    print(f"This session now reviews every {', '.join(types)} card, as {who['agent']}: each new one, each new version and "
+          f"each of {config.settings()['approver_name']}'s answers reaches you here as an [Approvals] message. "
+          f"Post your read with `approvals note <id> --file <note.md>`.")
+
+
+def cmd_note(a):
+    """The reviewer's read of a card, in its thread under the reviewer's name. It changes nothing on the card, and
+    the approver may answer before it lands."""
+    rv = store.reviewer()
+    me = reach.capture()
+    if not rv or not me["session_id"] or me["session_id"] != rv["reach"].get("session_id"):
+        _die("Only the reviewer's own session can post a note" + (f", and that is {rv['reach']['agent']}'s session. If this "
+             f"session has taken over its work, run `approvals review --types {','.join(rv['types'])}` here first." if rv else
+             "; no session reviews cards now."))
+    text = Path(a.file).read_text().strip()
+    if not text:
+        _die(f"{a.file} is empty.")
+    if len(text) > 2900:
+        _die(f"The note is {len(text)} characters; one Slack post shows about 2,900, so cut it.")
+    rec = store.load(a.id)
+    name = rv["reach"]["agent"]
+    ts = slackapi.post(cards.note_blocks(rec, name, text, store.now()), f"{name}: {text}", thread_ts=rec["thread_ts"])
+    store.update(a.id, lambda r: store.event(r, "review_note", by=name, text=text, ts=ts))
+    print(f"Your read is in the thread of {a.id}.")
 
 
 def cmd_inbox(a):
@@ -381,14 +435,19 @@ def cmd_inbox(a):
     service from delivering it too."""
     me = reach.capture(a.agent)
     shown = 0
+    rv = store.reviewer()
+    reviewing = bool(rv and me.get("session_id")) and me["session_id"] == rv["reach"].get("session_id")
 
-    def take(rec, own):
-        """The answers taken; printed once the record is saved, since a change can be made more than once."""
+    def take(rec, own, theirs):
+        """The answers taken; printed once the record is saved, since a change can be made more than once. The
+        reviewer's messages go only to the reviewer, and an asker's only to its asker's side (theirs)."""
         taken = []
         for item in rec.get("outbox", []):
             if item.get("delivered_at") or item.get("seen_by_agent"):
                 continue
-            if not own and not (item.get("inbox_only") or item.get("noted_failure")):
+            if item.get("to") and not reviewing:
+                continue
+            if not item.get("to") and (not theirs or not own and not (item.get("inbox_only") or item.get("noted_failure"))):
                 continue
             taken.append((item["text"], item.get("react_ts")))
             item["seen_by_agent"] = True
@@ -402,8 +461,9 @@ def cmd_inbox(a):
         waiting = any(not i.get("delivered_at") and not i.get("seen_by_agent") for i in rec.get("outbox", []))
         if not own and waiting and me.get("session_id") and me.get("runtime") == r.get("runtime") and me.get("cwd") == r.get("cwd"):
             own = transcripts.is_copy(r.get("runtime"), r.get("session_id"), me["session_id"], rec["id"])   # it continues the asker
-        if own or a.all or r.get("agent") == me["agent"]:
-            for text, react_ts in store.update(rec["id"], lambda x, own=own: take(x, own or a.all)):
+        theirs = own or a.all or r.get("agent") == me["agent"]
+        if theirs or reviewing:
+            for text, react_ts in store.update(rec["id"], lambda x, own=own, theirs=theirs: take(x, own or a.all, theirs)):
                 print(text)
                 shown += 1
                 if react_ts:   # 📨, as when the service types an answer in: the agent has it
@@ -468,7 +528,7 @@ def cmd_role(a):
 
 
 # Commands that post to Slack check first that this machine can, so nothing is saved for a card it can't post.
-POSTS = {"submit", "ask", "revise", "answer", "ack", "done", "withdraw", "record", "status"}
+POSTS = {"submit", "ask", "revise", "answer", "ack", "done", "withdraw", "record", "status", "note", "review"}
 
 
 def main(argv=None):
@@ -549,6 +609,17 @@ def main(argv=None):
     s.add_argument("old")
     s.add_argument("new")
     s.set_defaults(fn=cmd_repoint)
+
+    s = sub.add_parser("review", help="make this session the one reviewer of every card of some types; again from a new session moves it there")
+    s.add_argument("--types", help="comma-separated card types, e.g. budget,purchase,money")
+    s.add_argument("--agent", help="your name, as the approver knows you (e.g. CFO)")
+    s.add_argument("--off", action="store_true", help="nobody reviews")
+    s.set_defaults(fn=cmd_review)
+
+    s = sub.add_parser("note", help="the reviewer's read of a card, posted in its thread; changes nothing on the card")
+    s.add_argument("id")
+    s.add_argument("--file", required=True, help="the read, a short Markdown file")
+    s.set_defaults(fn=cmd_note)
 
     s = sub.add_parser("show")
     s.add_argument("id")

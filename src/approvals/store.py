@@ -99,6 +99,22 @@ def delete(rid):
         local_delete(rid)
 
 
+def reviewer():
+    """The one session that reviews the workspace's cards of some types (the CFO, for money), as
+    {"types", "reach", "test"}, or None."""
+    h = hub_client()
+    return h.reviewer() if h else local_reviewer()
+
+
+def set_reviewer(rv):
+    """rv None: no session reviews."""
+    h = hub_client()
+    if h:
+        h.set_reviewer(rv)
+    else:
+        local_set_reviewer(rv)
+
+
 def waiting(rec):
     return any(not i.get("delivered_at") and not i.get("seen_by_agent") for i in rec.get("outbox", []))
 
@@ -187,3 +203,22 @@ def local_all():
 def local_delete(rid):
     with locked():
         _path(rid).unlink(missing_ok=True)
+
+
+def local_reviewer():
+    try:
+        return json.loads(config.REVIEWER.read_text())
+    except FileNotFoundError:
+        return None
+
+
+def local_set_reviewer(rv):
+    """Replaced whole and outside the lock: it's read while a record is changed under the lock."""
+    config.ensure_dirs()
+    if rv is None:
+        config.REVIEWER.unlink(missing_ok=True)
+        return
+    fd, tmp = tempfile.mkstemp(dir=config.HOME, prefix=".tmp-", suffix=".json")
+    with os.fdopen(fd, "w") as f:
+        json.dump(rv, f, indent=1, ensure_ascii=False)
+    os.replace(tmp, config.REVIEWER)

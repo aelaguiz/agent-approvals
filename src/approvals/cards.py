@@ -985,6 +985,14 @@ def answer_blocks(rec, text, at):
     return blocks + [md(body), ctx(f"{esc(rec['agent'])} · answered · {rec['id']} · {when(at)}")]
 
 
+def note_blocks(rec, name, text, at):
+    """The reviewer's read of a card (the CFO's, of a money card), in its thread under the reviewer's name. It asks
+    nothing and changes nothing on the card. Markdown's **bold** is Slack's *bold*."""
+    blocks = [test_tag()] if rec.get("test") else []
+    return blocks + [md(f"💬 *{esc(name)}:*\n{bullets(esc(text.strip().replace('**', '*')))}"),
+                     ctx(f"{esc(name)} · a read for {esc(config.settings()['approver_name'])} before the answer; it changes nothing on the card · {rec['id']} · {when(at)}")]
+
+
 def question_blocks(rec, question):
     blocks = [test_tag()] if rec.get("test") else []
     blocks.append(md(f"❓ *{esc(rec['agent'])} asks:*\n{esc(question)}"))

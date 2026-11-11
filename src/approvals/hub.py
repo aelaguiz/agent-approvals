@@ -68,6 +68,13 @@ class Client:
         body = self.call("GET", f"/due?machine={machine}")[1]
         return body["due"], body["strays"]
 
+    def reviewer(self):
+        return self.call("GET", "/reviewer")[1].get("reviewer")   # a hub from before reviewers has none
+
+    def set_reviewer(self, rv):
+        if self.call("PUT", "/reviewer", {"reviewer": rv})[0] != 200:
+            raise store.StoreError(f"the approvals hub on {config.hub()} runs a version without reviewers; update it first")
+
     def health(self):
         return self.call("GET", "/health")[1]
 
@@ -97,8 +104,14 @@ class Handler(BaseHTTPRequestHandler):
             if method == "GET" and parts == ["health"]:
                 return self._send(200, {"machine": config.machine(), "id_prefix": config.settings()["id_prefix"]})
             if method == "GET" and parts == ["due"]:
-                due, strays = core.to_deliver(store.local_all(), q.get("machine", [""])[0])
+                due, strays = core.to_deliver(store.local_all(), q.get("machine", [""])[0], store.local_reviewer())
                 return self._send(200, {"due": due, "strays": strays})
+            if parts == ["reviewer"]:
+                if method == "GET":
+                    return self._send(200, {"reviewer": store.local_reviewer()})
+                if method == "PUT":
+                    store.local_set_reviewer(self._body()["reviewer"])
+                    return self._send(200, {})
             if parts == ["records"]:
                 if method == "GET":
                     recs = store.local_all()

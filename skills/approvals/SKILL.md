@@ -45,6 +45,8 @@ He knows his product, his systems and his field better than you do, and he holds
 2. **Submit it** from your own session, on the machine you run on: `approvals submit card.json --agent "<your name as the approver knows you>"`. The command learns from your session where to type the answer, so a card posted from another shell, such as over ssh, could never be answered to you, and the command refuses it. It prints the request number (for example AP-0013) and a link. If it refuses the card, it says why; fix that and submit again.
 3. **Carry on.** Do other work, or end your turn.
 
+A `budget`, `purchase` or `money` card also reaches the reviewer for money when one is set up (the CFO), and its read of your card lands in the thread, often before the approver answers; so don't ask it about the card separately, and remember its note isn't an answer: yours comes only from the approver.
+
 Every card needs:
 - `type`, one of: `creative`, `reply`, `budget`, `purchase`, `money`, `player_message`, `price`, `experiment`, `page`, `content`, `email`, `account`;
 - `title`, the action said plainly ("Move $20,000 from savings to operating", not "Transfer approval");
@@ -78,6 +80,15 @@ Answers arrive as messages starting with `[Approvals]` that quote the approver's
 **After the yes, keep the card true until the thing is really out.** He stops tracking a request once he answers it, and the card is where he looks to see whether it happened. So post each step on the card as it happens: `approvals status AP-0013 "Built, and live for half of new users"`, then `approvals status AP-0013 "First read at about $10 spent" --next` for what comes next, `--part 2` (or the row's id) for one row of a set, and `--headline "Released: three lesson fixes"` once it's out. When it waits on someone other than him (a teammate's design note, Apple's review, the next money ask), say who and by when with `--waiting-on`: the card shows it and stays off his morning list until your next line. `--on-you` is only for a condition he alone can clear ("approved, but I'll play it myself before it merges"); a card that says it waits on him when nothing does gets "There's nothing for me to do." On a message sent as him, `--their-answer` puts the other side's reply on the card. Each line is one short sentence he can read at a glance. These redraw the card in place and notify no one; `done` still marks the end, when it's real.
 
 **A new version replaces the old one.** The approver sees only the new version, at the bottom of the thread and in the first post, with a line in the channel pointing to it; the old one shrinks to a line he can open if he wants it. So your `changes` line, which opens the new card above his own words, is how he learns what is different, usually on a phone where he can't lay two cards side by side. Say what moved since the version he saw, the answer to his reply first: "Japan dropped, per your reply." A restatement of the card or a list of every edit sends him back to comparing versions by eye ("I see an accumulating set of copies ... and can't figure out what is new"). Each version must actually change what a yes covers; an answer to his question is not a version. A new version after a yes replaces that yes too, so wait for his answer on the new one. After a decline, a new proposal is a new card, not a version.
+
+## Reviewing cards for the approver
+
+Some cards get a second reader before the approver answers: the CFO reads every money card, so what an ask does to the company's cash sits beside it when he decides. If that's your job:
+
+- **Take the role from your own session:** `approvals review --types budget,purchase,money --agent "<your name>"`. There is one reviewer, so running it from a new session (a restore, a fresh start) moves the role there, with any messages still waiting for it. `approvals review` says who holds it, and `--off` ends it.
+- **Each new card of those types, each new version and each of the approver's answers reaches you** as an `[Approvals]` message naming the card; `approvals show AP-0013` reads it. These need no acknowledgement. When you pick work back up, `approvals inbox` hands you what came while you were stopped, as it does for askers.
+- **Your read goes in the card's thread:** `approvals note AP-0013 --file read.md`, under your name. Write what he should weigh that the card doesn't show, verdict first, in a few lines of his words: "A one-time $3,000 leaves the pod $2,400 under its month's grant. My read: worth it while a trial stays under $25." A restatement of the card adds nothing. The note changes nothing on the card, and he may answer before it lands, so post it soon and never hold other work for it. A new version gets another note only when it changes your read.
+- **The card stays the asker's.** Don't answer, revise or record anything on it; his answers reach you so your own records follow them, a yes booked the same day.
 
 ## Other commands
 

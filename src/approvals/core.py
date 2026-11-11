@@ -17,15 +17,38 @@ def one_line(s):
     return " / ".join(part.strip() for part in str(s).splitlines() if part.strip())
 
 
-def enqueue(rec, kind, text, react_ts=None):
+def enqueue(rec, kind, text, react_ts=None, to=None):
+    """A message for the agent that asked, or with to="reviewer" for the session reviewing the card's type."""
     ref = secrets.token_hex(3)
     rec.setdefault("outbox", []).append({
         "ref": ref, "kind": kind, "text": f"{text} (ref {ref})", "created": store.iso(),
         "react_ts": react_ts, "attempts": 0, "next_try": store.iso(), "delivered_at": None,
         "noted_failure": False, "seen_by_agent": False,
-        "needs_ack": kind != "expired", "acked_at": None, "ack_warned": False,
+        "needs_ack": kind not in ("expired", "review"), "acked_at": None, "ack_warned": False,
+        **({"to": to} if to else {}),
     })
     return ref
+
+
+def tell_reviewer(rec, news):
+    """A card of a type someone reviews (the CFO, for money) reaches that session too: when it's posted, at each new
+    version, and with each of the approver's answers, so its read can be in the thread before he answers. The asker's
+    side doesn't change, and nothing waits on the reviewer. TEST cards reach only a reviewer set up in a test run, and
+    the reviewer's own cards don't come back to it."""
+    rv = store.reviewer()
+    if (not rv or rec["type"] not in rv["types"] or bool(rec.get("test")) != bool(rv.get("test"))
+            or (rec.get("reach") or {}).get("session_id") == rv["reach"].get("session_id")):
+        return
+    enqueue(rec, "review", f'{head(rec)} a {rec["type"]} card from {rec["agent"]}, which you review: {news} '
+                           f'`approvals show {rec["id"]}` reads it.', to="reviewer")
+
+
+def where_said(where):
+    return {"button": "button in Slack", "pop-up": "in Slack"}.get(where, where)
+
+
+def quoted_words(words):
+    return f' His words: "{one_line(words)}".' if words else ""
 
 
 def ack_step(rec, what):
@@ -219,7 +242,8 @@ def decide(rec, n, verdict, by, where="button", words=None, choice=None, items=N
         if not rows:
             return "already"
         for j, _ in rows:
-            r = answer_part(rec, n, j, verdict, by, where=where, words=words, tell=where == "button")
+            r = answer_part(rec, n, j, verdict, by, where=where, words=words, tell=where == "button", review=False)
+        tell_reviewer(rec, f'{who()} {verdict} every part still open ({where_said(where)}).{quoted_words(words)}')
         return r
     d = rec.get("decision")
     if d and d.get("version") == n and d.get("verdict") in ("approved", "declined") and not (
@@ -234,12 +258,17 @@ def decide(rec, n, verdict, by, where="button", words=None, choice=None, items=N
     if where in ("button", "pop-up"):
         how = "button in Slack" if where == "button" else ("picked in a pop-up in Slack" if items is not None else "Edit the words in Slack")
         enqueue(rec, "decision", msg_decision(rec, verdict, how, choice, items, edited), react_ts=card_ts(rec))
+    what = (f"picked {choice}" if choice is not None else
+            f'approved items {", ".join(map(str, items))} of {len(card(rec)["items"])}' if items is not None else
+            "approved it with his own edited words" if edited is not None else f"{verdict} it")
+    tell_reviewer(rec, f"{who()} {what} ({where_said(where)}, {cards.when(store.now())}).{quoted_words(edited or words)}")
     return "ok"
 
 
-def answer_part(rec, n, j, verdict, by, where="button", words=None, choice=None, tell=True):
+def answer_part(rec, n, j, verdict, by, where="button", words=None, choice=None, tell=True, review=True):
     """One row of a set answered on its own: approved, declined, chosen ('chose'), or sent back ('change').
-    Returns 'ok', 'stale', 'withdrawn', 'already' or 'gone' (no such row)."""
+    Returns 'ok', 'stale', 'withdrawn', 'already' or 'gone' (no such row). review=False: the caller tells the
+    reviewer once for all the rows it answers."""
     bad = _check(rec, n)
     if bad:
         return bad
@@ -257,6 +286,10 @@ def answer_part(rec, n, j, verdict, by, where="button", words=None, choice=None,
     if tell:
         kind = "feedback" if verdict == "change" else "decision"
         enqueue(rec, kind, msg_part(rec, j, a), react_ts=card_ts(rec))
+    if review:
+        what = {"approved": "approved", "declined": "declined", "chose": f'chose "{choice}" for',
+                "change": "asked for a change to"}[verdict]
+        tell_reviewer(rec, f'{who()} {what} part {j} "{parts[j - 1]["title"]}" ({where_said(where)}).{quoted_words(words)}')
     settle(rec)
     return "ok"
 
@@ -270,8 +303,9 @@ def approve_all(rec, n, by):
     if not rows:
         return "already"
     for j, _ in rows:
-        answer_part(rec, n, j, "approved", by, where="Approve all", tell=False)
+        answer_part(rec, n, j, "approved", by, where="Approve all", tell=False, review=False)
     enqueue(rec, "decision", msg_all(rec, [j for j, _ in rows]), react_ts=card_ts(rec))
+    tell_reviewer(rec, f'{who()} approved parts {", ".join(str(j) for j, _ in rows)} (Approve all in Slack).')
     return "ok"
 
 
@@ -386,6 +420,8 @@ def take_replies(rec, replies, react_ts=None):
         rec["status"] = "revising"
         rec["open_question"] = None
     enqueue(rec, kind, msg_replies(rec, kind, texts, q), react_ts=last_ts)
+    said = " / ".join(f'"{one_line(x)}"' for x in texts)
+    tell_reviewer(rec, f"{who()} replied in the thread: {said}.")
     return kind
 
 
@@ -396,7 +432,7 @@ def expire(rec):
         rows = cards.open_rows(rec)
         n = len(rec["versions"])
         for j, _ in rows:
-            answer_part(rec, n, j, "expired", None, where="deadline", tell=False)
+            answer_part(rec, n, j, "expired", None, where="deadline", tell=False, review=False)
         store.event(rec, "expired", parts=[j for j, _ in rows])
         listed = "; ".join(f'part {j} "{p["title"]}"' for j, p in rows)
         said = f' The card said that with no answer, {c["if_no_answer"]}: do that.' if c.get("if_no_answer") else ""
@@ -461,13 +497,14 @@ def just_typed(item):
     return bool(at) and store.now() - datetime.fromisoformat(at) < timedelta(seconds=TYPED_SECONDS + 30)
 
 
-def next_item(rec):
-    """A request's first message not yet delivered or left in the inbox. Its later ones wait for it, so they
-    arrive in order. One just typed in doesn't hold them up: Claude takes a typed message in at its next step, so
-    the next is typed right behind it and the agent reads both at once, rather than acting on a yes for a few
-    seconds before the "wait, don't send" behind it."""
-    return next((i for i in rec.get("outbox", []) if not i.get("delivered_at") and not i.get("inbox_only")
-                 and not just_typed(i)), None)
+def next_item(rec, to=None):
+    """A request's first message for its asker (to="reviewer": for its reviewer) not yet delivered or left in the
+    inbox. Its later ones wait for it, so they arrive in order. One just typed in doesn't hold them up: Claude takes
+    a typed message in at its next step, so the next is typed right behind it and the agent reads both at once,
+    rather than acting on a yes for a few seconds before the "wait, don't send" behind it. The asker's and the
+    reviewer's messages never wait on each other."""
+    return next((i for i in rec.get("outbox", []) if i.get("to") == to and not i.get("delivered_at")
+                 and not i.get("inbox_only") and not just_typed(i)), None)
 
 
 PACE_SECONDS = 120   # the longest a decision waits for its agent to acknowledge the answer before it
@@ -492,7 +529,7 @@ def held(records):
         item = next_item(rec)
         if item and item["kind"] == "decision" and due(item) and not item.get("sent_at"):
             behind = rec["outbox"][rec["outbox"].index(item) + 1:]
-            if any(i["kind"] != "decision" and not i.get("delivered_at") for i in behind):
+            if any(i["kind"] != "decision" and not i.get("to") and not i.get("delivered_at") for i in behind):
                 continue   # he's replying on this card ("wait, don't send"): the reply can't wait, so the yes before it goes now
             waiting.setdefault(sid, []).append((item["created"], rec["id"], item["ref"]))
     out = set()
@@ -502,11 +539,12 @@ def held(records):
     return out
 
 
-def to_deliver(records, machine):
+def to_deliver(records, machine, reviewer=None):
     """What one machine delivers now: [request id, ref] of each request's next message that is due, for sessions
-    on that machine, except decisions held for their agent to catch up; and [request id, ref, reach] of strays,
-    messages the machine on the card couldn't deliver because the session wasn't there, for whichever machine has it
-    to take. Pass every record: holding a decision depends on the agent's other cards."""
+    on that machine, except decisions held for their agent to catch up, and its next message for the reviewer when
+    the reviewer's session is on that machine; and [request id, ref, reach] of strays, messages the machine on the
+    card couldn't deliver because the session wasn't there, for whichever machine has it to take. Pass every record:
+    holding a decision depends on the agent's other cards."""
     due_now, strays = [], []
     cutoff = store.now() - timedelta(days=STRAY_DAYS)
     one_machine = not config.settings().get("hub")   # every card is this machine's, whatever name it gave then
@@ -517,8 +555,11 @@ def to_deliver(records, machine):
         item = next_item(rec)
         if item and due(item) and (rec["id"], item["ref"]) not in hold and (one_machine or machine_of(rec) == machine):
             due_now.append([rec["id"], item["ref"]])
+        item = next_item(rec, "reviewer")
+        if reviewer and item and due(item) and (one_machine or reviewer["reach"].get("machine") == machine):
+            due_now.append([rec["id"], item["ref"]])
         for i in rec.get("outbox", []):
-            if (i.get("stray") and not i.get("delivered_at") and not i.get("seen_by_agent")
+            if (i.get("stray") and not i.get("to") and not i.get("delivered_at") and not i.get("seen_by_agent")
                     and datetime.fromisoformat(i["created"]) >= cutoff):
                 strays.append([rec["id"], i["ref"], rec.get("reach") or {}])
     return due_now, strays

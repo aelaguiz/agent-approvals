@@ -113,6 +113,15 @@ Only the asker, a moved copy or a continuation of it can change where a request'
 
 Every message starts with `[Approvals]` and the request number, quotes the approver's words exactly, and says what to do next. It's sent as one line, so nothing is submitted half-typed.
 
+## A reviewer for some types
+
+Amir wants the CFO's read of every request for money in front of him before he answers (November 11, 2026). So one session per workspace can review the cards of some types. `approvals review --types budget,purchase,money` records the session's reach, the way a submit records the asker's, in `reviewer.json` beside the records on the hub, which the other machines read and write over HTTP (`/reviewer`). Running it again from another session moves the role there, with the messages still waiting for it, and so does `approvals repoint`, which a pod restore runs; `approvals review --off` ends it. With no reviewer, nothing changes.
+
+- **What it hears:** a card of its types when it's posted, each new version, and each of the approver's answers (a decision, a row's answer, Approve all, a reply in the thread, a yes recorded from elsewhere), with his words. Each is a message on the card's outbox marked `to: reviewer`, delivered as answers are, by the machine the reviewer's session runs on; a reviewer that isn't running finds them in its `approvals inbox`. They need no acknowledgement, get no 📨, and post nothing in the thread when they can't be delivered, since the approver doesn't wait on them.
+- **The asker's side doesn't change.** The asker's messages and the reviewer's are queued apart, so neither waits for the other; the reviewer's never release a decision paced for the asker, and where the reviewer's session is never changes where the asker's answers go. Each `approvals inbox` hands out only its own side's messages.
+- **TEST cards** reach only a reviewer set up from a test run (`APPROVALS_TEST=1`), and a real reviewer hears only real cards, so a live test's budget cards never reach the CFO. The reviewer's own cards (the CFO asking to move cash) don't come back to it either.
+- **The note:** `approvals note <id> --file read.md`, from the reviewer's own session only, posts its read in the card's thread under the reviewer's name. It changes nothing on the card, and nothing waits on it: the approver may answer before it lands.
+
 ## Acknowledgements
 
 📨 means one thing: the service saw its message in the agent's transcript. That proves delivery, not understanding.

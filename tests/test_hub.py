@@ -93,6 +93,18 @@ def test_each_machine_is_given_only_its_own_sessions_answers(hubbox):
     assert client.due("elsewhere") == ([], [])
 
 
+def test_the_reviewer_is_kept_on_the_hub_and_hears_on_its_own_machine(hubbox):
+    """The CFO reviews from the laptop; a money card asked from the hub machine is answered to its asker there."""
+    store.set_reviewer({"types": ["money"], "reach": {"runtime": "claude", "session_id": "sid-cfo", "machine": "laptop"}})
+    assert config.REVIEWER.exists() and store.reviewer()["reach"]["session_id"] == "sid-cfo"
+    rid = card_rec("hubbox")["id"]
+    store.update(rid, lambda r: core.decide(r, 1, "approved", by="UAPPROVER"))
+    review = store.load(rid)["outbox"][-1]
+    client = store.hub_client()
+    assert review["to"] == "reviewer" and client.due("laptop")[0] == [[rid, review["ref"]]]
+    assert [x[1] for x in client.due("hubbox")[0]] == [store.load(rid)["outbox"][0]["ref"]]
+
+
 def test_on_one_machine_every_card_is_its_own_whatever_name_the_mac_gave(monkeypatch):
     """Without a hub there is one machine, and a Mac's own name follows its network."""
     monkeypatch.setenv("APPROVALS_MACHINE", "Sams-Laptop")

@@ -1,7 +1,7 @@
 interface:
   display_name: "Approvals"
   short_description: "Get a yes in Slack before acting; answer the approver and act on the yes"
-  default_prompt: "Use $approvals to ask for approval before an operational action with a card that opens with why it's worth doing and is written in the approver's words, shaped to how he will judge it; keep working; then answer his questions in the thread with one verdict-first reply, act on his answer when it arrives (or when approvals inbox hands it to you after you pick work back up), and keep the card true until the thing is really out."
+  default_prompt: "Use $approvals to ask for approval before an operational action with a card that opens with why it's worth doing and is written in the approver's words, shaped to how he will judge it; keep working; then answer his questions in the thread with one verdict-first reply, act on his answer when it arrives (or when approvals inbox hands it to you after you pick work back up), and keep the card true until the thing is really out. As the reviewer of some card types (the CFO, for money), take the role with approvals review and post your read in the card's thread with approvals note."
 
 policy:
   allow_implicit_invocation: true

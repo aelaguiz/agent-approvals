@@ -324,7 +324,7 @@ class Listener:
     def deliver_due(self):
         """On the hub, every few seconds: what's due for this machine's sessions, and ⏳ kept true on the cards."""
         recs = [r for r in store.all_records() if r.get("thread_ts")]
-        due, strays = core.to_deliver(recs, self.me)
+        due, strays = core.to_deliver(recs, self.me, store.reviewer())
         self.queue(due)
         self.take_strays(strays)
         self.show_waiting(recs, core.held(recs))
@@ -415,19 +415,24 @@ class Listener:
         item = next(i for i in rec["outbox"] if i["ref"] == ref)
         if item.get("delivered_at"):
             return
+        to = item.get("to")
+        reach = ((store.reviewer() or {}).get("reach") if to else rec.get("reach")) or {}
         start = time.monotonic()
         store.update(rid, lambda r: self._sending(r, ref))
         saved = time.monotonic()
-        res = router.deliver(rec.get("reach") or {}, item["text"], ref, request_id=rid, resume=False, confirm=False)
-        log.info("%s %s: %s (%s); saving took %.1fs, typing %.1fs", rid, ref, res.status, res.reason,
-                 saved - start, time.monotonic() - saved)
+        res = router.deliver(reach, item["text"], ref, request_id=rid, resume=False, confirm=False)
+        log.info("%s %s%s: %s (%s); saving took %.1fs, typing %.1fs", rid, ref, " (reviewer)" if to else "", res.status,
+                 res.reason, saved - start, time.monotonic() - saved)
+        sid = res.reach.get("session_id")
+        if to:
+            res.reach, res.moves = {}, []   # where the reviewer is moves nothing of the asker's
         self.record(rid, ref, res)
         if res.status == "sent":
-            self.awaiting[(rid, ref)] = ((rec.get("reach") or {}).get("runtime"), res.reach.get("session_id"), time.monotonic())
+            self.awaiting[(rid, ref)] = (reach.get("runtime"), sid, time.monotonic())
         if res.status in ("sent", "delivered"):
             # The approver's next reply on this card is typed right behind it, not on the next pass, so the agent
             # takes both in at once. A decision is left to the pass, which spaces them out.
-            nxt = core.next_item(store.load(rid))
+            nxt = core.next_item(store.load(rid), to)
             if nxt and nxt["kind"] != "decision" and core.due(nxt):
                 self.queue([[rid, nxt["ref"]]])
 
@@ -455,7 +460,7 @@ class Listener:
                 slackapi.react(item["react_ts"], "incoming_envelope")
             except Exception as e:
                 log.warning("reaction failed: %s", e)
-        if note:
+        if note and not item.get("to"):   # the approver's thread isn't told about the reviewer's deliveries
             try:
                 slackapi.note(rec["thread_ts"], note)
             except Exception as e:
@@ -493,7 +498,8 @@ class Listener:
         if res.status == "waiting":
             # The approver decides when an agent runs, so a stopped one isn't started for an answer, and isn't
             # typed into when it's back either: it finds the answer itself, with `approvals inbox`.
-            already = any(i.get("waiting_for_agent") and not i.get("delivered_at") for i in r["outbox"])
+            already = any(i.get("waiting_for_agent") and not i.get("delivered_at") and i.get("to") == item.get("to")
+                          for i in r["outbox"])
             item.update(inbox_only=True, waiting_for_agent=True, next_try=store.iso(store.now() + timedelta(days=3650)))
             store.event(r, "waiting_for_agent", ref=ref)
             if already:
