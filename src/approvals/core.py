@@ -174,7 +174,9 @@ def msg_replies(rec, kind, texts, question=None):
                  f'work, say first in one line what is coming and when, with `approvals ack {rid} "<what and when>"`.')
     if kind == "answer":
         return (f'{head(rec)} {who()} answered your question ("{one_line(question)}") in Slack at {t}: {said}. '
-                f'Carry on, usually with `approvals revise {rid} <card.json>`. {one_reply}')
+                f'If it asks for a change, carry on with `approvals revise {rid} <card.json>`. '
+                f'If it approves the card as it stands (a yes, or a detail you asked about settled with no change to the card), '
+                f'record it with `approvals record {rid} --approved --words "<their words>" --where "Slack thread"`, do it, then run `approvals done {rid} "<readback>"`. {one_reply}')
     if kind == "comment":
         return (f'{head(rec)} {who()} replied in Slack at {t}, after the decision: {said}. '
                 f'If it asks something, answer it with `approvals answer {rid} "<the answer, verdict first>"`. '
@@ -201,10 +203,14 @@ def card_ts(rec):
     return rec["versions"][-1].get("copy_ts") or rec["thread_ts"]
 
 
-def decide(rec, n, verdict, by, where="button", words=None, choice=None, items=None, edited=None):
+def decide(rec, n, verdict, by, where="button", words=None, choice=None, items=None, edited=None, again=False):
     """Returns 'ok', 'stale', 'withdrawn' or 'already'. A decision belongs to the version it was made on, so
     a later version can be decided afresh. A pick (choice), a batch picked in a pop-up (items) and a yes with the
-    approver's own words (edited) are yeses that say exactly what to do. On a set, a decision answers every open row."""
+    approver's own words (edited) are yeses that say exactly what to do. On a set, a decision answers every open row.
+    again: the agent records the approver's answer to a reply on a card he had already decided (status revising),
+    such as "sure, schedule it whenever" after a question about a missed hour; it stands as his new decision on
+    this version, so the card can be marked done. An answer asking for a change is never recorded: it gets a new
+    version."""
     bad = _check(rec, n)
     if bad:
         return bad
@@ -216,7 +222,8 @@ def decide(rec, n, verdict, by, where="button", words=None, choice=None, items=N
             r = answer_part(rec, n, j, verdict, by, where=where, words=words, tell=where == "button")
         return r
     d = rec.get("decision")
-    if d and d.get("version") == n and d.get("verdict") in ("approved", "declined"):
+    if d and d.get("version") == n and d.get("verdict") in ("approved", "declined") and not (
+            again and rec["status"] == "revising"):
         return "already"
     rec["decision"] = {"verdict": verdict, "version": n, "by": by, "where": where, "words": words, "at": store.iso()}
     rec["decision"].update({k: v for k, v in (("choice", choice), ("items", items), ("edited", edited)) if v is not None})

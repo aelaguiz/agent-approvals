@@ -99,7 +99,8 @@ approvals status AP-0001 "Brazil live; Mexico waiting for Google's review" --nex
 approvals status AP-0001 --part-of "Prices that fit each country"                    # set what a posted card belongs to, in place
 approvals done AP-0001 "Set both prices; read them back from the store"
 approvals inbox --agent "Pricing"              # answers that came while the agent wasn't running, or couldn't be typed in
-approvals record AP-0001 --approved --words "yes do it" --where "phone call"
+approvals record AP-0001 --approved --words "yes do it" --where "phone call"   # also after an answered question that lets it go ahead as it stands
+approvals repoint <old session> <new session>   # a launcher that starts an agent again in a fresh session (a pod restore) hands it the old one's open cards
 approvals list --open
 approvals doctor
 ```

@@ -300,6 +300,45 @@ def test_record_takes_a_row_or_a_choice_from_the_thread(slack):
     assert store.load("AP-0002")["decision"]["choice"] == "B"
 
 
+def test_an_answer_that_lets_an_approved_card_go_ahead_is_recorded_so_it_can_be_done(slack):
+    """#2: approved, then a question about the missed hour, then "sure, schedule it whenever"."""
+    rec = rec_for(SAMPLES["creative"])
+    assert core.decide(rec, 1, "approved", "U") == "ok"
+    rec.update(status="question", open_question={"text": "Which hour now?"})   # as `approvals ask` leaves it
+    core.take_replies(rec, [("2.0", "sure dude whatever just schedule it as you want")])
+    assert rec["status"] == "revising"
+    store.save(rec)
+    with pytest.raises(SystemExit):
+        cli.main(["done", "AP-0001", "posted at 9:02 pm"])
+    assert core.decide(store.load("AP-0001"), 1, "approved", "U") == "already"   # a second press still counts once
+    cli.main(["record", "AP-0001", "--approved", "--words", "sure dude whatever", "--where", "Slack thread"])
+    assert store.load("AP-0001")["decision"]["words"] == "sure dude whatever"
+    cli.main(["done", "AP-0001", "posted at 9:02 pm"])
+    assert store.load("AP-0001")["status"] == "done"
+
+
+def test_repoint_hands_open_cards_from_a_saved_session_to_the_restored_one(slack, monkeypatch, capsys):
+    from approvals import reach
+    old, new, other = "11111111-0000-0000-0000-000000000000", "22222222-0000-0000-0000-000000000000", "33333333-0000-0000-0000-000000000000"
+    here = {"runtime": "claude", "session_id": new, "cwd": "/pods/ai/lead", "herdr_session": "pods", "herdr_pane": "w9:p1",
+            "herdr_workspace": "w9", "machine": "testbox"}
+    monkeypatch.setattr(reach, "running", lambda sid: dict(here) if sid == new else None)
+    asked = {"runtime": "claude", "session_id": old, "agent": "AI lead", "cwd": "/pods/ai/lead", "herdr_pane": "w4:p1"}
+    store.save(rec_for(SAMPLES["creative"], reach=dict(asked)))
+    store.save(rec_for(SAMPLES["creative"], id="AP-0002", reach=dict(asked), status="done"))
+    store.save(rec_for(SAMPLES["creative"], id="AP-0003", reach=dict(asked, session_id=other)))
+    cli.main(["repoint", old, new])
+    r = store.load("AP-0001")["reach"]
+    assert (r["session_id"], r["herdr_pane"], r["agent"], r["earlier_ids"]) == (new, "w9:p1", "AI lead", [old])
+    assert store.load("AP-0002")["reach"]["session_id"] == old       # a finished card is left as it was
+    assert store.load("AP-0003")["reach"]["session_id"] == other     # someone else's card too
+    assert "AP-0001" in capsys.readouterr().out
+    cli.main(["repoint", old, new])
+    assert "No open request" in capsys.readouterr().out
+    with pytest.raises(SystemExit):
+        cli.main(["repoint", old, other])   # not running here
+
+
 # ---------- presses and pop-ups through the listener ----------
 
 def press_payload(value, user=None, trigger="t1"):

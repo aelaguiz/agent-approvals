@@ -277,7 +277,7 @@ def cmd_record(a):
                                     choice=a.choice, tell=False)
         if a.choice and a.choice not in [o["name"] for o in rec["versions"][-1]["card"].get("options") or []]:
             return f"{a.choice} isn't one of this card's options"
-        return core.decide(rec, n, verdict, by=by, where=a.where, words=a.words, choice=a.choice)
+        return core.decide(rec, n, verdict, by=by, where=a.where, words=a.words, choice=a.choice, again=True)
     r = store.update(a.id, fn)
     if r != "ok":
         _die(f"Not recorded: {r}.")
@@ -346,6 +346,32 @@ def cmd_answer(a):
     if back:
         core.refresh_and_clear(a.id)
     print(f"Answered in the thread of {a.id}" + ("; the card is back with the approver as it stands." if back else "."))
+
+
+def cmd_repoint(a):
+    """Every open request whose answers go to session OLD goes to session NEW instead, in every Slack workspace this
+    machine serves. For a launcher that starts an agent again in a new session with nothing of the old one's history,
+    as a pod restore does; a moved copy or a continuation is found by itself."""
+    new = reach.running(a.new)
+    if not new:
+        _die(f"Session {a.new} isn't running on this machine, so nothing was changed.")
+    if reach.running(a.old):
+        _die(f"Session {a.old} is still running, so its answers stay with it; nothing was changed.")
+    homes = [config.HOME] if os.environ.get("APPROVALS_HOME") else config.homes()
+    moved = []
+    for home in homes:
+        config.use(home)
+        try:
+            config.require()
+            config.bot_token()
+        except config.ConfigError:
+            continue   # a workspace this machine can't serve has no cards from it
+        for rec in store.all_records():
+            if rec["status"] in store.OPEN and (rec.get("reach") or {}).get("session_id") == a.old:
+                if store.update(rec["id"], lambda r: reach.take_over(r, a.old, new)):
+                    moved.append(rec["id"])
+    print(f"Answers to {', '.join(moved)} now go to session {a.new}." if moved else
+          f"No open request was waiting on session {a.old}.")
 
 
 def cmd_inbox(a):
@@ -518,6 +544,11 @@ def main(argv=None):
     s.add_argument("--agent")
     s.add_argument("--all", action="store_true")
     s.set_defaults(fn=cmd_inbox)
+
+    s = sub.add_parser("repoint", help="send the answers of every open request asked from session OLD to session NEW, which has taken over its work (a pod restore runs this)")
+    s.add_argument("old")
+    s.add_argument("new")
+    s.set_defaults(fn=cmd_repoint)
 
     s = sub.add_parser("show")
     s.add_argument("id")

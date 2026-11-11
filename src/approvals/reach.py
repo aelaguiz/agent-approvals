@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-from . import config, store, transcripts
+from . import config, router, store, transcripts
 
 
 def capture(agent_name=None):
@@ -53,3 +53,34 @@ def refresh(rec, new):
     if not new.get("agent") and old.get("agent"):
         merged["agent"] = old["agent"]
     rec["reach"] = merged
+
+
+def running(session_id):
+    """Where a session running on this machine is, as reach, or None when it isn't running here: its runtime, folder,
+    and Herdr pane when it runs in one."""
+    for runtime in ("claude", "codex"):
+        for pid, sid, cwd in transcripts.live_sessions(runtime):
+            if sid == session_id:
+                loc = router.find_pane_for_pid(pid)
+                hs, pane = loc or (None, None)
+                return {"runtime": runtime, "session_id": sid, "cwd": cwd, "host": config.hostname(),
+                        "machine": config.machine(), "herdr_session": hs, "herdr_pane": pane,
+                        "herdr_workspace": pane.split(":")[0] if pane else None, "herdr_tab": None,
+                        "updated": store.iso()}
+    return None
+
+
+def take_over(rec, old, new):
+    """`new` (running(), above) takes the record's answers from session `old`, which no longer runs: a pod restored
+    from a save starts each member in a new session that carries none of the old one's history, so nothing else can
+    tell they are the same agent. Returns False when the record's answers don't go to `old`."""
+    r = rec.get("reach") or {}
+    if r.get("session_id") != old:
+        return False
+    ids = [i for i in r.get("earlier_ids", []) if i != new["session_id"]]
+    if old not in ids:
+        ids.append(old)
+    rec["reach"] = dict(new, agent=r.get("agent"), cwd=new.get("cwd") or r.get("cwd"), earlier_ids=ids)
+    rec.setdefault("moves", []).append([old, new["session_id"]])
+    store.event(rec, "taken_over", old=old, new=new["session_id"])
+    return True

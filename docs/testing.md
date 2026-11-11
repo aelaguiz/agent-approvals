@@ -2,7 +2,7 @@
 
 ## Unit tests
 
-`make test` runs 165 tests, with no network. They cover:
+`make test` runs 167 tests, with no network. They cover:
 - every card type rendering, required fields, escaping;
 - 20 processes submitting at once and getting distinct numbers;
 - the first button press winning, and old versions refusing;
@@ -12,6 +12,7 @@
 - continuations and moved copies against real transcript files, including copies whose session ids were rewritten;
 - new versions: approvable after an earlier yes, refused after a decline, announced in the channel, posted once with the old version never posted again, an older copy shrunk to a line that opens it, the new card linking back, and the older version's line in the channel taken down; answers: verdict first in bold, the card handed back with no new version, nothing changed on an approved card; any post of the agent's counting as its acknowledgement; a card waiting on someone else shown on its face and kept off the morning list; the why line required; rows named by id; a card too long for a block per fact keeping its facts together; withdrawn cards;
 - evidence: one block of text is one post, and files named in evidence are uploaded;
+- an approved card whose question was answered recorded as approved again so it can be marked done, while a second press still counts once; `approvals repoint` handing a saved session's open cards to the session running now, and leaving finished cards and other sessions' cards alone;
 - the failure note posting once;
 - replies and approvals in a row: each reply its own message, in order, the next one on a card typed right behind the last before either shows up in the transcript; a typed message delivered and 📨 once it shows up, tried again if it doesn't within 90 seconds, and the next waiting when one can't be typed; a thread the approver just posted in read before hundreds of overdue ones, a flag that didn't fit one round kept for the next, and other people's posts never flagging; approvals pressed in a row reaching one agent one at a time, each after the agent acknowledged the last or 2 minutes without it; different agents not waiting on each other; a reply going straight through while the agent reacts to a yes; a reply on a card whose yes is waiting sending both now; rows of one card each waiting for their own acknowledgement; ⏳ on a waiting card and gone once it's released;
 - the morning list: posted once a day from 8 am and again the next day; only cards waiting on the approver, without TEST cards, grouped by closing day; cards closed with no answer since the last list; each way a card stops waiting (approved, declined, replied to, withdrawn, closed) struck through with what happened, and a new version bringing it back; an edit only when something changed; a failed post tried again; one line and no mention when nothing waits; a list asked for in the channel, which mentions no one, includes cards that came after the morning list, shrinks the list it replaces to a link and is the one kept current from then on; an ask before 8 am still getting the morning list; only the approver's own posts outside a card's thread counting as asks (thread replies, other people and joins don't);
