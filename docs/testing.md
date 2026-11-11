@@ -127,6 +127,19 @@ A test hub must not connect to Slack: a second connection with the workspace's a
 
 ## Results
 
+### November 11, 2026: a reviewer for money cards
+
+Built for issue #12. Unit tests: 173 of 173. Then a live run in Fun Country's #approvals on the installed package, with the hub on the Studio and the reviewer a Claude session on old-m1, registered from a test run (`APPROVALS_TEST=1 approvals review --types budget,purchase,money`) so TEST cards reached it. The asker was a stand-in session id in another folder, so nothing but the new routing could have reached the reviewer.
+
+| Check | Result |
+| --- | --- |
+| A new money card reaches the reviewer | Pass. A TEST `budget` card posted at 6:55:53 was typed into the reviewer's session 3 seconds later and seen in its transcript 2 seconds after that. The message named the card, its asker, `approvals show` and `approvals note`, and the reviewer's session confirmed it. |
+| A decision reaches the reviewer | Pass. A decline recorded with `approvals record` (a stand-in; only the approver's own presses count) reached the reviewer 2 seconds later, with the words. |
+| The note | Pass. `approvals note` from the reviewer's session posted its read in the card's thread under its name, Markdown bold and bullets drawn by Slack, and changed neither the card's state nor its messages. The same command from the asker's session was refused. |
+| Clean-up | `approvals purge-tests --only` removed the card and its posts; `approvals review --off` left no reviewer. |
+
+**Seen while deploying:** the Studio's fleet sync was stuck for 20 minutes on a `git fetch` of another repository and hadn't reached this one, so the hub was installed from a temporary clone of the pushed commit, with the same make targets the fleet runs.
+
 ### November 9, 2026: replies within seconds, approvals one at a time
 
 Built for issues #3, #8 and #9. Unit tests: 155 of 155. Then a live run on the installed package on all six machines, with the hub on the Studio. One Claude agent in the sandbox on the M5 got a brief with three unrelated budget top-ups and posted three TEST cards. Thread replies were `[test reply]` posts by the bot, the stand-in for the approver. The approvals went through `core.press`, the function the Approve button calls, three within one second, because only the approver's own presses count in Slack.
