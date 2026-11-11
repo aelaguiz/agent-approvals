@@ -317,6 +317,46 @@ def test_an_answer_that_lets_an_approved_card_go_ahead_is_recorded_so_it_can_be_
     assert store.load("AP-0001")["status"] == "done"
 
 
+def test_an_answer_on_a_set_whose_rows_were_all_approved_is_recorded_so_it_can_be_done(slack):
+    """#2 on a card with rows (AP-0666): every row approved by button, a question on one row, a text answer."""
+    rec = rec_for(KINDS["set"])
+    for j in range(1, len(rec["versions"][0]["card"]["parts"]) + 1):
+        assert core.press(rec, 1, f"p{j}:approve", "U") == "ok"
+    assert rec["status"] == "approved"
+    rec.update(status="question", open_question={"text": "Row 3 costs $15 more; fine?"})   # as `approvals ask` leaves it
+    core.take_replies(rec, [("2.0", "i don't care $15 is cheap")])
+    assert rec["status"] == "revising"
+    store.save(rec)
+    with pytest.raises(SystemExit):
+        cli.main(["done", "AP-0001", "running"])
+    assert core.press(store.load("AP-0001"), 1, "p3:approve", "U") == "already"   # a second press still counts once
+    cli.main(["record", "AP-0001", "--approved", "--part", "3", "--words", "i don't care $15 is cheap", "--where", "Slack thread"])
+    rec = store.load("AP-0001")
+    assert rec["status"] == "approved" and rec["answers"]["3"]["words"] == "i don't care $15 is cheap"
+    cli.main(["done", "AP-0001", "running"])
+    assert store.load("AP-0001")["status"] == "done"
+    # The same answer recorded for the whole card works too; a row sent back for a change still needs a new version.
+    rec = rec_for(KINDS["set"], id="AP-0002")
+    for j in range(1, len(rec["versions"][0]["card"]["parts"]) + 1):
+        core.press(rec, 1, f"p{j}:approve", "U")
+    rec.update(status="question", open_question={"text": "Fine?"})
+    core.take_replies(rec, [("3.0", "fine")])
+    store.save(rec)
+    cli.main(["record", "AP-0002", "--approved", "--words", "fine", "--where", "Slack thread"])
+    assert store.load("AP-0002")["status"] == "approved"
+    rec = rec_for(KINDS["set"], id="AP-0003")
+    core.press(rec, 1, "p1:approve", "U")
+    core.ask_change(rec, 1, "shorter", "U", j=2)
+    for j in range(3, len(rec["versions"][0]["card"]["parts"]) + 1):
+        core.press(rec, 1, f"p{j}:approve", "U")
+    assert rec["status"] == "revising"
+    store.save(rec)
+    for argv in (["--part", "2"], []):
+        with pytest.raises(SystemExit):
+            cli.main(["record", "AP-0003", "--approved", "--words", "ok", "--where", "Slack thread", *argv])
+    assert store.load("AP-0003")["status"] == "revising"
+
+
 def test_repoint_hands_open_cards_from_a_saved_session_to_the_restored_one(slack, monkeypatch, capsys):
     from approvals import reach
     old, new, other = "11111111-0000-0000-0000-000000000000", "22222222-0000-0000-0000-000000000000", "33333333-0000-0000-0000-000000000000"

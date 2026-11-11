@@ -293,7 +293,7 @@ def cmd_record(a):
             if not j:
                 return f"there is no row {a.part}"
             return core.answer_part(rec, n, j, "chose" if a.choice else verdict, by, where=a.where, words=a.words,
-                                    choice=a.choice, tell=False)
+                                    choice=a.choice, tell=False, again=True)
         if a.choice and a.choice not in [o["name"] for o in rec["versions"][-1]["card"].get("options") or []]:
             return f"{a.choice} isn't one of this card's options"
         return core.decide(rec, n, verdict, by=by, where=a.where, words=a.words, choice=a.choice, again=True)

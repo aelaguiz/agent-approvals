@@ -2,7 +2,7 @@
 
 ## Unit tests
 
-`make test` runs 173 tests, with no network. They cover:
+`make test` runs 180 tests, with no network. They cover:
 - every card type rendering, required fields, escaping;
 - 20 processes submitting at once and getting distinct numbers;
 - the first button press winning, and old versions refusing;

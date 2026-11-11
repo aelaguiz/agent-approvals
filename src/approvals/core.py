@@ -240,7 +240,12 @@ def decide(rec, n, verdict, by, where="button", words=None, choice=None, items=N
     if card(rec).get("parts"):
         rows = cards.open_rows(rec)
         if not rows:
-            return "already"
+            if not (again and verdict == "approved" and rec["status"] == "revising" and _rows_decided(rec, n)):
+                return "already"
+            store.event(rec, "decision", verdict=verdict, version=n, where=where, words=words)
+            tell_reviewer(rec, f'{who()} let the card go ahead as its rows were decided ({where_said(where)}).{quoted_words(words)}')
+            settle(rec)
+            return "ok"
         for j, _ in rows:
             r = answer_part(rec, n, j, verdict, by, where=where, words=words, tell=where == "button", review=False)
         tell_reviewer(rec, f'{who()} {verdict} every part still open ({where_said(where)}).{quoted_words(words)}')
@@ -265,10 +270,18 @@ def decide(rec, n, verdict, by, where="button", words=None, choice=None, items=N
     return "ok"
 
 
-def answer_part(rec, n, j, verdict, by, where="button", words=None, choice=None, tell=True, review=True):
+def _rows_decided(rec, n):
+    """Every row of the set answered on version n with a decision (none sent back for a change)."""
+    answers = rec.get("answers") or {}
+    got = [answers.get(cards.part_id(p, j)) for j, p in enumerate(card(rec)["parts"], 1)]
+    return all(a and a.get("version") == n and a["verdict"] in ("approved", "declined", "chose") for a in got)
+
+
+def answer_part(rec, n, j, verdict, by, where="button", words=None, choice=None, tell=True, review=True, again=False):
     """One row of a set answered on its own: approved, declined, chosen ('chose'), or sent back ('change').
     Returns 'ok', 'stale', 'withdrawn', 'already' or 'gone' (no such row). review=False: the caller tells the
-    reviewer once for all the rows it answers."""
+    reviewer once for all the rows it answers. again: as in decide(), the approver's answer to a reply on a set
+    whose rows were all decided (status revising) is recorded as this row's new answer, so the card can be done."""
     bad = _check(rec, n)
     if bad:
         return bad
@@ -277,7 +290,7 @@ def answer_part(rec, n, j, verdict, by, where="button", words=None, choice=None,
         return "gone"
     pid = cards.part_id(parts[j - 1], j)
     answers = rec.setdefault("answers", {})
-    if pid in answers:
+    if pid in answers and not (again and verdict != "change" and rec["status"] == "revising" and _rows_decided(rec, n)):
         return "already"
     a = {"verdict": verdict, "version": n, "by": by, "where": where, "at": store.iso()}
     a.update({k: v for k, v in (("words", words), ("choice", choice)) if v is not None})
