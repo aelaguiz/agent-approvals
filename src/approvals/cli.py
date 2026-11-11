@@ -104,10 +104,22 @@ def _post_evidence(rec, evidence):
 
 
 def cmd_submit(a):
-    card = _load_card(a.card)
-    errs = cards.validate(card)
-    if errs:
-        _die("Card refused:\n- " + "\n- ".join(errs))
+    """One card, or several as a set: each its own decision, posted one after another, each showing "1 of 3"."""
+    if len(a.card) > 1 and "-" in a.card:
+        _die("A set is read from files, one per card.")
+    if len(a.card) > cards.SET_MAX:
+        _die(f"A set holds up to {cards.SET_MAX} cards; more than that won't be read as one piece of work.")
+    loaded = [_load_card(p) for p in a.card]
+    for i, card in enumerate(loaded, 1):
+        errs = cards.validate(card)
+        if errs:
+            which = f"Card {i} of {len(loaded)} ({a.card[i - 1]}) refused; nothing was posted" if len(loaded) > 1 else "Card refused"
+            _die(which + ":\n- " + "\n- ".join(errs))
+    for i, card in enumerate(loaded, 1):
+        _submit_one(card, a, {"n": i, "of": len(loaded)} if len(loaded) > 1 else None)
+
+
+def _submit_one(card, a, set_pos):
     who = reach.capture(card.get("agent") or a.agent)
     if not who["session_id"]:
         # A card with no asker can never have its answer typed back: every reply would wait in an inbox. The way
@@ -118,13 +130,16 @@ def cmd_submit(a):
     deadline = store.now() + (timedelta(minutes=a.deadline_minutes) if a.deadline_minutes else timedelta(hours=hours))
     version = {"n": 1, "card": card, "posted_at": store.iso()}
     _prepare_media(card, version)
-    rec = store.create({
+    rec = {
         "type": card["type"], "title": card["title"], "agent": who["agent"],
         "created": store.iso(), "deadline": store.iso(deadline), "status": "pending",
         "test": bool(a.test or card.get("test") or config.is_test_run()), "versions": [version], "thread_ts": None,
         "last_seen": None, "open_question": None, "decision": None, "done": None,
         "events": [], "outbox": [], "reach": None, "moves": [], "card_dirty": False,
-    })
+    }
+    if set_pos:
+        rec["set"] = set_pos
+    rec = store.create(rec)
     reach.refresh(rec, who)
     ts = slackapi.post(cards.card_blocks(rec, 1, "open"), cards.card_text(rec, 1))
     rec["thread_ts"] = ts
@@ -535,8 +550,8 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="approvals", description="Ask for approval as a Slack card; the answer comes back into this session.")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("submit", help="post a new request; prints its number")
-    s.add_argument("card", help="card JSON file, or - for stdin")
+    s = sub.add_parser("submit", help="post a new request, or several as a set; prints each number")
+    s.add_argument("card", nargs="+", help="card JSON file, or - for stdin; several files post a set, each its own decision, showing '1 of 3'")
     s.add_argument("--agent", help="your agent name, as the approver knows it (e.g. Monetization)")
     s.add_argument("--test", action="store_true", help=argparse.SUPPRESS)
     s.add_argument("--deadline-minutes", type=int, help=argparse.SUPPRESS)

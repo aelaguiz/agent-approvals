@@ -53,10 +53,12 @@ One card is answered one way:
 
 - **A yes or no**, as before, with buttons named for what happens. `change_label` adds a Change button; quotes marked `edit` add Edit the words.
 - **A pick** among `options`. With pictures, the options are carousel cards side by side, each with its own Pick button and the sender's pick marked; without, they're buttons. The decision records the `choice`.
-- **A row each** (`parts`): each row has its own buttons and its own answer, kept in `answers` by the row's id (its `id`, else its position). The card is waiting on the approver while any row is open, back with the agent while a row waits for a new version (Change on that row), and otherwise approved if any row was approved or chosen, declined if none was. Approve all answers every open plain row except those marked `own_yes`, in one message. At the deadline only the open rows close.
+- **A row each** (`parts`): each row has its own buttons and its own answer, kept in `answers` by the row's id (its `id`, else its position). The card is waiting on the approver while any row is open, back with the agent while a row waits for a new version (Change on that row), and otherwise approved if any row was approved or chosen, declined if none was. Approve all answers every open plain row except those marked `own_yes`, in one message. At the deadline only the open rows close. A row's own `quotes` (their message, the reply) are drawn under its title, right above its buttons; a Read-button quote is refused on a card with rows, because it sent the approver to the bottom of the card and back for each row (November 11, 2026: "I would rather get separate approval cards than have this weird homework").
 - **A batch** (`items`): a yes covers all; Pick which opens a checklist, and the decision records which `items` were approved.
 
 Everything else (the frame line `part_of`, `if_no_answer`, `gallery`, `sections`, `links`, `from`) can go on any card.
+
+**A set** is several cards sent in one `approvals submit a.json b.json`, for things that belong together but each need their own reading. Each is its own record, thread, deadline and answer; the record keeps `set: {"n", "of"}`, and the frame line and the notification line show "2 of 4". All are validated before any is posted, so a set never goes out half.
 
 **Each answer reaches the agent as its own message, naming exactly what it answers:** a row's answer names the row by number and title and says where the other rows stand ("This answer is for part 2 only; part 1 is approved, parts 3 and 4 are waiting"); a pick names the option; a batch lists what to do and what to leave out; edited words are quoted as a JSON string, so the line breaks survive the one-line message.
 

@@ -92,6 +92,7 @@ Agents use the skill. To try it by hand:
 
 ```bash
 approvals submit card.json --agent "Pricing"   # posts the card, prints AP-0001 and a link
+approvals submit a.json b.json c.json --agent "Revenue"   # a set: three cards together, each its own decision, marked "1 of 3"
 approvals ask AP-0001 "Mexico at MX$899 or MX$999?"
 approvals revise AP-0001 card-v2.json          # next version, in the same thread
 approvals ack AP-0001 "Got it: setting both prices now"   # the agent's own acknowledgement, in the thread

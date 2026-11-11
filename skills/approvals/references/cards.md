@@ -24,16 +24,33 @@ Contents: [Fields](#fields) · [What goes on the card](#what-goes-on-the-card-an
 | `gallery` | Pictures, each `{"image": "/abs/path.png", "label": "…", "note": "…", "mark": [x, y, w, h], "video": "/abs/clip.mp4"}`. The label says what it is: today or after, real or mock, which phone and build (under 150 characters). `mark` outlines what changed, in the picture's pixels; mark the same place on the today picture so the two line up. `video` adds a Play button (a clip of motion). One picture shows full width; two to ten are a swipeable carousel, each slide zoomed onto its mark (or showing the whole picture) with a Full size button. The pictures also go in the card's thread, full size. |
 | `sections` | Titled groups of lines: `{"title": "What the reads found", "lines": [...]}`. A line is text, `[label, value]`, or `{"text": "…", "tag": "Updaters"}`. Start a line with ✅, ⚪ or ⏳ when that helps him read it. |
 | `links` | Up to 5 `[label, "https://…"]` buttons that open a page, beside the answer buttons: the deck, the reads, the clips. |
-| `parts` | Rows answered one by one: `{"title", "note", "image", "yes_label", "no_label", "options", "pick", "own_yes", "id"}`. Up to 10. The card numbers the rows, so titles don't need numbers. Each row gets its own buttons (Approve and No unless you name them), and a row with a picture gets a See it button. Approve all appears while two or more plain rows are open; `own_yes: true` keeps a row out of it. A revision keeps the answer of every row you leave exactly as it was (matched by `id`, else position). |
+| `parts` | Rows answered one by one: `{"title", "note", "quotes", "image", "yes_label", "no_label", "options", "pick", "own_yes", "id"}`. Up to 10. The card numbers the rows, so titles don't need numbers. A row's `quotes` (`{"label", "text"}`, like their message and your reply) are drawn under its title, right above its buttons. Each row gets its own buttons (Approve and No unless you name them), and a row with a picture gets a See it button. Approve all appears while two or more plain rows are open; `own_yes: true` keeps a row out of it. A revision keeps the answer of every row you leave exactly as it was (matched by `id`, else position). |
 | `options`, `pick` | A choice: `{"name": "A", "title": "a panel from the hand count", "image": "/abs/a.png"}`, and the name of your pick. On the card, options with pictures sit side by side, each with its own Pick button; on a row, they're buttons named by `name`. `no_label` adds a decline ("Neither"). |
 | `items`, `pick_label` | A batch: each item its name or `[name, what differs]`. A yes covers all of them; Pick which opens a checklist whose button (`pick_label`, like `"Send {n}"`) sends the ticked ones. |
 | `change_label` | Adds a button ("Change", "Change this fix") that opens a box for what should change; on a set, one on every row. His words reach you as feedback and go in the thread. |
 | `from` | Who it goes out as ("your X account @handle"), shown first. |
 | quote `edit: true`, `hint` | The words that go out. Adds Edit the words, which opens them in a box (`hint` under it); what he sends from there is his yes, with his words. One per card, under 3,000 characters. |
-| quote `button` | Puts the quote behind a button with that label ("Read the email") instead of on the card. |
+| quote `button` | Puts the quote behind a button with that label instead of on the card: only for words he might want but won't decide on, like the whole thread behind the line you quote. Never what a yes sends or decides, and refused on a card with rows. |
 | `offer` | After a yes, asks whether to stop asking for this kind: say exactly what would stop ("first emails to creators with a free year of Plus"). His answer comes back to you. Never on money: he wants to approve each spend. |
 
-One card is answered one way: plain yes or no, `options`, `parts` or `items`. Slack holds 50 blocks a message, so a card with too much on it is refused with a count; move detail to `evidence`.
+One card is answered one way: plain yes or no, `options`, `parts` or `items`. Slack holds 50 blocks a message, so a card with too much on it is refused with a count; move detail to `evidence`, or send a set.
+
+## One card or a set
+
+A card is one decision he makes from what's on it, with the buttons right under what he just read. So for each thing you'd ask, the question is whether what decides it fits right above its buttons. A line or two (a store, a small change shown in its picture, a read with its cost) is a row. A reading of its own (a reply to a person, a design he judges whole, a plan, a spend whose case takes more than a few lines) is a card of its own. Proof that you did the work never settles it either way: it goes in `evidence`, in the thread. Things that belong together arrive together, as rows on one card or as a set of cards; things that don't belong together never share a card, whatever minute they're ready.
+
+Where it went each way, all from cards in November 2026:
+
+- **A set, not rows.** Four people waiting on answers about charges, each with their message and the reply you'd send as him. On one card with a row each, the replies didn't fit in the rows, so they sat behind four Read buttons at the bottom and each row said "The reply is Reply 1 below": "I would rather get separate approval cards than have this weird homework." As four cards sent together, each holds their words, your reply and its own Send and No, and each is answered in one look.
+- **Together, not one by one.** Four small changes toward one goal came as four cards over 34 minutes. He answered them in nine as the set they were (two approved, one declined, one sent back for better words) and asked that related asks "come together rather than individually." Each was judged from its before-and-after picture and a line, so they're rows on one card; had each needed its own reading, a set.
+- **Rows.** A release's server, Google Play and iPhone. Each is a line, and he answers them differently because the stores leave him different time to catch a problem.
+- **Rows, once the proof moved out.** Two reads that decide one plan. As rows of 300 words each (the method, the counts behind the counts, what each fallback costs) they were a wall; as two or three lines each (what it finds, what it changes, what it costs), with the method in `evidence`, he answers each where he reads it.
+- **One yes, not four rows.** Four small checks toward one purpose at a few dollars each, which he had approved one by one until he answered one that rose to about $15 with "i don't care $15 is cheap". One row, "Run all four", listing them inside it.
+- **One card, not a set.** Ten emails from one template, only the names and links differing: one reading, so one card with `items` and the email on the card. Ten emails each written for its person are ten readings, so a set.
+- **Not on this card at all.** A card asking to ship a release also carried another team's two decisions and six sections of what was in it, each line tagged with card numbers: "I can't tell if this is all stuff thats ready to go and you're asking if it can ship or if you're asking to build something". A ship card asks only to ship and says up front that everything on it is built and tested; what players get is a plain list, and another team's decision comes on that team's own card.
+- **Two cards, not a set.** A price change and an ad, ready in the same minute. A set tells him these go together; unrelated cards just post one after the other, each from the agent whose work it is, so its answer comes back to that agent.
+
+A set is one piece of work he'd decide in one sitting, so its cards share `part_of` and go out in one `approvals submit a.json b.json`. It isn't a day's queue: a set so long he'd lose which card he's on is two pieces of work.
 
 ## What goes on the card, and what goes in the thread
 
@@ -59,13 +76,13 @@ And the paragraph moves to `evidence`, with the link to its source. The approver
 Before the fields, shape the card around how he will judge it. Picture the approver deciding: what does he have to see, and what does he have to be able to say back? Most of his replies to cards that failed him were the card's shape, not its content: "show me the before and after for each change", "I don't want to click through and approve each of them", "I want to see it as designed, I don't wanna see plain text", and "I should approve the store builds and app store submission separately from google play". So:
 
 - **If he judges it by looking, put it on the card the way people will meet it.** A change to a screen is today beside the after, each picture saying whether it's real or a mock and from which phone and build, with the change outlined (`gallery`, with `mark`). An email is its designed render at phone width, a push its exact words, an ad its first frame full height. Text describing a screen makes him ask for the screen. Each picture also has to be readable when he opens it full size and zooms in, because the card shows it as a thumbnail and the picture itself is all he has: a screen at the phone's own resolution, a slide or mock exported at two or three times the size it's shown at, and cut to what the row is about rather than a whole slide around it. Rows 2 to 4 of the coaching-at-the-table card on November 9 were whole deck slides at 1,100 pixels, six phone screens to a slide, and nothing in them could be read at any zoom ("I can't tell shit from a blurry small image"); the one screen that changed, at full resolution, could. A picture that only sets the scene, like a hand of six moments shown as one strip, is the exception that reads at a glance, so it needs size but no crop.
-- **If he'll want to answer the pieces differently, give each piece its own answer.** Four changes toward one goal, ready together, are one card with a row each (`parts`), not four cards in half an hour and not one yes for all four: that morning he approved two, declined one and sent one back for better words. A piece that takes something away from people or speaks in his name never rides on Approve all (`own_yes`). Each store of a release is its own row, because Google Play is live in minutes and the App Store takes days.
+- **If he'll want to answer the pieces differently, give each piece its own answer:** a row (`parts`) when a line or two decides it, its own card in a set when it needs its own reading ([One card or a set](#one-card-or-a-set)). A row's own words (their message, your reply) go in its `quotes`, drawn above its buttons. A piece that takes something away from people or speaks in his name never rides on Approve all (`own_yes`).
 - **If the call is between things, name the things.** Approve and No don't fit "A or B", and they misfire when your pick isn't the yes: a green Approve beside a red No reads as "the work dies if you follow me". Use `options` with your `pick`, on the card or on a row, and name each button for what happens ("Stop at 72 h, resume if the read says so" and "Keep training").
 - **If it's many of the same thing, ask once.** Ten emails to ten creators are one card with `items`: a yes sends all, and Pick which lets him hold some back.
 - **If it goes out in his name, let him change the words himself.** Mark the outgoing words `edit: true`, so Edit the words opens them in a box; what he sends from there is his yes with his words.
 - **If waiting costs something, say what happens with no answer and when** (`if_no_answer`). It goes on the card and on the lock-screen line, which is all he sees on his phone.
 
-These combine: a release has sections of tagged changes and a row per store; a call on spend has the reads behind it and a row per decision. The kinds below show each.
+These combine: a release has what players get and a row per store; a call on spend has the reads behind it and a row per decision. The kinds below show each.
 
 Each example is made up, modelled on a real card that failed in its old shape.
 
@@ -89,7 +106,7 @@ Anything users will see change: a screen, words in the app, a lesson, a store li
 
 ### A set of related changes, each with its own answer
 
-Several changes toward one initiative, ready around the same time. One card, a row each, so he can approve two, decline one and send one back in the same minute.
+Several changes toward one initiative, ready around the same time, each decided from its picture and a line. One card, a row each, so he can approve two, decline one and send one back in the same minute.
 
 ```json
 {"type": "content", "title": "Payers keep using what they paid for: 4 changes",
@@ -106,6 +123,26 @@ Several changes toward one initiative, ready around the same time. One card, a r
 ```
 
 When he asks for a change on row 3, post the next version with only row 3 changed (and `changes` saying so): rows 1, 2 and 4 keep their answers, and row 3 comes back marked new with its buttons.
+
+### Cards that go together, each needing its own reading
+
+Four replies to four people, each with their words and yours. One file per card, sent in one command so they arrive together, marked "1 of 4" to "4 of 4". Each card stands on its own: he may answer the third first.
+
+```json
+{"type": "email", "title": "Reply to a yearly charge after a cancelled trial",
+ "why": "This person cancelled their trial the day before they were charged the yearly fee, and has waited 14 days for an answer.",
+ "part_of": "Answer people waiting on us about a charge",
+ "from": "your company address, in their thread",
+ "quotes": [{"label": "Their words", "text": "I cancelled my trial yesterday and was still charged for the year."},
+            {"label": "Your reply", "text": "Hi,\n\nSorry this sat so long. …\n\nAmir", "edit": true}],
+ "facts": [["Why trial users get charged before they can cancel", "the store takes the first payment about 8 hours before a trial ends, and our reminder gives only the date; fixing the reminder is its own card"]],
+ "yes_label": "Send", "change_label": "Change",
+ "approves": "sending this reply once.", "does_not_approve": "a refund from us: the store handles these."}
+```
+
+```
+approvals submit reply-1.json reply-2.json reply-3.json reply-4.json --agent "Revenue"
+```
 
 ### A call on spend, with the reads behind it
 
@@ -138,7 +175,7 @@ Many asks of one kind. One card; a yes covers all, and he can hold some back.
  "part_of": "Poker creators use Poker Skill",
  "facts": [["From", "your company address. The same email to each, with their name and their own link, every link tested on iPhone and Android"]],
  "items": [["River Rat Poker", "Instagram Reels · follow-up"], ["Two Pair Tom", "YouTube vlog"], "The Grind Podcast (Sam)", "…"],
- "quotes": [{"label": "The email", "text": "Hi {name}, …", "button": "Read the email"}],
+ "quotes": [{"label": "The email", "text": "Hi {name}, …"}],
  "yes_label": "Send all 10", "pick_label": "Send {n}",
  "offer": "You've said yes to all 48 creator messages you've answered this month. Stop asking for first emails to creators with a free year of Plus?",
  "approves": "sending these emails once each.", "does_not_approve": "follow-ups or other creators."}
@@ -175,15 +212,17 @@ A push, an email, an in-app message: the words as they land, the designed render
 
 ### A release
 
-Grouped by initiative, each change saying who gets it when, each store its own yes.
+It asks only to ship, and says so: everything on it is built and tested. What players get is a plain list by when they get it, with no card numbers; each store is its own yes; anything else that needs a decision comes on its own card from whoever owns it.
 
 ```json
-{"type": "content", "title": "Release 2.1.65",
- "why": "It puts today's coaching and fixes in users' hands: your move shows the moment you tap, and finished players stop getting the evening push.",
+{"type": "content", "title": "Ship 2.1.65: your move shows the moment you tap",
+ "why": "It puts today's coaching and fixes in players' hands. Everything on this card is built, merged and tested: a yes ships it, and nothing here asks to build anything.",
  "part_of": null,
  "sections": [
-   {"title": "Coaching at the table · feature and product pods", "lines": [{"text": "Your move shows the moment you tap. (AP-0544)", "tag": "Updaters"}]},
-   {"title": "Fixes", "lines": [{"text": "The evening Missions push stops reaching users who already finished.", "tag": "Everyone at deploy"}]}],
+   {"title": "What players get", "lines": [
+     ["Everyone, when the server deploys", "the evening Missions push stops reaching players who already finished"],
+     ["Everyone who updates", "their move shows the moment they tap"],
+     ["In the build, off until its test starts", "the new report card"]]}],
  "facts": [["QA", "ship it"], ["⚠️ Known and going out", "after sign-in, Home can offer the wrong next lesson for half a second (#9818)"],
            ["🛑 Can't be undone", "an hourly sweep deletes finished hand records older than a day"]],
  "parts": [{"title": "Server", "own_yes": true},

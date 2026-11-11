@@ -35,7 +35,8 @@ NEED_TEXT = {
 
 # Slack's limits: a carousel holds 10 cards; a card's title 150 characters and its body 200; a button 75; a pop-up's
 # text box 3,000; a message 50 blocks.
-GALLERY_MAX, PARTS_MAX, OPTIONS_MAX, ITEMS_MAX, LINKS_MAX = 10, 10, 10, 100, 5
+# A set is several cards posted together, each its own decision.
+GALLERY_MAX, PARTS_MAX, OPTIONS_MAX, ITEMS_MAX, LINKS_MAX, SET_MAX = 10, 10, 10, 100, 5, 10
 LABEL_MAX, NOTE_MAX, BUTTON_MAX, EDIT_MAX, BLOCKS_MAX, WHY_MAX = 150, 200, 75, 3000, 50, 400
 SHAPES = ("parts", "options", "items")
 
@@ -148,7 +149,7 @@ def validate(card, revision=False):
     errs += _validate_shapes(card)
     if not errs and (n := len(card_blocks(_stub(card), 1, "open"))) > BLOCKS_MAX:
         errs.append(f"too much for one card: it needs {n} Slack blocks and a message holds {BLOCKS_MAX}; "
-                    "move detail to evidence, or split it into cards")
+                    "move detail to evidence, or send it as a set of cards, one decision each")
     return errs
 
 
@@ -206,6 +207,15 @@ def _validate_shapes(card):
                         errs.append(f"row {j}: {key} is a button: keep it under {BUTTON_MAX} characters")
                 if p.get("options") is not None:
                     errs += _validate_options(p["options"], p.get("pick"), f"row {j}", pictures=False)
+                for q in p.get("quotes") or []:
+                    if not (isinstance(q, dict) and _text(q.get("label"), LABEL_MAX) and _text(q.get("text"), EDIT_MAX)):
+                        errs.append(f"row {j}: each quote needs a label and its words, under {EDIT_MAX} characters")
+                    elif q.get("button") or q.get("edit"):
+                        errs.append(f"row {j}: a row's quote is drawn in the row, right above its buttons; it takes no button")
+            if any(q.get("button") for q in card.get("quotes") or [] if isinstance(q, dict)):
+                errs.append("on a card with rows, words a row is answered on go in that row's own quotes, drawn above its "
+                            "buttons, never behind a Read button. Words that need a reading of their own make a card of "
+                            "their own: send the cards together as a set (`approvals submit a.json b.json`)")
 
     if card.get("options") is not None:
         errs += _validate_options(card["options"], card.get("pick"), "options", pictures=True)
@@ -495,7 +505,8 @@ def _card_blocks(rec, n, mode, compact=False):
     elif mode == "open" and status_lines(rec):
         blocks.append(ctx("\n".join(status_lines(rec))))
     if mode != "final":
-        blocks.append({"type": "divider"})
+        if blocks[-1].get("type") != "divider":   # rows end on their own divider
+            blocks.append({"type": "divider"})
         blocks.append(md(f"*Your yes covers:* {esc(card['approves'])}\n*It doesn't cover:* {esc(card['does_not_approve'])}"))
         if card.get("links"):
             blocks.append({"type": "actions", "block_id": "links", "elements": [
@@ -512,14 +523,21 @@ def has_frame(rec, card):
     return "frame" in rec or "part_of" in card
 
 
+def set_pos(rec):
+    """ "1 of 3" for a card posted as one of a set, else None."""
+    s = rec.get("set")
+    return f"{s['n']} of {s['of']}" if s else None
+
+
 def frame_line(rec, card):
-    """What the card belongs to, and who sent it: set in place on the record (`approvals status --part-of`), else the
-    card's own. A card from before the frame line, never given one, has none."""
-    if not has_frame(rec, card):
+    """What the card belongs to, where it sits in its set, and who sent it. Part of is set in place on the record
+    (`approvals status --part-of`), else the card's own. A card from before the frame line, never given one, has none."""
+    pos = set_pos(rec)
+    if not has_frame(rec, card) and not pos:
         return None
-    part_of = rec["frame"] if "frame" in rec else card["part_of"]
-    who = esc(rec["agent"])
-    return ctx(f"Part of: {esc(part_of)} · {who}" if part_of else f"Stands alone · {who}")
+    part_of = (rec["frame"] if "frame" in rec else card["part_of"]) if has_frame(rec, card) else None
+    head = [f"Part of: {esc(part_of)}"] if part_of else [] if pos else ["Stands alone"]
+    return ctx(" · ".join(head + ([pos] if pos else []) + [esc(rec["agent"])]))
 
 
 def _replaced_blocks(rec, n):
@@ -676,6 +694,7 @@ def _rows(rec, n, mode):
         if files.get(f"part:{j}"):
             sec["accessory"] = picture(files[f"part:{j}"], p["title"])
         out.append(sec)
+        out += [quote_block(q) for q in p.get("quotes") or []]   # the row's own words, right above its buttons
         under = ([answer_line(a, deadline)] if a else []) + status_lines(rec, pid)
         if under:
             out.append(ctx("\n".join(under)))
@@ -749,7 +768,7 @@ def _buttons(rec, n):
 
 def _footer(rec, n, mode):
     card = rec["versions"][n - 1]["card"]
-    base = f"{rec['id']} · {version_label(n)}" + ("" if has_frame(rec, card) else f" · From {esc(rec['agent'])}")
+    base = f"{rec['id']} · {version_label(n)}" + ("" if has_frame(rec, card) or rec.get("set") else f" · From {esc(rec['agent'])}")
     if mode == "open":
         by = when(datetime.fromisoformat(rec["deadline"]))
         late = f"With no answer by {by}, {esc(card['if_no_answer'])}" if card.get("if_no_answer") else f"No answer by {by} means no"
@@ -1004,6 +1023,8 @@ def card_text(rec, n):
     """The message's own text: the one line an iPhone notification shows."""
     card = rec["versions"][n - 1]["card"]
     text = f"{TYPES[card['type']]['emoji']} {rec['agent']}: {card['title']}" + (f" ({version_label(n)})" if n > 1 else "")
+    if set_pos(rec):
+        text += f" · {set_pos(rec)}"
     if card.get("parts") and (left := len(open_rows(rec, card))) and rec.get("status") not in ("withdrawn", "done"):
         text += f" · {left} to answer"
     if card.get("if_no_answer") and rec.get("status") in ("pending", "question"):
