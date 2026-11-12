@@ -583,14 +583,9 @@ def _happened(rec):
 def cmd_history(a):
     """Cards newest first, each with what happened on it in order: for the deputy to see how an asker's recent cards
     of a kind went, and how its own calls compare with what the approver did. Facts only, no ranking."""
-    since = store.now() - timedelta(days=a.days) if a.days else None
+    since = store.iso(store.now() - timedelta(days=a.days)) if a.days else None
     shown = 0
-    for rec in sorted(store.all_records(), key=lambda r: r["created"], reverse=True):
-        if ((a.agent and a.agent.lower() not in rec["agent"].lower()) or (a.type and rec["type"] != a.type)
-                or (since and datetime.fromisoformat(rec["created"]) < since) or (a.calls and not rec.get("calls"))):
-            continue
-        if shown == a.limit:
-            break
+    for rec in store.history_records(a.agent, a.type, since, a.limit, a.calls):
         print(f"{rec['id']}  {_stamp(rec['created'])}  {rec['type']}  {rec['agent']}: {rec['title']}")
         for line in _happened(rec):
             print(f"    {line}")

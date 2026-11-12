@@ -206,3 +206,15 @@ def test_role_says_what_the_service_does_here(hubbox, monkeypatch, capsys):
     cli.main(["role"])
     lines = capsys.readouterr().out.splitlines()
     assert lines[:2] == ["delivery", "hub"] and lines[2].startswith("none: token file not found")
+
+
+def test_history_is_filtered_on_the_hub_so_only_matching_cards_cross(hubbox):
+    """The deputy looks at a few cards many times a day; the hub sends only what was asked for, newest first."""
+    for agent, kind in (("Ads", "money"), ("Social", "money"), ("Ads", "money")):
+        rec = make_rec(SAMPLES[kind], agent=agent)
+        rec.pop("id")
+        store.create(rec)
+    got = store.history_records(agent="ads", limit=5)
+    assert [r["id"] for r in got] == ["AP-0003", "AP-0001"]
+    assert [r["id"] for r in store.history_records(limit=1)] == ["AP-0003"]
+    assert store.history_records(calls=True) == []

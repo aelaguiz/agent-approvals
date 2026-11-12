@@ -495,7 +495,11 @@ def call(rec, what, why, by, live):
     store.event(rec, "call", version=n, call=what, why=why, by=by, live=live)
     rec["card_dirty"] = True
     if what == "approve" and live:
-        decide(rec, n, "approved", by=by, where="deputy")
+        r = decide(rec, n, "approved", by=by, where="deputy")
+        if r != "ok":   # nothing was approved, so the asker must not be told it was
+            rec["calls"].pop()
+            rec["events"].pop()
+            return f"it could not be approved ({r})"
         rec["decision"] = {"verdict": "approved", "version": n, "by": by, "where": "deputy", "why": why, "words": None,
                            "at": store.iso()}
         enqueue(rec, "decision", msg_auto(rec, by, why), react_ts=card_ts(rec))

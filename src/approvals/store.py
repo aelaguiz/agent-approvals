@@ -85,6 +85,13 @@ def all_records():
     return h.records() if h else local_all()
 
 
+def history_records(agent=None, type=None, since=None, limit=20, calls=False):
+    """Cards newest first that match: part of the asker's name, a type, posted since a time, called by the deputy.
+    Filtered where the records are kept, so a look at a few cards doesn't bring every record across the network."""
+    h = hub_client()
+    return h.history(agent, type, since, limit, calls) if h else local_history(agent, type, since, limit, calls)
+
+
 def waiting_records():
     """Records with a message the agent hasn't been given yet."""
     h = hub_client()
@@ -213,6 +220,18 @@ def local_all():
             out.append(json.loads(p.read_text()))
         except (json.JSONDecodeError, OSError):
             continue
+    return out
+
+
+def local_history(agent=None, type=None, since=None, limit=20, calls=False):
+    out = []
+    for rec in sorted(local_all(), key=lambda r: (r["created"], r["id"]), reverse=True):
+        if ((agent and agent.lower() not in rec["agent"].lower()) or (type and rec["type"] != type)
+                or (since and parse(rec["created"]) < parse(since)) or (calls and not rec.get("calls"))):
+            continue
+        if len(out) == limit:
+            break
+        out.append(rec)
     return out
 
 

@@ -13,7 +13,7 @@ import threading
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from . import basecamp, config, core, store
 
@@ -60,6 +60,10 @@ class Client:
 
     def records(self, waiting=False):
         return self.call("GET", "/records" + ("?waiting=1" if waiting else ""))[1]["records"]
+
+    def history(self, agent, type, since, limit, calls):
+        q = {k: v for k, v in (("agent", agent), ("type", type), ("since", since), ("limit", limit), ("calls", 1 if calls else None)) if v}
+        return self.call("GET", "/history?" + urlencode(q))[1]["records"]
 
     def delete(self, rid):
         self.call("DELETE", f"/records/{rid}")
@@ -114,6 +118,10 @@ class Handler(BaseHTTPRequestHandler):
                 recs, machine = store.local_all(), q.get("machine", [""])[0]
                 due, strays = core.to_deliver(recs, machine, store.local_reviewer(), store.local_deputy())
                 return self._send(200, {"due": due, "strays": strays, "basecamp": basecamp.due(recs, machine)})
+            if method == "GET" and parts == ["history"]:
+                one = lambda k: q.get(k, [None])[0]
+                return self._send(200, {"records": store.local_history(one("agent"), one("type"), one("since"),
+                                                                        int(one("limit") or 20), bool(one("calls")))})
             if parts == ["reviewer"]:
                 if method == "GET":
                     return self._send(200, {"reviewer": store.local_reviewer()})
