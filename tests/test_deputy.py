@@ -376,6 +376,50 @@ def test_an_approve_is_refused_on_a_pick_with_none_named_and_from_any_other_sess
     assert not store.load("AP-0004").get("calls")
 
 
+def test_a_dry_run_call_can_be_made_again_once_auto_approval_is_on_and_only_then(monkeypatch, slack, capsys):
+    monkeypatch.setattr(slackapi, "message_url", lambda ts: f"https://x.slack.com/p{ts}")
+    be_deputy()
+    for rid in ("AP-0001", "AP-0002", "AP-0003"):
+        card(rid)
+    as_session(monkeypatch, "sid-dep")
+    call("AP-0001", "--approve", "--why", "Dry: inside the cap.")
+    call("AP-0002", "--his", "--why", "Dry: a new kind of spend.")
+    call("AP-0003", "--approve", "--why", "Dry: routine.")
+    with pytest.raises(SystemExit):   # a dry run over a dry run is still one call a version
+        call("AP-0001", "--his", "--why", "Second thoughts.")
+    assert "v1 already has your call" in capsys.readouterr().err and len(store.load("AP-0001")["calls"]) == 1
+    be_deputy(live=True)
+    call("AP-0001", "--approve", "--why", "Inside the test's cap.")        # a live approve over a dry-run approve
+    call("AP-0002", "--approve", "--why", "He has since set this spend.")  # a live approve over a dry-run "his"
+    call("AP-0003", "--his", "--why", "He asked about this kind today.")   # a live "his" over a dry-run approve
+    a, b, c = (store.load(rid) for rid in ("AP-0001", "AP-0002", "AP-0003"))
+    for rec, why in ((a, "Inside the test's cap."), (b, "He has since set this spend.")):
+        assert rec["status"] == "approved" and rec["decision"]["where"] == "deputy" and rec["decision"]["why"] == why
+        assert [x["live"] for x in rec["calls"]] == [False, True] and cards.call_on(rec, 1)["why"] == why
+        assert len(to(rec["id"])) == 1 and "approved for Sam by his deputy" in to(rec["id"])[0]["text"]
+        final = txt(cards.card_blocks(rec, 1, "final"))
+        assert f"🤖 Approved for you by Exec · approver" in final and why in final and "Dry:" not in final
+        assert [e["live"] for e in rec["events"] if e["kind"] == "call"] == [False, True]   # the dry run stays as history
+    assert c["status"] == "pending" and c["outbox"] == [] and [x["call"] for x in c["calls"]] == ["approve", "his"]
+    opened = txt(cards.card_blocks(c, 1, "open"))
+    assert "🤖 Exec · approver left this for you: He asked about this kind today." in opened and "Dry run" not in opened
+    # A version with a live call takes no second one, whichever way.
+    for rid, args in (("AP-0003", ["--approve"]), ("AP-0003", ["--his"])):
+        with pytest.raises(SystemExit):
+            call(rid, *args, "--why", "Again.")
+        assert "v1 already has your call" in capsys.readouterr().err
+    assert len(store.load("AP-0003")["calls"]) == 2
+    # The morning summary counts each card once, by its newest call.
+    recs = [store.load(rid) for rid in ("AP-0001", "AP-0002", "AP-0003")]
+    blocks, text = digest.summary(store.deputy(), datetime.fromisoformat(a["created"]) - timedelta(hours=1), recs)
+    seen = txt(blocks)
+    assert "2 cards were approved for you since yesterday morning" in text and "it left 1 for you" in seen
+    assert seen.count("AP-0001") == 1 and seen.count("AP-0002") == 1 and "Dry:" not in seen
+    # Taken back, it is his decline, and the card names the live call's why.
+    assert press("AP-0001", "takeback") == "ok"
+    assert "Exec · approver had approved it: Inside the test's cap." in txt(cards.card_blocks(store.load("AP-0001"), 1, "final"))
+
+
 # ---------- taking it back ----------
 
 def auto_approved(monkeypatch, rid="AP-0001", kind=None):

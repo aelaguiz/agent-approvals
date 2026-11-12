@@ -434,8 +434,8 @@ def removed(rec):
 
 
 def call_on(rec, n):
-    """The deputy's call on version n, or None."""
-    return next((c for c in rec.get("calls") or [] if c["version"] == n), None)
+    """The deputy's call on version n (the newest, where a dry-run call was made again with auto-approval on), or None."""
+    return next((c for c in reversed(rec.get("calls") or []) if c["version"] == n), None)
 
 
 def auto_approved(rec):

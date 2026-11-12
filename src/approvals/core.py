@@ -484,7 +484,11 @@ def call(rec, what, why, by, live):
     bad = _not_callable(rec, n)
     if bad:
         return bad
-    if cards.call_on(rec, n):
+    prior = cards.call_on(rec, n)
+    # One call a version, except that a dry-run call can be made again once auto-approval is on: a dry run approved
+    # nothing, so the card would otherwise wait on the approver for a call that was only ever shown. The new call
+    # stands as the call on that version; the dry-run one stays in the events.
+    if prior and (prior["live"] or not live):
         return f"v{n} already has your call"
     c = card(rec)
     open_rows = cards.open_rows(rec)
