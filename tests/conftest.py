@@ -19,6 +19,7 @@ def tmp_home(tmp_path, monkeypatch):
     monkeypatch.setenv("APPROVALS_HOME", str(home))
     monkeypatch.delenv("APPROVALS_TEST_APPROVER", raising=False)
     monkeypatch.delenv("APPROVALS_TEST", raising=False)
+    monkeypatch.delenv("APPROVALS_FROM", raising=False)   # a pod member's own name would name every test's asker
     monkeypatch.setenv("APPROVALS_MACHINE", "testbox")
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-made-up")
     from approvals import config

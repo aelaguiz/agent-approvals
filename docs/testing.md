@@ -128,6 +128,23 @@ A test hub must not connect to Slack: a second connection with the workspace's a
 
 ## Results
 
+### November 12, 2026: answering from the list in one tap
+
+Unit tests: 197 of 197. Then a live run in Fun Country's real #approvals, after the hub on the Studio restarted on the published commit. Four TEST cards were posted from a Claude session on the M5 (APPROVALS_TEST=1), and a TEST list naming them was posted and kept current from a scratch folder, as on November 2. The presses were the approver's own account in Slack's web app, made by a script clicking each button, since the agent browser's synthetic mouse input never reached the page.
+
+| Check | Result |
+| --- | --- |
+| The list's buttons | Pass. Slack accepted the list; each line showed Approve, Deny and Remove, and the two-row set showed "Approve all 2". |
+| Approve | Pass. The hub logged the press at 6:15:10; the card was approved, the answer was typed into the asking session at 6:15:12 and seen in its transcript at 6:15:15, and the line crossed off "You approved it, 6:15 am". |
+| Deny | Pass. Declined, the agent's message said so, the line crossed off "You declined it". |
+| Remove | Pass. The card was closed as removed (headline "Removed: …", "Removed from your list by Amir … Nothing still waiting on it was approved"), the agent got the removal message, and the line crossed off "You removed it". |
+| Approve all 2 | Pass. Both rows approved, one message naming both. |
+| The real list | Pass. Redrawn with buttons within a second of the restart: 14 of 16 still waiting, every waiting line with its buttons, one answered line counted in "…and 1 more". A set whose rows each need their own pick showed only Deny and Remove. |
+
+The TEST cards and the TEST list were deleted afterwards. Not seen live: the hub redrawing the real list right after a press, since only the approver's taps on real cards exercise it; the unit tests cover it.
+
+**Found while testing:** `make test` from a pod member's session failed 6 tests, because the pod sets `APPROVALS_FROM` and every test's asker took the member's name. The tests now clear it.
+
 ### November 11, 2026: Basecamp steps
 
 Built for the leads' Basecamp plan (Amir's go, November 11). Unit tests: 193 of 193. The Slack half wasn't run live: the only Slack is Amir's own #approvals, and nothing here may post a card there or answer a real one. The Basecamp half was run live by calling the step code directly (`basecamp.wanted` and `basecamp.write`, the same calls the service and the command make) against a scratch card in a Basecamp project, as the CFO's login read from its folder's `.basecamp/config.json`: the step created waiting on the approver, retitled with an approval and "not yet seen by CFO", retitled without it, checked, read back, and the card trashed.
