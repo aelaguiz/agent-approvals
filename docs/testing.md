@@ -144,6 +144,8 @@ Not seen: the approver's own press of Take it back and of the summary's button i
 
 Then the real deputy, an agent in its own session on another machine, took the role as a dry run, and its first call on a real card was recorded by the hub and shown by `approvals history --calls` within a minute.
 
+**Later that day: the deputy's approve covers picks and rows that need their own yes.** Unit tests: 234 of 234. Not run live: the real deputy held the role, there is only one, and a stand-in in test mode would have taken it from the real one, so the pick and own-yes paths were not exercised on TEST cards in Slack. What the change touches is the call itself (`core.call`, run by the `approvals call` command on the deputy's own machine) and the words drawn on the answered card and in the summary (drawn by the hub); delivery and routing are unchanged.
+
 ### November 12, 2026: answering from the list in one tap
 
 Unit tests: 197 of 197. Then a live run in Fun Country's real #approvals, after the hub on the Studio restarted on the published commit. Four TEST cards were posted from a Claude session on the M5 (APPROVALS_TEST=1), and a TEST list naming them was posted and kept current from a scratch folder, as on November 2. The presses were the approver's own account in Slack's web app, made by a script clicking each button, since the agent browser's synthetic mouse input never reached the page.
