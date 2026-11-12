@@ -129,6 +129,21 @@ A test hub must not connect to Slack: a second connection with the workspace's a
 
 ## Results
 
+### November 12, 2026: the deputy
+
+On the live service after the install, with a stand-in deputy in test mode (a made-up session id, `APPROVALS_TEST=1`), so only TEST cards were involved and nobody held the role before or after:
+
+- The stand-in took the role. A TEST card posted from an agent's session reached the stand-in's `approvals inbox` with the commands to make its call.
+- A dry-run `approvals call --approve` was recorded, the asker heard nothing, and the card in Slack showed "🤖 Dry run · TEST approver would have approved this for you: ..." above its footer.
+- With auto-approval on, an approve on a second TEST card made it "🤖 Auto-approved: ..." with "🤖 Approved for you by TEST approver, Thu 8:28 am: ..." and the buttons See the card and Take it back. The asking session had "approved for Amir by his deputy" typed in 20 seconds later (the log: delivered, seen in the transcript) and acknowledged it in the thread.
+- Take it back, made with the same call the button makes (`core.press(..., "takeback")`), turned the card into "↩️ You took it back: ..." naming who had approved it and why. The stop message was typed into the asking session 2 seconds after it was sent, and the stand-in's inbox held "took back your approval".
+- The summary posted in both forms (auto-approval on: the card struck through as taken back, with Pause auto-approval; dry run: what the approver did beside each card, with Turn auto-approval on), redrew as after a press of its button, and was deleted.
+- Clean-up: the role ended with `approvals deputy --off`, and both TEST cards were purged.
+
+Not seen: the approver's own press of Take it back and of the summary's button in Slack, and `approvals pictures` downloading from Slack.
+
+Then the real deputy, an agent in its own session on another machine, took the role as a dry run, and its first call on a real card was recorded by the hub and shown by `approvals history --calls` within a minute.
+
 ### November 12, 2026: answering from the list in one tap
 
 Unit tests: 197 of 197. Then a live run in Fun Country's real #approvals, after the hub on the Studio restarted on the published commit. Four TEST cards were posted from a Claude session on the M5 (APPROVALS_TEST=1), and a TEST list naming them was posted and kept current from a scratch folder, as on November 2. The presses were the approver's own account in Slack's web app, made by a script clicking each button, since the agent browser's synthetic mouse input never reached the page.
