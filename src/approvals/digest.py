@@ -319,6 +319,9 @@ def summary(d, since, records):
         link = f"<{slackapi.message_url(r['thread_ts'])}|{r['id']}>"
         title = " ".join(str(r["title"]).split())
         line = f"{link} {cards.esc(title if len(title) <= 90 else title[:89].rstrip() + '…')} — {cards.esc(core.one_line(c['why']))}"
+        pick = (r.get("decision") or {}).get("choice") if live and cards.auto_approved(r) else None
+        if pick:
+            line += f" · took the card's pick, {cards.esc(pick)}"
         if live and r.get("taken_back"):
             line = f"~{line}~ ↩️ taken back"
         elif not live:

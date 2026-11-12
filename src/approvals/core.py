@@ -278,8 +278,11 @@ def decide(rec, n, verdict, by, where="button", words=None, choice=None, items=N
                 tell_deputy(rec, news)
             settle(rec)
             return "ok"
-        for j, _ in rows:
-            r = answer_part(rec, n, j, verdict, by, where=where, words=words, tell=where == "button", review=False)
+        for j, p in rows:
+            # The deputy's yes on a row that asks for a pick takes the pick the card names for it.
+            pick = p.get("pick") if where == "deputy" and verdict == "approved" and p.get("options") else None
+            r = answer_part(rec, n, j, "chose" if pick else verdict, by, where=where, words=words, choice=pick,
+                            tell=where == "button", review=False)
         news = f'{who()} {verdict} every part still open ({where_said(where)}).{quoted_words(words)}'
         tell_reviewer(rec, news)
         if verdict != "approved" or words:
@@ -305,7 +308,7 @@ def decide(rec, n, verdict, by, where="button", words=None, choice=None, items=N
     tell_reviewer(rec, news)
     plain = (verdict == "approved" and not words and edited is None and choice is None
              and (items is None or len(items) == len(card(rec).get("items") or [])))
-    if not plain:
+    if not plain and where != "deputy":   # the deputy isn't told of its own approval
         tell_deputy(rec, news)
     return "ok"
 
@@ -485,31 +488,52 @@ def call(rec, what, why, by, live):
         return f"v{n} already has your call"
     c = card(rec)
     open_rows = cards.open_rows(rec)
-    if what == "approve" and (c.get("options") or any(p.get("options") for _, p in open_rows)):
-        return "it asks for a pick between options, and a pick is the approver's"
-    if what == "approve" and any(p.get("own_yes") for _, p in open_rows):
-        # A row marked own_yes is never approved together with others (Approve all skips it), so a yes for the
-        # whole card can't cover it either.
-        return "a row on it needs the approver's own yes"
+    choice = None
+    if what == "approve":
+        # An approve covers the whole card: every open row, a row marked own_yes included (only the approver's own
+        # Approve all skips those). Where the card asks for a pick, at its own level or on a row, the approve takes
+        # the pick its agent named; a card that names none leaves nothing for an approval to take.
+        if (c.get("options") and not c.get("pick")) or any(p.get("options") and not p.get("pick") for _, p in open_rows):
+            return "it asks for a pick and names none, so there is nothing for an approval to take"
+        choice = c.get("pick") if c.get("options") else None
     rec.setdefault("calls", []).append({"version": n, "call": what, "why": why, "by": by, "at": store.iso(), "live": live})
     store.event(rec, "call", version=n, call=what, why=why, by=by, live=live)
     rec["card_dirty"] = True
     if what == "approve" and live:
-        r = decide(rec, n, "approved", by=by, where="deputy")
+        r = decide(rec, n, "approved", by=by, where="deputy", choice=choice)
         if r != "ok":   # nothing was approved, so the asker must not be told it was
             rec["calls"].pop()
             rec["events"].pop()
             return f"it could not be approved ({r})"
         rec["decision"] = {"verdict": "approved", "version": n, "by": by, "where": "deputy", "why": why, "words": None,
                            "at": store.iso()}
+        if choice is not None:
+            rec["decision"]["choice"] = choice
         enqueue(rec, "decision", msg_auto(rec, by, why), react_ts=card_ts(rec))
     return "ok"
 
 
 def msg_auto(rec, by, why):
+    """The deputy's approval, typed to the asker. Where it took a pick the card named, at the card's level or on a
+    row, it says which, since that is what the yes covers."""
+    c = card(rec)
+    n = len(rec["versions"])
+    choice = (rec.get("decision") or {}).get("choice")
+    took, do = "", "do exactly what the card describes"
+    if choice is not None:
+        o = next(o for o in c["options"] if o["name"] == choice)
+        took = f' It took the pick the card names, {choice}' + (f' ("{o["title"]}")' if o.get("title") else "") + "."
+        do = f"do exactly what the card describes for {choice}, nothing else"
+    answers = rec.get("answers") or {}
+    rows = [(j, a["choice"]) for j, p in enumerate(c.get("parts") or [], 1)
+            for a in [answers.get(cards.part_id(p, j)) or {}]
+            if a.get("where") == "deputy" and a.get("version") == n and a.get("verdict") == "chose"]
+    if rows:
+        took = " " + " ".join(f'On part {j} it took the pick the card names, "{ch}".' for j, ch in rows)
+        do = "do exactly what the card describes, with " + ("that pick" if len(rows) == 1 else "those picks")
     return (f'{head(rec)} approved for {who()} by his deputy, {by} (auto-approval, {cards.when(store.now())}). '
-            f'Why: "{one_line(why)}". It counts as his yes, for exactly what the card describes. '
-            f'{ack_step(rec, "what you are about to do")} Then do exactly what the card describes, and {done_step(rec)}')
+            f'Why: "{one_line(why)}". It counts as his yes, for exactly what the card describes.{took} '
+            f'{ack_step(rec, "what you are about to do")} Then {do}, and {done_step(rec)}')
 
 
 def take_back(rec, n, by):

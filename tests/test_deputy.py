@@ -269,18 +269,101 @@ def test_a_call_is_refused_with_nothing_recorded_when_the_card_isnt_waiting_on_h
     assert after.get("calls") == before.get("calls") and after["outbox"] == before["outbox"] and after["status"] == before["status"]
 
 
-def test_an_approve_is_refused_on_a_pick_a_row_that_needs_its_own_yes_and_from_any_other_session(monkeypatch, slack, capsys):
+def test_an_approve_takes_the_pick_the_card_names_and_says_so_to_the_asker_and_on_the_card(monkeypatch, slack, capsys):
+    be_deputy(live=True)
+    card("AP-0001", "choice")    # a pick at the card's level, our pick A
+    as_session(monkeypatch, "sid-dep")
+    call("AP-0001", "--approve", "--why", "The design he already chose in the deck.")
+    rec = store.load("AP-0001")
+    d = rec["decision"]
+    assert rec["status"] == "approved" and d["where"] == "deputy" and d["choice"] == "A" and d["by"] == "Exec · approver"
+    assert [e.get("choice") for e in rec["events"] if e["kind"] == "decision"] == ["A"]
+    [msg] = to("AP-0001")
+    assert msg["kind"] == "decision" and msg["needs_ack"]
+    assert ('It counts as his yes, for exactly what the card describes. It took the pick the card names, A ("a panel from the hand count"). '
+            'First acknowledge' in msg["text"])
+    assert "Then do exactly what the card describes for A, nothing else, and" in msg["text"] and "approvals done AP-0001" in msg["text"]
+    assert to("AP-0001", "deputy") == []   # its own pick doesn't come back to it
+    final = txt(cards.card_blocks(rec, 1, "final"))
+    assert "🤖 Auto-approved: Pick how users see" in final and "🤖 Approved for you by Exec · approver, taking the card's pick, A, " in final
+    assert "You picked" not in final and values(cards.card_blocks(rec, 1, "final")) == ["AP-0001|1|see", "AP-0001|1|takeback"]
+    monkeypatch.setattr(slackapi, "message_url", lambda ts: f"https://x.slack.com/p{ts}")
+    blocks, _ = digest.summary(store.deputy(), datetime.fromisoformat(rec["created"]) - timedelta(hours=1), [rec])
+    assert "· took the card's pick, A" in txt(blocks)
+    # Taken back, it is his decline like any other auto-approval.
+    assert press("AP-0001", "takeback") == "ok"
+    rec = store.load("AP-0001")
+    assert rec["status"] == "declined" and "choice" not in rec["decision"] and "took back the approval his deputy gave" in to("AP-0001")[-1]["text"]
+
+
+def test_an_approve_takes_a_rows_pick_and_covers_rows_that_need_their_own_yes(monkeypatch, slack, capsys):
+    be_deputy(live=True)
+    card("AP-0002", "spend")     # a plain row, and a row with options and a pick
+    card("AP-0003", "release")   # rows each marked as needing their own yes
+    as_session(monkeypatch, "sid-dep")
+    call("AP-0002", "--approve", "--why", "A read inside the run he set.")
+    call("AP-0003", "--approve", "--why", "The release steps he approves every time.")
+    s = store.load("AP-0002")
+    a1, a2 = s["answers"].values()
+    assert s["status"] == "approved" and s["decision"]["where"] == "deputy" and "choice" not in s["decision"]
+    assert (a1["verdict"], a1["where"]) == ("approved", "deputy")
+    assert (a2["verdict"], a2["where"], a2["choice"]) == ("chose", "deputy", "Stop at 72 h, resume if the read says so")
+    [msg] = to("AP-0002")
+    assert 'On part 2 it took the pick the card names, "Stop at 72 h, resume if the read says so". First acknowledge' in msg["text"]
+    assert "Then do exactly what the card describes, with that pick, and" in msg["text"]
+    seen = txt(cards.card_blocks(s, 1, "final"))
+    assert "✅ *Stop at 72 h, resume if the read says so* · chosen" in seen and "· for you by Exec · approver" in seen and "· deputy" not in seen
+    r = store.load("AP-0003")
+    assert r["status"] == "approved" and r["decision"]["where"] == "deputy"
+    assert [(a["verdict"], a["where"]) for a in r["answers"].values()] == [("approved", "deputy")] * 3
+    [msg] = to("AP-0003")
+    assert "It counts as his yes, for exactly what the card describes. First acknowledge" in msg["text"]
+    assert "AP-0003|1|takeback" in values(cards.card_blocks(r, 1, "final"))
+    # His own Approve all still skips rows that need their own yes; only the deputy's yes covers them.
+    card("AP-0005", "release")
+    assert press("AP-0005", "all") == "already" and not store.load("AP-0005").get("answers")
+    # Taken back, every row the deputy answered is his decline, the chosen one too.
+    for rid in ("AP-0002", "AP-0003"):
+        assert press(rid, "takeback") == "ok"
+        rec = store.load(rid)
+        assert rec["status"] == "declined" and {(a["verdict"], a["where"]) for a in rec["answers"].values()} == {
+            ("declined", "took back the auto-approval")}
+
+
+def test_in_a_dry_run_a_pick_and_own_yes_rows_are_called_and_nothing_is_approved(monkeypatch, slack, capsys):
+    be_deputy()
+    card("AP-0001", "choice")
+    card("AP-0003", "release")
+    as_session(monkeypatch, "sid-dep")
+    for rid in ("AP-0001", "AP-0003"):
+        call(rid, "--approve", "--why", "Routine.")
+        rec = store.load(rid)
+        assert rec["status"] == "pending" and rec["outbox"] == [] and not rec.get("answers") and not rec.get("decision")
+        assert rec["calls"][-1]["call"] == "approve" and rec["calls"][-1]["live"] is False
+    assert ("🤖 Dry run · Exec · approver would have approved this for you, taking the card's pick, A: Routine."
+            in txt(cards.card_blocks(store.load("AP-0001"), 1, "open")))
+    assert "🤖 Dry run · Exec · approver would have approved this for you: Routine." in txt(cards.card_blocks(store.load("AP-0003"), 1, "open"))
+
+
+def test_an_approve_is_refused_on_a_pick_with_none_named_and_from_any_other_session(monkeypatch, slack, capsys):
     be_deputy(live=True)
     card("AP-0001", "choice")
     card("AP-0002", "spend")     # a row with options
-    card("AP-0003", "release")   # rows that each need his own yes
     card("AP-0004")
+
+    def no_pick(r):
+        c = r["versions"][0]["card"]
+        c.pop("pick", None)
+        for p in c.get("parts") or []:
+            p.pop("pick", None)
+    for rid in ("AP-0001", "AP-0002"):
+        store.update(rid, no_pick)
     as_session(monkeypatch, "sid-dep")
-    for rid, said in (("AP-0001", "a pick is the approver's"), ("AP-0002", "a pick is the approver's"),
-                      ("AP-0003", "needs the approver's own yes")):
+    for rid in ("AP-0001", "AP-0002"):
         with pytest.raises(SystemExit):
             call(rid, "--approve", "--why", "Routine.")
-        assert said in capsys.readouterr().err and not store.load(rid).get("calls")
+        assert "it asks for a pick and names none, so there is nothing for an approval to take" in capsys.readouterr().err
+        assert not store.load(rid).get("calls") and store.load(rid)["status"] == "pending"
     call("AP-0001", "--his", "--why", "A design choice is his.")   # leaving it for him is always fine
     for why, said in (("  ", "Say why"), ("x" * 301, "The why is 301 characters; keep it under 300")):
         with pytest.raises(SystemExit):

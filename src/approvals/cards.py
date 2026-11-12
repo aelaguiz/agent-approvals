@@ -399,6 +399,8 @@ def answer_line(a, deadline=None):
     """One row's answer, as the row shows it."""
     at = clock(datetime.fromisoformat(a["at"]))
     where = f" · {esc(a['where'])}" if a.get("where") not in (None, "button", "Approve all", "pop-up") else ""
+    if a.get("where") == "deputy":   # the deputy's yes on this row, in the approver's words for it
+        where = f" · for you by {esc(a.get('by') or 'your deputy')}"
     if a["verdict"] == "approved":
         return f"✅ *Approved* {at}{where}"
     if a["verdict"] == "declined":
@@ -448,7 +450,9 @@ def call_line(rec, n):
         return None
     if c["call"] == "his":
         return ctx(f"🤖 {esc(c['by'])} left this for you: {esc(c['why'])}")
-    return ctx(f"🤖 Dry run · {esc(c['by'])} would have approved this for you: {esc(c['why'])}")
+    card = rec["versions"][n - 1]["card"]
+    pick = f", taking the card's pick, {esc(card['pick'])}" if card.get("options") and card.get("pick") else ""
+    return ctx(f"🤖 Dry run · {esc(c['by'])} would have approved this for you{pick}: {esc(c['why'])}")
 
 
 def take_back_row(rec, n):
@@ -882,7 +886,8 @@ def _timeline_blocks(rec, card):
         lines.append(f"↩️ Auto-approval taken back by {who}, {when(datetime.fromisoformat(tb['at']))}. "
                      f"{esc(approval['by'])} had approved it: {esc(approval['why'])}")
     elif auto_approved(rec):
-        lines.append(f"🤖 Approved for you by {esc(d['by'])}, {at}: {esc(d.get('why') or '')}")
+        pick = f", taking the card's pick, {esc(d['choice'])}" if d.get("choice") else ""
+        lines.append(f"🤖 Approved for you by {esc(d['by'])}{pick}, {at}: {esc(d.get('why') or '')}")
     elif verdict == "approved" and not card.get("parts"):
         verb = "Picked" if d.get("choice") else "Approved"
         line = f"✅ {verb} by {who}, {at}{where}"
