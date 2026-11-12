@@ -1,5 +1,6 @@
 """The morning list: once a day, one message in the approvals channel naming every card that waits on the
-approver, kept current all day as they answer. The approver gets a fresh one any time by posting in the channel.
+approver, kept current all day as they answer. The approver gets a fresh one any time by posting in the channel,
+and answers a card from it in one tap: Approve, Deny, or Remove it from the list.
 
 Cards pile up in the channel and the approver loses track of which still wait on them; one card closed
 unanswered is one the agent drops. The list is what's left, so a line that stops waiting on them is struck
@@ -11,6 +12,7 @@ import json
 import logging
 import os
 import tempfile
+import threading
 from datetime import datetime, timedelta
 
 from . import cards, config, slackapi, store
@@ -19,8 +21,10 @@ log = logging.getLogger("approvals")
 
 HOUR = 8                        # posted at 8:00 am in the workspace's timezone
 WAITING = {"pending", "question"}
-MAX_LINES = 18                  # two blocks a line; Slack takes 50 blocks a message
 GROUPS = ["🔴 *Expires today*", "🟡 *Expires tomorrow*", "⚪ *Later*"]
+
+
+_lock = threading.Lock()        # the sweep and a button press's follow-up both edit the list
 
 
 def _path():
@@ -93,24 +97,49 @@ def _outcome(rec, day):
         return f"💬 You replied {_at(_last(rec, 'feedback', 'answer'), day)}; the agent is working on it"
     if s == "expired":
         return f"⌛ No answer by {_at(datetime.fromisoformat(rec['deadline']), day)}, so not approved"
+    if s == "withdrawn" and cards.removed(rec):
+        return f"🗑️ You removed it, {_at(datetime.fromisoformat(rec['withdrawn']['at']), day)}"
     if s == "withdrawn":
         return f"↩️ The agent withdrew it, {_at(datetime.fromisoformat(rec['withdrawn']['at']), day)}"
     return s
 
 
+def _buttons(rec):
+    """One tap answers a card from the list, as the card's own buttons would: Approve says yes to all of it (every
+    plain row of a set, every item of a batch; a choice gets its options instead), Deny says no, and Remove takes it
+    off the list without a verdict on the idea. A choice shown in pictures has no pick here: it's decided by looking."""
+    c = rec["versions"][-1]["card"]
+    base = f"{rec['id']}|{len(rec['versions'])}"
+    if c.get("parts"):
+        rows, left = cards.approve_all_rows(rec), cards.open_rows(rec)
+        label = "Approve" if len(left) == 1 else f"Approve all {len(rows)}" if len(rows) == len(left) else f"Approve {len(rows)} of {len(left)}"
+        yes = [cards.button(label, f"{base}|all", "primary")] if rows else []
+    elif c.get("options"):
+        yes = [] if any(o.get("image") for o in c["options"]) else [
+            cards.button(f"{o['name']}: {o['title']}" if o.get("title") else cards.option_button(o), f"{base}|pick:{i}",
+                         "primary" if o["name"] == c.get("pick") else None) for i, o in enumerate(c["options"])]
+    else:
+        yes = [cards.button(f"Approve all {len(c['items'])}" if c.get("items") else "Approve", f"{base}|approve", "primary")]
+    return {"type": "actions", "block_id": f"list|{base}",
+            "elements": yes + [cards.button("Deny", f"{base}|decline", "danger"), cards.button("Remove", f"{base}|remove")]}
+
+
 def _line(rec, day, detail=None):
-    """Two blocks: the card, linked, then one gray line. A card no longer waiting is struck through."""
+    """The card, linked, then one gray line; a card waiting on the approver's answer gets its buttons under them. A
+    card no longer waiting is struck through."""
     emoji = cards.TYPES[rec["versions"][-1]["card"]["type"]]["emoji"]
     link = f"<{slackapi.message_url(rec['thread_ts'])}|{rec['id']}>"
     if detail is None and not waiting(rec):
         return [cards.md(f"{emoji} ~{link}  {_title(rec)}~"), cards.ctx(_outcome(rec, day))]
     if detail is None and rec["status"] not in WAITING:
         detail = f"{cards.esc(rec['agent'])} · ⏳ waiting on you: {cards.esc(cards.on_you(rec)['text'])}"
+    buttons = []
     if detail is None:
         asked = "❓ asked you a question · " if rec["status"] == "question" else ""
         detail = (f"{cards.esc(rec['agent'])} · {asked}since {_at(_waiting_since(rec), day)}"
                   f" · expires {_at(datetime.fromisoformat(rec['deadline']), day)}")
-    return [cards.md(f"{emoji} {link}  *{_title(rec)}*"), cards.ctx(detail)]
+        buttons = [_buttons(rec)]
+    return [cards.md(f"{emoji} {link}  *{_title(rec)}*"), cards.ctx(detail)] + buttons
 
 
 def render(st, records):
@@ -133,31 +162,28 @@ def render(st, records):
     mention = f"<@{config.settings()['approver']}> " if (listed or closed) and not st.get("asked") else ""
     icon = "📋" if st.get("asked") else "☀️"
 
-    body, shown = [], 0
+    # Each line in order, a heading riding with the first line under it so it never shows alone.
+    chunks = []
     for g, label in enumerate(GROUPS):
         rows = sorted((r for r in listed if _group(r, day) == g), key=lambda r: r["deadline"])
-        if not rows:
-            continue
-        body.append(cards.md(label))
-        for r in rows:
-            if shown < MAX_LINES:
-                body += _line(r, day)
-            shown += 1
-    if closed:
-        body.append({"type": "divider"})
-        body.append(cards.md("⏰ *Closed with no answer since the last list*"))
-        body.append(cards.ctx("The agent dropped these. A reply in the card's thread reopens it."))
-        for r in sorted(closed, key=lambda r: r["deadline"]):
-            if shown < MAX_LINES:
-                expired = _last(r, "expired") or datetime.fromisoformat(r["deadline"])
-                body += _line(r, day, None if r["status"] != "expired" else f"{cards.esc(r['agent'])} · closed {_at(expired, day)}")
-            shown += 1
-    if shown > MAX_LINES:
-        body.append(cards.ctx(f"…and {shown - MAX_LINES} more; `approvals list --open` has them all."))
-    if listed or closed:
-        body.append(cards.ctx("Tap a number to open its card. Each line crosses off when you answer it."))
+        chunks += [([cards.md(label)] if i == 0 else []) + _line(r, day) for i, r in enumerate(rows)]
+    for i, r in enumerate(sorted(closed, key=lambda r: r["deadline"])):
+        head = [{"type": "divider"}, cards.md("⏰ *Closed with no answer since the last list*"),
+                cards.ctx("The agent dropped these. A reply in the card's thread reopens it.")] if i == 0 else []
+        expired = _last(r, "expired") or datetime.fromisoformat(r["deadline"])
+        chunks.append(head + _line(r, day, None if r["status"] != "expired" else f"{cards.esc(r['agent'])} · closed {_at(expired, day)}"))
 
     top = [cards.ctx("🧪 *TEST list.* It covers TEST cards only and gets deleted after testing.")] if config.is_test_run() else []
+    room = cards.BLOCKS_MAX - len(top) - 3   # Slack's limit, less the date line, "…and N more" and the last line
+    body = []
+    for k, chunk in enumerate(chunks):
+        if len(body) + len(chunk) > room:
+            body.append(cards.ctx(f"…and {len(chunks) - k} more. Answer some, then post in the channel for a fresh list."))
+            break
+        body += chunk
+    if listed or closed:
+        body.append(cards.ctx("Approve, Deny or Remove answers a card right here; tap its number to read it first. "
+                              "Each line crosses off when you answer it."))
     top.append(cards.md(f"{mention}{icon} *{headline}*"))
     sub = day.strftime("%A, %b ") + str(day.day) + (" · soonest deadline first" if listed else "")
     content = hashlib.sha256(json.dumps(top + [cards.ctx(sub)] + body, sort_keys=True).encode()).hexdigest()
@@ -168,8 +194,13 @@ def render(st, records):
 
 def tick(now=None, asked=False):
     """Post the morning list once it's due, or a fresh list when the approver asked for one; otherwise keep the
-    newest list current. Called every few seconds. State changes only after Slack accepts the post or edit, so a
-    failure is retried next time."""
+    newest list current. Called every few seconds, and right after a button press so its line crosses off at once.
+    State changes only after Slack accepts the post or edit, so a failure is retried next time."""
+    with _lock:
+        _tick(now, asked)
+
+
+def _tick(now, asked):
     now = now or store.now()
     local = cards.local(now)
     st = load_state()

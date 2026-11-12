@@ -122,6 +122,7 @@ class Listener:
         "stale": "That version was replaced; use the newest card's buttons.",
         "already": "This one is already decided.",
         "withdrawn": "The agent withdrew this one, so there's nothing to decide.",
+        "removed": "You removed this one from your list, so there's nothing to decide.",
         "gone": "That button doesn't match the card any more; use the newest card's buttons.",
     }
 
@@ -150,7 +151,15 @@ class Listener:
         log.info("click %s v%s %s -> %s", rid, n, what, r)
         if r in self.REFUSED:
             return lambda: slackapi.ephemeral(user, self.REFUSED[r], thread_ts)
-        return lambda: self.try_refresh(rid)
+        return lambda: (self.try_refresh(rid), self.refresh_list())
+
+    def refresh_list(self):
+        """A press, on the card or on the list, crosses its line off the list now rather than at the next sweep, so
+        the approver going down the list sees each answer land."""
+        try:
+            digest.tick()
+        except Exception as e:
+            log.warning("the list's refresh after a press failed, the sweep will retry: %s", e)
 
     def open_view(self, rid, n, what, trigger, user, thread_ts):
         """Open the pop-up a button asks for, unless the card moved on since it was drawn."""

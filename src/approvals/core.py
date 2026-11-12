@@ -126,6 +126,16 @@ def msg_decision(rec, verdict, where, choice=None, items=None, edited=None):
     return f'{head(rec)} No answer by the deadline, so it is not approved.{said} Don\'t resubmit or send a reminder; a reply in the thread would reopen it.'
 
 
+def msg_removed(rec):
+    t = cards.when(store.now())
+    kept = (" Parts he had already answered keep those answers." if card(rec).get("parts") and len(cards.open_rows(rec)) < len(card(rec)["parts"]) else "")
+    return (f'{head(rec)} {who()} removed it from his list (Remove, on his list of what waits on him in Slack, {t}). '
+            f'The card is closed and nothing still waiting on it is approved.{kept} {ack_step(rec, "that you are dropping it")} '
+            f'Then drop it and don\'t post it again. Removing isn\'t declining: it says this card shouldn\'t be waiting on him, '
+            f'not that the idea is wrong. If what it was for still matters, work out why it didn\'t belong in front of him '
+            f'(yours to decide, already settled, or out of date) before asking him again.')
+
+
 def _others(rec, skip):
     """Where the card's other rows stand, so a row's answer can't be read as the whole card's."""
     c = card(rec)
@@ -218,7 +228,7 @@ def _check(rec, n):
     if n != len(rec["versions"]):
         return "stale"
     if rec["status"] == "withdrawn":
-        return "withdrawn"
+        return "removed" if cards.removed(rec) else "withdrawn"
     return None
 
 
@@ -359,6 +369,8 @@ def press(rec, n, what, by):
         return decide(rec, n, "approved", by=by, choice=c["options"][i]["name"])
     if what == "all":
         return approve_all(rec, n, by)
+    if what == "remove":
+        return remove(rec, n, by)
     if what.startswith("offer:"):
         return answer_offer(rec, n, what.split(":")[1], by)
     if what.startswith("p"):
@@ -368,6 +380,25 @@ def press(rec, n, what, by):
             return answer_part(rec, n, j, "chose", by, choice=c["parts"][j - 1]["options"][int(rest[0])]["name"])
         return answer_part(rec, n, j, "approved" if act == "approve" else "declined", by)
     return "gone"
+
+
+def remove(rec, n, by):
+    """Remove, on the approver's list: the card comes off it, closed with nothing still waiting on it approved, and
+    without a verdict on the idea. Kept as a withdrawn card marked as his, so everything that knows a withdrawn card
+    (no buttons, no replies counted as a decision, the agent's own commands refused) treats it as one."""
+    bad = _check(rec, n)
+    if bad:
+        return bad
+    if rec["status"] in CLOSED:
+        return "already"
+    rec["status"] = "withdrawn"
+    rec["withdrawn"] = {"text": f"{who()} removed it from his list", "at": store.iso(), "by": by}
+    rec["open_question"] = None
+    rec["card_dirty"] = True
+    store.event(rec, "removed", by=by)
+    enqueue(rec, "decision", msg_removed(rec), react_ts=card_ts(rec))
+    tell_reviewer(rec, f"{who()} removed it from his list, without approving or declining it ({cards.when(store.now())}).")
+    return "ok"
 
 
 def answer_offer(rec, n, choice, by):

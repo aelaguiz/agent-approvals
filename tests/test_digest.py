@@ -187,3 +187,70 @@ def test_asking_before_8am_still_gets_the_morning_list(slack):
     digest.tick(MON_8AM)
     digest.tick(MON_8AM + timedelta(hours=1))
     assert [t for _, t in posted] == ["📋 1 card is waiting on you", "<@UAPPROVER> ☀️ 1 card is waiting on you"]
+
+
+def buttons_of(blocks):
+    return [[(e["text"]["text"], e["value"]) for e in b["elements"]] for b in blocks if b["type"] == "actions"]
+
+
+def shaped(n, **card_fields):
+    rec = card(n)
+    rec["versions"][0]["card"].update(card_fields)
+    store.save(rec)
+
+
+def test_each_waiting_line_answers_its_card_in_one_tap(slack):
+    posted, _ = slack
+    card(1)
+    rec = card(2, type="experiment")
+    rec["versions"].append({"n": 2, "card": {"type": "experiment"}})
+    store.save(rec)
+    shaped(3, parts=[{"title": "a"}, {"title": "b"}])
+    shaped(4, parts=[{"title": "a"}, {"title": "b", "own_yes": True}])
+    shaped(5, items=["x", "y", "z"])
+    shaped(6, options=[{"name": "A", "title": "a panel"}, {"name": "B", "title": "a rail"}], pick="B")
+    shaped(7, options=[{"name": "A", "title": "a panel", "image": "a.png"}, {"name": "B", "title": "a rail", "image": "b.png"}])
+    rec = card(8, status="approved")   # approved, with a condition only the approver can clear: listed, nothing to tap
+    rec["timeline"] = [{"text": "play it before it merges", "kind": "on_you", "part": None, "at": rec["created"]}]
+    store.save(rec)
+    digest.tick(MON_8AM)
+    no = lambda i, v=1: [("Deny", f"AP-000{i}|{v}|decline"), ("Remove", f"AP-000{i}|{v}|remove")]
+    assert buttons_of(posted[0][0]) == [
+        [("Approve", "AP-0001|1|approve")] + no(1),
+        [("Approve", "AP-0002|2|approve")] + no(2, 2),   # the newest version's
+        [("Approve all 2", "AP-0003|1|all")] + no(3),
+        [("Approve 1 of 2", "AP-0004|1|all")] + no(4),
+        [("Approve all 3", "AP-0005|1|approve")] + no(5),
+        [("A: a panel", "AP-0006|1|pick:0"), ("B: a rail", "AP-0006|1|pick:1")] + no(6),
+        no(7),   # a choice in pictures is decided by looking at them
+    ]
+    assert "AP-0008" in text_of(posted[0][0]) and "waiting on you: play it before it merges" in text_of(posted[0][0])
+
+
+def test_remove_crosses_it_off_and_tells_the_agent_it_is_closed_without_a_no(slack, monkeypatch):
+    posted, updated = slack
+    card(1)
+    card(2)
+    digest.tick(MON_8AM)
+    monkeypatch.setattr(store, "now", lambda: MON_8AM + timedelta(hours=1))
+    assert store.update("AP-0001", lambda r: core.press(r, 1, "remove", by="UAPPROVER")) == "ok"
+    rec = store.load("AP-0001")
+    assert rec["status"] == "withdrawn" and rec["withdrawn"]["by"] == "UAPPROVER"
+    msg = rec["outbox"][-1]["text"]
+    assert "Sam removed it from his list" in msg and "nothing still waiting on it is approved" in msg
+    assert "Removing isn't declining" in msg and "approvals ack AP-0001" in msg
+    assert store.update("AP-0001", lambda r: core.press(r, 1, "approve", by="UAPPROVER")) == "removed"
+    digest.tick(MON_8AM + timedelta(hours=1))
+    _, blocks, text = updated[-1]
+    assert "1 of 2 still waiting on you" in text and "🗑️ You removed it, 9:00 am" in text_of(blocks)
+    assert [row[0][1] for row in buttons_of(blocks)] == ["AP-0002|1|approve"]   # answered lines have no buttons
+
+
+def test_a_long_list_stays_within_slacks_limit_and_says_how_many_more(slack):
+    posted, _ = slack
+    for n in range(1, 21):
+        card(n)
+    digest.tick(MON_8AM)
+    blocks, _ = posted[0]
+    assert len(blocks) == 50 and len(buttons_of(blocks)) == 15
+    assert "…and 5 more. Answer some, then post in the channel for a fresh list." in text_of(blocks)

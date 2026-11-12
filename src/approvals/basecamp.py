@@ -82,7 +82,7 @@ def wanted(rec):
     d = rec.get("decision") or {}
     verdict = "withdrawn" if status == "withdrawn" else d.get("verdict") if status in ("approved", "declined", "expired", "done") else None
     if verdict == "withdrawn":
-        what = "withdrawn"
+        what = f"removed by {who}" if cards.removed(rec) else "withdrawn"
     elif verdict:
         what = verdict + (f" {cards.clock(datetime.fromisoformat(d['at']))}" if d.get("at") else "")
     elif status == "revising" and last_reply_at(rec):

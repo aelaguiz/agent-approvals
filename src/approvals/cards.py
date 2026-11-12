@@ -426,6 +426,11 @@ def pending_lines(rec, part=None):
     return out
 
 
+def removed(rec):
+    """The approver took the card off his list with Remove: withdrawn, by him rather than its agent."""
+    return rec.get("status") == "withdrawn" and bool((rec.get("withdrawn") or {}).get("by"))
+
+
 def waiting_on(rec):
     """Someone other than the approver the card waits on, until a later line of what happened."""
     if rec.get("status") in ("withdrawn", "done", "declined"):
@@ -795,6 +800,8 @@ def _final_head(rec, card):
         return f"✅ You picked {d['choice']}"
     if verdict == "approved" and d.get("items") is not None and len(d["items"]) < len(card.get("items") or []):
         return f"✅ Approved {len(d['items'])} of {len(card['items'])}: {card['title']}"
+    if removed(rec):
+        return f"🗑️ Removed: {card['title']}"
     mark = {"approved": "✅", "declined": "❌", "expired": "⌛", "withdrawn": "↩️"}.get(verdict, "✅")
     prefix = {"approved": "Approved: ", "declined": "Declined: ", "expired": "No answer: ", "withdrawn": "Withdrawn: "}.get(verdict, "")
     return f"{mark} {prefix}{card['title']}"
@@ -846,6 +853,8 @@ def _timeline_blocks(rec, card):
         lines.append(f"❌ Declined by {who}, {at}{where}")
     elif verdict == "expired":
         lines.append(f"⌛ No answer by {when(datetime.fromisoformat(rec['deadline']))}, so not approved. A reply in the thread reopens it.")
+    elif removed(rec):
+        lines.append(f"🗑️ Removed from your list by {who}, {when(datetime.fromisoformat(rec['withdrawn']['at']))}. Nothing still waiting on it was approved.")
     elif verdict == "withdrawn" and rec.get("withdrawn"):
         w = rec["withdrawn"]
         lines.append(f"↩️ Withdrawn by {esc(rec['agent'])}, {when(datetime.fromisoformat(w['at']))}: {esc(w['text'])}")

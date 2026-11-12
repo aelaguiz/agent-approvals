@@ -5,7 +5,7 @@ from datetime import timedelta
 
 import pytest
 
-from approvals import cards, cli, config, core, digest, listener, slackapi, store
+from approvals import basecamp, cards, cli, config, core, digest, listener, slackapi, store
 from kinds import KINDS
 from samples import SAMPLES
 from test_cards_store import make_rec
@@ -407,6 +407,23 @@ def test_a_row_press_through_the_listener_saves_before_the_ack(slack):
     run(follow)
     run(L.handle_click(press_payload("AP-0001|1|p3:decline")))
     assert slack[-1] == {"ephemeral": "This one is already decided."}
+
+
+def test_remove_from_the_list_closes_the_card_and_crosses_its_line_off_at_once(slack, monkeypatch):
+    store.save(rec_for(KINDS["test"]))
+    ticks = []
+    monkeypatch.setattr(listener.digest, "tick", lambda *a, **kw: ticks.append(1))
+    L = listener.Listener()
+    run(L.handle_click(press_payload("AP-0001|1|remove")))   # from the list: no thread
+    rec = store.load("AP-0001")
+    assert rec["status"] == "withdrawn" and cards.removed(rec) and ticks == [1]
+    assert "removed it from his list" in rec["outbox"][-1]["text"] and rec["outbox"][-1]["react_ts"] == rec["thread_ts"]
+    card = [p for p in slack if p.get("update") == rec["thread_ts"]][-1]["blocks"]
+    assert "🗑️ Removed: Build and test two screens" in txt(card) and "Removed from your list by" in txt(card)
+    assert values(card) == ["AP-0001|1|see"]
+    assert basecamp.wanted(rec)[0].startswith("AP-0001 · removed by ")
+    run(L.handle_click(press_payload("AP-0001|1|approve")))
+    assert slack[-1] == {"ephemeral": "You removed this one from your list, so there's nothing to decide."}
 
 
 def test_the_change_box_opens_and_its_words_reach_the_agent_and_the_thread(slack):
