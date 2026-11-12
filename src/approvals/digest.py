@@ -176,6 +176,7 @@ def render(st, records):
         chunks.append(head + _line(r, day, None if r["status"] != "expired" else f"{cards.esc(r['agent'])} · closed {_at(expired, day)}"))
 
     top = [cards.ctx("🧪 *TEST list.* It covers TEST cards only and gets deleted after testing.")] if config.is_test_run() else []
+    top.append(cards.md(f"{mention}{icon} *{headline}*"))
     room = cards.BLOCKS_MAX - len(top) - 3   # Slack's limit, less the date line, "…and N more" and the last line
     body = []
     for k, chunk in enumerate(chunks):
@@ -186,7 +187,6 @@ def render(st, records):
     if listed or closed:
         body.append(cards.ctx("Approve, Deny or Remove answers a card right here; tap its number to read it first. "
                               "Each line crosses off when you answer it."))
-    top.append(cards.md(f"{mention}{icon} *{headline}*"))
     sub = day.strftime("%A, %b ") + str(day.day) + (" · soonest deadline first" if listed else "")
     content = hashlib.sha256(json.dumps(top + [cards.ctx(sub)] + body, sort_keys=True).encode()).hexdigest()
     if st.get("updated_at"):

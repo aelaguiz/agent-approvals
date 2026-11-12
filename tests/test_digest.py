@@ -254,3 +254,13 @@ def test_a_long_list_stays_within_slacks_limit_and_says_how_many_more(slack):
     blocks, _ = posted[0]
     assert len(blocks) == 50 and len(buttons_of(blocks)) == 15
     assert "…and 5 more. Answer some, then post in the channel for a fresh list." in text_of(blocks)
+
+
+def test_a_list_that_fills_its_room_exactly_still_fits_with_its_headline(slack):
+    # Two headings and 15 lines filled the room to the block, so the headline added after made 51 (November 12).
+    posted, _ = slack
+    for n in range(1, 17):
+        card(n, deadline=MON_8AM + (timedelta(hours=8) if n <= 10 else timedelta(days=1) if n <= 15 else timedelta(days=3)))
+    digest.tick(MON_8AM)
+    blocks, _ = posted[0]
+    assert len(blocks) <= 50 and "more. Answer some" in text_of(blocks)
