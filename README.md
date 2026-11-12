@@ -23,6 +23,7 @@ agent ──approvals submit──▶ card in #approvals ──▶ you: ✅ / �
 - **Answer from the list in one tap.** Under each card waiting on you are its buttons: **Approve** (a yes to all of it: every plain row of a set, every item of a batch; a choice shows its options instead, unless they're pictures you need to see), **Deny**, and **Remove**, which takes a card that shouldn't be waiting on you off the list: it closes with nothing approved, and the agent is told it's no verdict on the idea. Each tap is the same press as the card's own buttons, and its line crosses off within a second or two.
 - **The same list whenever you ask.** Post anything in the channel itself, not in a card's thread ("what's waiting?"), and within seconds the service posts a fresh list at the bottom, without mentioning you. Only the newest list is kept current; the one it replaces shrinks to a link to it.
 - **A second reader for money.** One agent session, the CFO, can review every budget, purchase and money card. It hears each one as it's posted, each new version and each of your answers, and puts its read in the card's thread with `approvals note`, so it sits beside the ask when you decide. Nothing waits on it, the asker's side doesn't change, and with no reviewer set up nothing changes at all.
+- **A deputy for the routine cards.** One agent session, the deputy, can hear every card as it's posted and make its own call on each: approve it for you, or leave it for you, with one or two sentences of why. Until you turn auto-approval on it's a dry run: each call is recorded and shown on the card in one gray line, and nothing is approved. Once it's on, the deputy's approve reaches the asking agent as your yes, the card says "🤖 Auto-approved" with its why, and a **Take it back** button turns it into your no at any time, even after the agent is done. Right after the 8 am list, one message sums up its calls since yesterday morning, with a button to turn auto-approval on or pause it. Which cards to approve is the deputy agent's own judgment; the tool only carries the call. The agents that post cards change nothing they do.
 - **Agents learn it from a skill.** The `approvals` skill teaches when to ask (only when a yes is required, and once), how to write a card someone can decide from at a glance, and what to do with each kind of answer.
 
 ## Requirements
@@ -111,6 +112,11 @@ approvals list --open
 approvals doctor
 approvals review --types budget,purchase,money --agent "CFO"   # this session reviews those cards; again from a new session moves it there; --off ends it
 approvals note AP-0001 --file read.md          # the reviewer's read, in the card's thread
+approvals deputy --agent "Approver"            # this session hears every card and makes its own call on each; again from a new session moves it there
+approvals deputy --live                        # auto-approval on: the deputy's approve is the approver's yes (--dry-run pauses it; --off ends the role; alone, says who holds it)
+approvals call AP-0001 --approve --why "Inside the test's cap, like every top-up he has approved"   # the deputy's call (or --his, to leave it for him)
+approvals history --agent "Pricing" --type price --days 30   # cards newest first, each with what happened on it in order; --calls: only cards the deputy called
+approvals pictures AP-0001                     # saves the newest version's pictures into a folder and prints their paths
 ```
 
 The name a card and its replies show is `--agent`, unless whatever started the agent set `APPROVALS_FROM` (a team's launcher, say "AI pod · lead"): that wins, so the approver can always tell which team and member sent it.
@@ -125,6 +131,7 @@ A card is JSON. [skills/approvals/references/cards.md](skills/approvals/referenc
 - **Log:** `~/.approvals/logs/listener.log`, on each machine.
 - **The list:** the newest list's message and what it lists, in `~/.approvals/digest.json`, on the hub.
 - **The reviewer:** which session reviews which card types, in `~/.approvals/reviewer.json`, on the hub.
+- **The deputy:** which session it is and whether auto-approval is on, in `~/.approvals/deputy.json`, on the hub.
 - **Restart the service:** `launchctl kickstart -k gui/$(id -u)/com.agent-approvals.listener`, or `systemctl --user restart agent-approvals` on Linux.
 - Another workspace's records, log and service are the same paths in its own folder, and `com.agent-approvals.listener.<folder name>`.
 

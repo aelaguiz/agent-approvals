@@ -115,6 +115,22 @@ def set_reviewer(rv):
         local_set_reviewer(rv)
 
 
+def deputy():
+    """The one session that hears every card and makes its own call on each, as
+    {"reach", "live", "test", "since", "live_since"}, or None. live: its approve is the approver's yes."""
+    h = hub_client()
+    return h.deputy() if h else local_deputy()
+
+
+def set_deputy(d):
+    """d None: nobody is the deputy."""
+    h = hub_client()
+    if h:
+        h.set_deputy(d)
+    else:
+        local_set_deputy(d)
+
+
 def waiting(rec):
     return any(not i.get("delivered_at") and not i.get("seen_by_agent") for i in rec.get("outbox", []))
 
@@ -205,20 +221,36 @@ def local_delete(rid):
         _path(rid).unlink(missing_ok=True)
 
 
-def local_reviewer():
+def _read_role(path):
     try:
-        return json.loads(config.REVIEWER.read_text())
+        return json.loads(path.read_text())
     except FileNotFoundError:
         return None
 
 
-def local_set_reviewer(rv):
+def _write_role(path, role):
     """Replaced whole and outside the lock: it's read while a record is changed under the lock."""
     config.ensure_dirs()
-    if rv is None:
-        config.REVIEWER.unlink(missing_ok=True)
+    if role is None:
+        path.unlink(missing_ok=True)
         return
     fd, tmp = tempfile.mkstemp(dir=config.HOME, prefix=".tmp-", suffix=".json")
     with os.fdopen(fd, "w") as f:
-        json.dump(rv, f, indent=1, ensure_ascii=False)
-    os.replace(tmp, config.REVIEWER)
+        json.dump(role, f, indent=1, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def local_reviewer():
+    return _read_role(config.REVIEWER)
+
+
+def local_set_reviewer(rv):
+    _write_role(config.REVIEWER, rv)
+
+
+def local_deputy():
+    return _read_role(config.DEPUTY)
+
+
+def local_set_deputy(d):
+    _write_role(config.DEPUTY, d)

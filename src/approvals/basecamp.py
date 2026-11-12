@@ -84,7 +84,8 @@ def wanted(rec):
     if verdict == "withdrawn":
         what = f"removed by {who}" if cards.removed(rec) else "withdrawn"
     elif verdict:
-        what = verdict + (f" {cards.clock(datetime.fromisoformat(d['at']))}" if d.get("at") else "")
+        word = "auto-approved" if verdict == "approved" and d.get("where") == "deputy" else verdict
+        what = word + (f" {cards.clock(datetime.fromisoformat(d['at']))}" if d.get("at") else "")
     elif status == "revising" and last_reply_at(rec):
         what = f"asked a question {cards.clock(datetime.fromisoformat(last_reply_at(rec)))}"
     else:

@@ -18,16 +18,35 @@ def one_line(s):
 
 
 def enqueue(rec, kind, text, react_ts=None, to=None):
-    """A message for the agent that asked, or with to="reviewer" for the session reviewing the card's type."""
+    """A message for the agent that asked, or with to="reviewer" for the session reviewing the card's type, or
+    to="deputy" for the deputy."""
     ref = secrets.token_hex(3)
     rec.setdefault("outbox", []).append({
         "ref": ref, "kind": kind, "text": f"{text} (ref {ref})", "created": store.iso(),
         "react_ts": react_ts, "attempts": 0, "next_try": store.iso(), "delivered_at": None,
         "noted_failure": False, "seen_by_agent": False,
-        "needs_ack": kind not in ("expired", "review"), "acked_at": None, "ack_warned": False,
+        "needs_ack": kind not in ("expired", "review", "deputy"), "acked_at": None, "ack_warned": False,
         **({"to": to} if to else {}),
     })
     return ref
+
+
+def tell_deputy(rec, news):
+    """Every card reaches the deputy, which makes its own call on each: when it's posted, at each new version, with
+    everything the approver says or does on it other than a plain yes (which it reads from the record), and when its
+    agent withdraws it. Nothing waits on the deputy. TEST cards reach only a deputy set up in a test run, and the
+    deputy's own cards don't come back to it."""
+    d = store.deputy()
+    if (not d or bool(rec.get("test")) != bool(d.get("test"))
+            or (rec.get("reach") or {}).get("session_id") == d["reach"].get("session_id")):
+        return
+    enqueue(rec, "deputy", f"{head(rec)} {news}", to="deputy")
+
+
+def make_your_call(rec):
+    rid = rec["id"]
+    return (f'Make your call: `approvals show {rid}` reads it, `approvals pictures {rid}` saves its pictures where you '
+            f'can look at them, then `approvals call {rid} --approve --why "<why>"` or `approvals call {rid} --his --why "<why>"`.')
 
 
 def tell_reviewer(rec, news):
@@ -44,7 +63,7 @@ def tell_reviewer(rec, news):
 
 
 def where_said(where):
-    return {"button": "button in Slack", "pop-up": "in Slack"}.get(where, where)
+    return {"button": "button in Slack", "pop-up": "in Slack", "deputy": "auto-approval by his deputy"}.get(where, where)
 
 
 def quoted_words(words):
@@ -253,12 +272,18 @@ def decide(rec, n, verdict, by, where="button", words=None, choice=None, items=N
             if not (again and verdict == "approved" and rec["status"] == "revising" and _rows_decided(rec, n)):
                 return "already"
             store.event(rec, "decision", verdict=verdict, version=n, where=where, words=words)
-            tell_reviewer(rec, f'{who()} let the card go ahead as its rows were decided ({where_said(where)}).{quoted_words(words)}')
+            news = f'{who()} let the card go ahead as its rows were decided ({where_said(where)}).{quoted_words(words)}'
+            tell_reviewer(rec, news)
+            if words:
+                tell_deputy(rec, news)
             settle(rec)
             return "ok"
         for j, _ in rows:
             r = answer_part(rec, n, j, verdict, by, where=where, words=words, tell=where == "button", review=False)
-        tell_reviewer(rec, f'{who()} {verdict} every part still open ({where_said(where)}).{quoted_words(words)}')
+        news = f'{who()} {verdict} every part still open ({where_said(where)}).{quoted_words(words)}'
+        tell_reviewer(rec, news)
+        if verdict != "approved" or words:
+            tell_deputy(rec, news)
         return r
     d = rec.get("decision")
     if d and d.get("version") == n and d.get("verdict") in ("approved", "declined") and not (
@@ -276,7 +301,12 @@ def decide(rec, n, verdict, by, where="button", words=None, choice=None, items=N
     what = (f"picked {choice}" if choice is not None else
             f'approved items {", ".join(map(str, items))} of {len(card(rec)["items"])}' if items is not None else
             "approved it with his own edited words" if edited is not None else f"{verdict} it")
-    tell_reviewer(rec, f"{who()} {what} ({where_said(where)}, {cards.when(store.now())}).{quoted_words(edited or words)}")
+    news = f"{who()} {what} ({where_said(where)}, {cards.when(store.now())}).{quoted_words(edited or words)}"
+    tell_reviewer(rec, news)
+    plain = (verdict == "approved" and not words and edited is None and choice is None
+             and (items is None or len(items) == len(card(rec).get("items") or [])))
+    if not plain:
+        tell_deputy(rec, news)
     return "ok"
 
 
@@ -312,7 +342,10 @@ def answer_part(rec, n, j, verdict, by, where="button", words=None, choice=None,
     if review:
         what = {"approved": "approved", "declined": "declined", "chose": f'chose "{choice}" for',
                 "change": "asked for a change to"}[verdict]
-        tell_reviewer(rec, f'{who()} {what} part {j} "{parts[j - 1]["title"]}" ({where_said(where)}).{quoted_words(words)}')
+        news = f'{who()} {what} part {j} "{parts[j - 1]["title"]}" ({where_said(where)}).{quoted_words(words)}'
+        tell_reviewer(rec, news)
+        if verdict != "approved" or words:
+            tell_deputy(rec, news)
     settle(rec)
     return "ok"
 
@@ -371,6 +404,8 @@ def press(rec, n, what, by):
         return approve_all(rec, n, by)
     if what == "remove":
         return remove(rec, n, by)
+    if what == "takeback":
+        return take_back(rec, n, by)
     if what.startswith("offer:"):
         return answer_offer(rec, n, what.split(":")[1], by)
     if what.startswith("p"):
@@ -397,7 +432,9 @@ def remove(rec, n, by):
     rec["card_dirty"] = True
     store.event(rec, "removed", by=by)
     enqueue(rec, "decision", msg_removed(rec), react_ts=card_ts(rec))
-    tell_reviewer(rec, f"{who()} removed it from his list, without approving or declining it ({cards.when(store.now())}).")
+    news = f"{who()} removed it from his list, without approving or declining it ({cards.when(store.now())})."
+    tell_reviewer(rec, news)
+    tell_deputy(rec, news)
     return "ok"
 
 
@@ -409,6 +446,120 @@ def answer_offer(rec, n, choice, by):
     store.event(rec, "offer", choice=choice)
     enqueue(rec, "comment", msg_offer(rec, choice), react_ts=card_ts(rec))
     return "ok"
+
+
+# ---------- the deputy ----------
+
+def _answered_on(rec, n):
+    """The approver has answered version n in some way: a reply in the thread since it was posted, or a row."""
+    posted = rec["versions"][n - 1].get("posted_at") or rec["created"]
+    return (any(e["kind"] in ("feedback", "answer", "comment") and e["at"] >= posted for e in rec.get("events") or [])
+            or any(a.get("version") == n for a in (rec.get("answers") or {}).values()))
+
+
+def _not_callable(rec, n):
+    """Why the deputy can't call version n: it's no longer waiting on the approver's first answer. None when it is."""
+    s = rec["status"]
+    if s == "withdrawn":
+        return "he removed it from his list" if cards.removed(rec) else "its agent withdrew it"
+    if s in ("approved", "declined", "done"):
+        return f"it is already decided ({s})"
+    if s == "expired":
+        return "it closed with no answer by its deadline"
+    if s == "revising":
+        return f"it is back with its agent after {who()}'s reply"
+    if _answered_on(rec, n):
+        return f"{who()} has already answered on v{n}"
+    return None
+
+
+def call(rec, what, why, by, live):
+    """The deputy's call on the newest version: "approve" (for the approver) or "his" (left for him). Recorded
+    either way; an approve approves the card for him only when auto-approval is on (live). Returns 'ok', or why
+    nothing was recorded."""
+    n = len(rec["versions"])
+    bad = _not_callable(rec, n)
+    if bad:
+        return bad
+    if cards.call_on(rec, n):
+        return f"v{n} already has your call"
+    c = card(rec)
+    open_rows = cards.open_rows(rec)
+    if what == "approve" and (c.get("options") or any(p.get("options") for _, p in open_rows)):
+        return "it asks for a pick between options, and a pick is the approver's"
+    if what == "approve" and any(p.get("own_yes") for _, p in open_rows):
+        # A row marked own_yes is never approved together with others (Approve all skips it), so a yes for the
+        # whole card can't cover it either.
+        return "a row on it needs the approver's own yes"
+    rec.setdefault("calls", []).append({"version": n, "call": what, "why": why, "by": by, "at": store.iso(), "live": live})
+    store.event(rec, "call", version=n, call=what, why=why, by=by, live=live)
+    rec["card_dirty"] = True
+    if what == "approve" and live:
+        decide(rec, n, "approved", by=by, where="deputy")
+        rec["decision"] = {"verdict": "approved", "version": n, "by": by, "where": "deputy", "why": why, "words": None,
+                           "at": store.iso()}
+        enqueue(rec, "decision", msg_auto(rec, by, why), react_ts=card_ts(rec))
+    return "ok"
+
+
+def msg_auto(rec, by, why):
+    return (f'{head(rec)} approved for {who()} by his deputy, {by} (auto-approval, {cards.when(store.now())}). '
+            f'Why: "{one_line(why)}". It counts as his yes, for exactly what the card describes. '
+            f'{ack_step(rec, "what you are about to do")} Then do exactly what the card describes, and {done_step(rec)}')
+
+
+def take_back(rec, n, by):
+    """Take it back, on an auto-approved card, at any time (after done too): the card becomes the approver's own
+    decline, and its agent stops and undoes what it can."""
+    if n != len(rec["versions"]):
+        return "stale"
+    if rec.get("taken_back"):
+        return "taken"
+    if not cards.auto_approved(rec):
+        return "gone"
+    at = store.iso()
+    rec["taken_back"] = {"by": by, "at": at}
+    rec["decision"] = {"verdict": "declined", "version": n, "by": by, "where": "took back the auto-approval", "words": None, "at": at}
+    for a in (rec.get("answers") or {}).values():   # a set's rows the deputy approved show as not approved
+        if a.get("where") == "deputy" and a.get("version") == n:
+            a.update(verdict="declined", where="took back the auto-approval", at=at)
+    rec["status"] = "declined"
+    rec["open_question"] = None
+    rec["card_dirty"] = True
+    store.event(rec, "taken_back", by=by)
+    # Not paced like a decision: it takes back a yes, so it is typed right behind that yes if it hasn't gone yet.
+    enqueue(rec, "taken_back", msg_taken_back(rec), react_ts=card_ts(rec))
+    tell_deputy(rec, f"{who()} took back your approval (button in Slack, {cards.when(store.now())}), so it is not approved.")
+    return "ok"
+
+
+def msg_taken_back(rec):
+    return (f'{head(rec)} {who()} took back the approval his deputy gave (button in Slack, {cards.when(store.now())}), '
+            f'so it is not approved. {ack_step(rec, "that you are stopping, and what is already done")} '
+            f'If you haven\'t acted, don\'t. If you have, undo what can be undone, and say on the card where it stands with '
+            f'`approvals status {rec["id"]} "<what>"`. He may say more in the thread.')
+
+
+def plain_yes(rec, n):
+    """His first decision on version n was Approve by the button (no edited words, no partial batch, no pick: a batch
+    ticked whole in Pick which counts; on a set, every row he answered approved by its button or Approve all), and no
+    reply of his came between the version's posting and that decision. A fact about the record, used only for the morning summary's counts."""
+    c = rec["versions"][n - 1]["card"]
+    posted = rec["versions"][n - 1].get("posted_at") or rec["created"]
+    events = [e for e in rec.get("events") or [] if e["at"] >= posted]
+    if c.get("parts"):
+        rows = [i for i, e in enumerate(events) if e["kind"] == "part" and e.get("version") == n]
+        if not rows or any(events[i]["verdict"] != "approved" or events[i].get("where") not in ("button", "Approve all")
+                           or events[i].get("words") for i in rows):
+            return False
+        decided = rows[-1]
+    else:
+        decided = next((i for i, e in enumerate(events) if e["kind"] == "decision" and e.get("version") == n), None)
+        d = events[decided] if decided is not None else {}
+        if (d.get("verdict") != "approved" or d.get("where") not in ("button", "pop-up") or d.get("words") or d.get("choice") is not None
+                or d.get("edited") is not None or (d.get("items") is not None and len(d["items"]) < len(c.get("items") or []))):
+            return False
+    return not any(e["kind"] in ("feedback", "answer", "comment") for e in events[:decided])
 
 
 def ask_change(rec, n, words, by, j=None):
@@ -466,6 +617,7 @@ def take_replies(rec, replies, react_ts=None):
     enqueue(rec, kind, msg_replies(rec, kind, texts, q), react_ts=last_ts)
     said = " / ".join(f'"{one_line(x)}"' for x in texts)
     tell_reviewer(rec, f"{who()} replied in the thread: {said}.")
+    tell_deputy(rec, f"{who()} replied in the thread" + (" after his decision" if kind == "comment" else "") + f": {said}.")
     return kind
 
 
@@ -542,11 +694,11 @@ def just_typed(item):
 
 
 def next_item(rec, to=None):
-    """A request's first message for its asker (to="reviewer": for its reviewer) not yet delivered or left in the
-    inbox. Its later ones wait for it, so they arrive in order. One just typed in doesn't hold them up: Claude takes
-    a typed message in at its next step, so the next is typed right behind it and the agent reads both at once,
-    rather than acting on a yes for a few seconds before the "wait, don't send" behind it. The asker's and the
-    reviewer's messages never wait on each other."""
+    """A request's first message for its asker (to="reviewer": for its reviewer; to="deputy": for the deputy) not
+    yet delivered or left in the inbox. Its later ones wait for it, so they arrive in order. One just typed in doesn't
+    hold them up: Claude takes a typed message in at its next step, so the next is typed right behind it and the agent
+    reads both at once, rather than acting on a yes for a few seconds before the "wait, don't send" behind it. The
+    asker's, the reviewer's and the deputy's messages never wait on each other."""
     return next((i for i in rec.get("outbox", []) if i.get("to") == to and not i.get("delivered_at")
                  and not i.get("inbox_only") and not just_typed(i)), None)
 
@@ -583,12 +735,12 @@ def held(records):
     return out
 
 
-def to_deliver(records, machine, reviewer=None):
+def to_deliver(records, machine, reviewer=None, deputy=None):
     """What one machine delivers now: [request id, ref] of each request's next message that is due, for sessions
-    on that machine, except decisions held for their agent to catch up, and its next message for the reviewer when
-    the reviewer's session is on that machine; and [request id, ref, reach] of strays, messages the machine on the
-    card couldn't deliver because the session wasn't there, for whichever machine has it to take. Pass every record:
-    holding a decision depends on the agent's other cards."""
+    on that machine, except decisions held for their agent to catch up, and its next message for the reviewer (and
+    for the deputy) when that session is on that machine; and [request id, ref, reach] of strays, messages the machine
+    on the card couldn't deliver because the session wasn't there, for whichever machine has it to take. Pass every
+    record: holding a decision depends on the agent's other cards."""
     due_now, strays = [], []
     cutoff = store.now() - timedelta(days=STRAY_DAYS)
     one_machine = not config.settings().get("hub")   # every card is this machine's, whatever name it gave then
@@ -599,9 +751,10 @@ def to_deliver(records, machine, reviewer=None):
         item = next_item(rec)
         if item and due(item) and (rec["id"], item["ref"]) not in hold and (one_machine or machine_of(rec) == machine):
             due_now.append([rec["id"], item["ref"]])
-        item = next_item(rec, "reviewer")
-        if reviewer and item and due(item) and (one_machine or reviewer["reach"].get("machine") == machine):
-            due_now.append([rec["id"], item["ref"]])
+        for to, role in (("reviewer", reviewer), ("deputy", deputy)):
+            item = next_item(rec, to)
+            if role and item and due(item) and (one_machine or role["reach"].get("machine") == machine):
+                due_now.append([rec["id"], item["ref"]])
         for i in rec.get("outbox", []):
             if (i.get("stray") and not i.get("to") and not i.get("delivered_at") and not i.get("seen_by_agent")
                     and datetime.fromisoformat(i["created"]) >= cutoff):

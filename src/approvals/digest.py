@@ -15,7 +15,7 @@ import tempfile
 import threading
 from datetime import datetime, timedelta
 
-from . import cards, config, slackapi, store
+from . import cards, config, core, slackapi, store
 
 log = logging.getLogger("approvals")
 
@@ -89,6 +89,8 @@ def _title(rec):
 def _outcome(rec, day):
     """What happened to a card that no longer waits on the approver."""
     s, d = rec["status"], rec.get("decision") or {}
+    if cards.auto_approved(rec):
+        return f"🤖 Auto-approved by {cards.esc(d['by'])}, {_at(datetime.fromisoformat(d['at']), day)}"
     if s in ("approved", "done"):
         return f"✅ You approved it, {_at(datetime.fromisoformat(d['at']), day)}" if d.get("at") else "✅ Approved"
     if s == "declined":
@@ -223,6 +225,14 @@ def _tick(now, asked):
                  len(new["listed"]), len(new["closed"]))
         if st:
             _retire(st, new)
+        if morning:
+            try:
+                rendered = summary(store.deputy(), eight - timedelta(days=1), records)
+                if rendered:
+                    slackapi.post(*rendered)
+                    log.info("the deputy's summary posted")
+            except Exception as e:
+                log.warning("the deputy's summary wasn't posted: %s", e)
         return
     if not st:
         return
@@ -245,3 +255,104 @@ def _retire(old, new):
         slackapi.update(old["ts"], [cards.ctx(text)], text)
     except Exception as e:
         log.warning("couldn't shrink the replaced list %s: %s", old["ts"], e)
+
+
+# ---------- the deputy's summary ----------
+
+SECTION_MAX = 2900   # a section block holds 3,000 characters
+
+
+def _switch(live):
+    """The summary's one button: the approver's own switch for auto-approval."""
+    b = (cards.button("Pause auto-approval", "deputy|0|pause") if live else
+         cards.button("Turn auto-approval on", "deputy|0|live", "primary"))
+    return {"type": "actions", "block_id": "deputy", "elements": [b]}
+
+
+def switched(blocks, live, at):
+    """The summary after its button: the other button, and who switched auto-approval when."""
+    keep = [b for b in blocks if b.get("block_id") not in ("deputy", "deputy-mode")]
+    line = cards.ctx(f"Auto-approval {'turned on' if live else 'paused'} by {config.settings()['approver_name']}, {cards.when(at)}")
+    return keep + [dict(line, block_id="deputy-mode"), _switch(live)]
+
+
+def _what_he_did(rec, n):
+    """What the approver did on version n of a card the deputy would have approved, and which count it goes in:
+    approved without a word (A), replied on or declined (B), still open or withdrawn (C)."""
+    if cards.removed(rec):
+        return "🗑️ you removed it", "B"
+    if rec["status"] == "withdrawn":
+        return "↩️ the agent withdrew it", "C"
+    if core.plain_yes(rec, n):
+        return "✅ you approved it", "A"
+    posted = rec["versions"][n - 1].get("posted_at") or rec["created"]
+    his = [e for e in rec.get("events") or [] if e["at"] >= posted and (
+        e["kind"] in ("feedback", "answer", "comment")
+        or e["kind"] in ("decision", "part") and e.get("version") == n and e.get("verdict") != "expired")]
+    if any(e.get("verdict") == "declined" for e in his):
+        return "❌ you declined it", "B"
+    if his:
+        return "💬 you replied", "B"
+    if rec["status"] == "expired":
+        return "⌛ no answer by its deadline", "C"
+    return "⏳ still open", "C"
+
+
+def summary(d, since, records):
+    """The deputy's calls since yesterday morning, posted right after the morning list as a snapshot, not kept
+    current: (blocks, text), or None when there's no deputy or it made no call. With auto-approval on, every card it
+    approved; in a dry run, every card it would have approved and what the approver did instead. Only facts from the
+    records, grouped by asking agent."""
+    if not d:
+        return None
+    latest = {}
+    for r in records:
+        calls = [c for c in r.get("calls") or [] if datetime.fromisoformat(c["at"]) >= since]
+        if calls:
+            latest[r["id"]] = (r, calls[-1])
+    if not latest:
+        return None
+    name, live = cards.esc(d["reach"]["agent"]), bool(d.get("live"))
+    yeses = [(r, c) for r, c in latest.values() if c["call"] == "approve" and bool(c["live"]) == live]
+    groups, counts = {}, {"A": 0, "B": 0, "C": 0}
+    for r, c in sorted(yeses, key=lambda x: x[0]["id"]):
+        link = f"<{slackapi.message_url(r['thread_ts'])}|{r['id']}>"
+        title = " ".join(str(r["title"]).split())
+        line = f"{link} {cards.esc(title if len(title) <= 90 else title[:89].rstrip() + '…')} — {cards.esc(core.one_line(c['why']))}"
+        if live and r.get("taken_back"):
+            line = f"~{line}~ ↩️ taken back"
+        elif not live:
+            label, group = _what_he_did(r, c["version"])
+            counts[group] += 1
+            line += f" · {label}"
+        groups.setdefault(r["agent"], []).append(f"• {line}")
+    n = len(yeses)
+    if live:
+        left = [(r, c) for r, c in latest.values() if c["call"] == "his"]
+        took = sum(1 for r, _ in yeses if r.get("taken_back"))
+        plain = sum(1 for r, c in left if core.plain_yes(r, c["version"]))
+        headline = f"🤖 *{n} card{'s were' if n != 1 else ' was'} approved for you since yesterday morning*"
+        sub = f"By {name} · you took back {took} · it left {len(left)} for you, and you approved {plain} of those without a word"
+    else:
+        headline = f"🤖 *Dry run: {name} would have approved {n} of the {len(latest)} cards since yesterday morning*"
+        sub = (f"Of those {n}, you approved {counts['A']} without a word, replied on or declined {counts['B']}, "
+               f"and {counts['C']} are still open or were withdrawn")
+    top = [cards.ctx("🧪 *TEST summary.* It covers TEST cards only.")] if config.is_test_run() else []
+    top += [cards.md(headline), cards.ctx(sub)]
+    # Each agent's name rides with its first line, so it never shows alone.
+    chunks = [(f"*{cards.esc(agent)}*\n" if i == 0 else "") + line for agent in sorted(groups) for i, line in enumerate(groups[agent])]
+    room = cards.BLOCKS_MAX - len(top) - 3   # less "…and N more", the switch's line and its button
+    body, lines, shown = [], [], 0
+    for text in chunks:
+        if lines and len("\n".join(lines + [text])) > SECTION_MAX:
+            body.append(cards.md("\n".join(lines)))
+            lines = []
+            if len(body) == room:
+                break
+        lines.append(text)
+        shown += 1
+    if lines:
+        body.append(cards.md("\n".join(lines)))
+    if shown < len(chunks):
+        body.append(cards.ctx(f"…and {len(chunks) - shown} more"))
+    return top + body + [_switch(live)], headline.replace("*", "")

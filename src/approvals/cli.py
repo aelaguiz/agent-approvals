@@ -4,7 +4,8 @@ import json
 import os
 import re
 import sys
-from datetime import timedelta
+import tempfile
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from . import basecamp, cards, config, core, pictures, reach, slackapi, store, transcripts
@@ -154,6 +155,7 @@ def _submit_one(card, a, set_pos):
     store.event(rec, "submitted")
     core.tell_reviewer(rec, f"{rec['agent']} posted it for {core.who()}'s answer. Your read goes in its thread with "
                             f"`approvals note {rec['id']} --file <note.md>`; he may answer first, and nothing waits on it.")
+    core.tell_deputy(rec, f"a {rec['type']} card from {rec['agent']}, posted for {core.who()}'s answer. {core.make_your_call(rec)}")
     store.save(rec)
     if cards.pictures(card):
         _share_pictures(rec["id"], 1)
@@ -217,6 +219,8 @@ def cmd_revise(a):
         store.event(r, "revised", version=n)
         core.tell_reviewer(r, f"{r['agent']} posted v{n}" + (f' ("{core.one_line(card["changes"])}")' if card.get("changes") else "")
                               + f". If it changes your read, post it with `approvals note {r['id']} --file <note.md>`.")
+        core.tell_deputy(r, f"{r['agent']} posted v{n}" + (f' ("{core.one_line(card["changes"])}")' if card.get("changes") else "")
+                            + f". Your call on v{n - 1}, if you made one, doesn't carry to this version. {core.make_your_call(r)}")
         return r
     rec = store.update(a.id, add)
     # The new version goes at the bottom of the thread, where he reads; an earlier copy there shrinks to a line.
@@ -279,6 +283,7 @@ def cmd_withdraw(a):
         rec["open_question"] = None
         rec["card_dirty"] = True
         store.event(rec, "withdrawn", text=a.why)
+        core.tell_deputy(rec, f'{rec["agent"]} withdrew it: "{core.one_line(a.why)}".')
         return "ok"
     r = store.update(a.id, fn)
     if r != "ok":
@@ -400,6 +405,10 @@ def cmd_repoint(a):
         if rv and rv["reach"].get("session_id") == a.old:   # the reviewer's role moves with it too
             store.set_reviewer(dict(rv, reach=dict(new, agent=rv["reach"].get("agent"))))
             moved.append(f"the {', '.join(rv['types'])} cards it reviews")
+        d = store.deputy()
+        if d and d["reach"].get("session_id") == a.old:   # and the deputy's
+            store.set_deputy(dict(d, reach=dict(new, agent=d["reach"].get("agent"))))
+            moved.append("the deputy's role")
     print(f"Answers to {', '.join(moved)} now go to session {a.new}." if moved else
           f"No open request was waiting on session {a.old}.")
 
@@ -450,6 +459,165 @@ def cmd_note(a):
     print(f"Your read is in the thread of {a.id}.")
 
 
+def _mode(d):
+    return "auto-approval is on" if d.get("live") else "it runs as a dry run"
+
+
+def cmd_deputy(a):
+    """This session becomes the deputy, which hears every card and makes its own call on each; running it again from
+    another session moves the role there, keeping its mode. --live and --dry-run switch the mode, from any session.
+    --off: nobody is the deputy. None of these: say who is."""
+    d = store.deputy()
+    if a.off:
+        store.set_deputy(None)
+        print("Nobody is the deputy now.")
+        return
+    if a.live or a.dry_run:
+        if not d:
+            _die("No session is the deputy, so there's no auto-approval to switch.")
+        if bool(d.get("live")) == bool(a.live):
+            print(f"Nothing changed: {_mode(d)} for {d['reach']['agent']}.")
+            return
+        store.set_deputy(dict(d, live=bool(a.live), live_since=store.iso() if a.live else None))
+        print(f"Auto-approval is on now: {d['reach']['agent']}'s approve reaches the asking agent as "
+              f"{config.settings()['approver_name']}'s yes." if a.live else
+              f"Auto-approval is paused: {d['reach']['agent']}'s calls are recorded and shown, and nothing is approved.")
+        return
+    if not a.agent:
+        print(f"{d['reach']['agent']} is the deputy, from session {d['reach']['session_id']} on {d['reach']['machine']}, "
+              f"and {_mode(d)}." if d else "Nobody is the deputy.")
+        return
+    who = reach.capture(a.agent)
+    if not who["session_id"]:
+        _die("This shell isn't a Claude or Codex session, so nothing could reach you. Run `approvals deputy` in your own session.")
+    live = bool(d and d.get("live"))   # a restored session picks up where the old one stood
+    store.set_deputy({"reach": who, "live": live, "test": config.is_test_run(), "since": store.iso(),
+                      "live_since": d.get("live_since") if live else None})
+    print(f"This session is now the deputy, as {who['agent']}, and {_mode({'live': live})}: every new card, each new "
+          f"version and everything {config.settings()['approver_name']} says on a card other than a plain yes reaches "
+          f"you here as an [Approvals] message. Make your call on each with `approvals call <id> --approve|--his --why \"<why>\"`.")
+
+
+WHY_MAX = 300
+
+
+def cmd_call(a):
+    """The deputy's call on a card's newest version: approve it for the approver, or leave it for him. Recorded and
+    shown on the card either way; an approve is his yes only when auto-approval is on."""
+    d = store.deputy()
+    me = reach.capture()
+    if not d or not me["session_id"] or me["session_id"] != d["reach"].get("session_id"):
+        _die("Only the deputy's own session can make a call" + (f", and that is {d['reach']['agent']}'s session. If this "
+             f"session has taken over its work, run `approvals deputy --agent \"{d['reach']['agent']}\"` here first." if d else
+             "; nobody is the deputy now."))
+    why = (a.why or "").strip()
+    if not why:
+        _die("Say why, in one or two sentences for the approver: he reads it on the card and in the morning summary.")
+    if len(why) > WHY_MAX:
+        _die(f"The why is {len(why)} characters; keep it under {WHY_MAX}, one or two sentences.")
+    name, live = d["reach"]["agent"], bool(d.get("live"))
+    what = "approve" if a.approve else "his"
+    r = store.update(a.id, lambda rec: core.call(rec, what, why, name, live))
+    if r != "ok":
+        _die(f"Not recorded: {r}.")
+    core.refresh_and_clear(a.id)
+    who = config.settings()["approver_name"]
+    print(f"{a.id}: left for {who}; the card shows your why." if what == "his" else
+          f"{a.id}: approved for {who}; its agent has his yes, and the card shows your why." if live else
+          f"{a.id}: a dry run, so nothing was approved and its agent heard nothing; the card shows you would have approved it.")
+
+
+def _stamp(iso):
+    """'Nov 9 4:47 pm', in the workspace's time zone."""
+    d = cards.local(datetime.fromisoformat(iso))
+    return d.strftime("%b ") + str(d.day) + " " + cards.clock(d)
+
+
+def _took(start, end):
+    mins = int((datetime.fromisoformat(end) - datetime.fromisoformat(start)).total_seconds() // 60)
+    return f"{mins // 1440}d {mins % 1440 // 60}h" if mins >= 1440 else f"{mins // 60}h {mins % 60}m" if mins >= 60 else f"{mins}m"
+
+
+def _happened(rec):
+    """What happened on a card, in order, one line each: facts from its record."""
+    who = config.settings()["approver_name"]
+    posted = {v["n"]: v.get("posted_at") or rec["created"] for v in rec["versions"]}
+    out = []
+    for e in rec.get("events") or []:
+        k, at = e["kind"], _stamp(e["at"])
+        said = f': "{core.one_line(e["text"])}"' if e.get("text") else ""
+        if k == "call":
+            mode = "" if e.get("call") == "his" else " (auto-approval)" if e.get("live") else " (dry run)"
+            out.append(f"{at}  {e['by']} on v{e['version']}: " + ("approve" if e["call"] == "approve" else "left it for him")
+                       + f"{mode}. Why: \"{core.one_line(e['why'])}\"")
+        elif k in ("feedback", "answer", "comment"):
+            out.append(f"{at}  {who} replied{said}")
+        elif k == "decision":
+            by = "his deputy" if e.get("where") == "deputy" else who
+            extra = (f", picked {e['choice']}" if e.get("choice") else f", items {e['items']}" if e.get("items") is not None
+                     else ", with his own edited words" if e.get("edited") else "")
+            out.append(f"{at}  {by} {e['verdict']} v{e['version']} ({core.where_said(e.get('where'))}{extra}), "
+                       f"{_took(posted.get(e['version'], rec['created']), e['at'])} after posting"
+                       + (f': "{core.one_line(e["words"])}"' if e.get("words") else ""))
+        elif k == "part":
+            out.append(f"{at}  part {e['part']} {e['verdict']} on v{e['version']} ({core.where_said(e.get('where'))}), "
+                       f"{_took(posted.get(e['version'], rec['created']), e['at'])} after posting"
+                       + (f': "{core.one_line(e["words"])}"' if e.get("words") else ""))
+        elif k == "taken_back":
+            out.append(f"{at}  {who} took back the auto-approval")
+        elif k == "removed":
+            out.append(f"{at}  {who} removed it from his list")
+        elif k == "withdrawn":
+            out.append(f"{at}  {rec['agent']} withdrew it{said}")
+        elif k == "revised":
+            out.append(f"{at}  {rec['agent']} posted v{e['version']}")
+        elif k == "question":
+            out.append(f"{at}  {rec['agent']} asked{said}")
+        elif k == "expired":
+            out.append(f"{at}  no answer by the deadline")
+        elif k == "done":
+            out.append(f"{at}  done{said}")
+    return out
+
+
+def cmd_history(a):
+    """Cards newest first, each with what happened on it in order: for the deputy to see how an asker's recent cards
+    of a kind went, and how its own calls compare with what the approver did. Facts only, no ranking."""
+    since = store.now() - timedelta(days=a.days) if a.days else None
+    shown = 0
+    for rec in sorted(store.all_records(), key=lambda r: r["created"], reverse=True):
+        if ((a.agent and a.agent.lower() not in rec["agent"].lower()) or (a.type and rec["type"] != a.type)
+                or (since and datetime.fromisoformat(rec["created"]) < since) or (a.calls and not rec.get("calls"))):
+            continue
+        if shown == a.limit:
+            break
+        print(f"{rec['id']}  {_stamp(rec['created'])}  {rec['type']}  {rec['agent']}: {rec['title']}")
+        for line in _happened(rec):
+            print(f"    {line}")
+        print()
+        shown += 1
+    if not shown:
+        print("No cards match.")
+
+
+def cmd_pictures(a):
+    """Save the newest version's pictures, as the card uploaded them to Slack, so an agent session can look at them."""
+    rec = store.load(a.id)
+    v = rec["versions"][-1]
+    files = ([("image", v["image_file_id"])] if v.get("image_file_id") else []) + [
+        (key, ref) for key, ref in (v.get("files") or {}).items() if not key.endswith(":card")]   # skip the carousel's fitted copies
+    videos = ([v["video_url"]] if v.get("video_url") else []) + list((v.get("videos") or {}).values())
+    if not files and not videos:
+        print(f"{a.id} v{v['n']} has no pictures.")
+        return
+    folder = Path(a.dir).expanduser() if a.dir else Path(tempfile.mkdtemp(prefix=f"{a.id}-"))
+    folder.mkdir(parents=True, exist_ok=True)
+    for key, ref in files:
+        print(slackapi.download(ref["id"] if isinstance(ref, dict) else ref, folder, key.replace(":", "-")))
+    for url in videos:
+        print(f"video: {url}")
+
+
 def cmd_inbox(a):
     """Answers not typed into their asker's session: ones that came while it wasn't running, and ones the
     service can't type in. Each answer goes to exactly one session: the asker gets anything not yet delivered;
@@ -457,17 +625,18 @@ def cmd_inbox(a):
     service from delivering it too."""
     me = reach.capture(a.agent)
     shown = 0
-    rv = store.reviewer()
-    reviewing = bool(rv and me.get("session_id")) and me["session_id"] == rv["reach"].get("session_id")
+    roles = {to: bool(role and me.get("session_id")) and me["session_id"] == role["reach"].get("session_id")
+             for to, role in (("reviewer", store.reviewer()), ("deputy", store.deputy()))}
 
     def take(rec, own, theirs):
         """The answers taken; printed once the record is saved, since a change can be made more than once. The
-        reviewer's messages go only to the reviewer, and an asker's only to its asker's side (theirs)."""
+        reviewer's messages go only to the reviewer, the deputy's only to the deputy, and an asker's only to its
+        asker's side (theirs)."""
         taken = []
         for item in rec.get("outbox", []):
             if item.get("delivered_at") or item.get("seen_by_agent"):
                 continue
-            if item.get("to") and not reviewing:
+            if item.get("to") and not roles[item["to"]]:
                 continue
             if not item.get("to") and (not theirs or not own and not (item.get("inbox_only") or item.get("noted_failure"))):
                 continue
@@ -484,7 +653,7 @@ def cmd_inbox(a):
         if not own and waiting and me.get("session_id") and me.get("runtime") == r.get("runtime") and me.get("cwd") == r.get("cwd"):
             own = transcripts.is_copy(r.get("runtime"), r.get("session_id"), me["session_id"], rec["id"])   # it continues the asker
         theirs = own or a.all or r.get("agent") == me["agent"]
-        if theirs or reviewing:
+        if theirs or any(roles.values()):
             taken = store.update(rec["id"], lambda x, own=own, theirs=theirs: take(x, own or a.all, theirs))
             if taken and rec.get("basecamp"):
                 basecamp.sync(rec["id"])
@@ -553,7 +722,8 @@ def cmd_role(a):
 
 
 # Commands that post to Slack check first that this machine can, so nothing is saved for a card it can't post.
-POSTS = {"submit", "ask", "revise", "answer", "ack", "done", "withdraw", "record", "status", "note", "review"}
+POSTS = {"submit", "ask", "revise", "answer", "ack", "done", "withdraw", "record", "status", "note", "review",
+         "deputy", "call", "pictures"}
 # Commands that can change what a request's Basecamp steps say.
 CHANGES = {"ask", "revise", "answer", "ack", "done", "withdraw", "record", "status"}
 
@@ -649,6 +819,36 @@ def main(argv=None):
     s.add_argument("id")
     s.add_argument("--file", required=True, help="the read, a short Markdown file")
     s.set_defaults(fn=cmd_note)
+
+    s = sub.add_parser("deputy", help="make this session the deputy, which hears every card and makes its own call on each; "
+                                      "again from a new session moves it there; alone, says who is")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--agent", help="your name, as the approver knows you (e.g. Executive pod · approver)")
+    g.add_argument("--off", action="store_true", help="nobody is the deputy")
+    g.add_argument("--live", action="store_true", help="turn auto-approval on: the deputy's approve is the approver's yes")
+    g.add_argument("--dry-run", action="store_true", help="pause auto-approval: calls are recorded and shown, nothing approved")
+    s.set_defaults(fn=cmd_deputy)
+
+    s = sub.add_parser("call", help="the deputy's call on a card's newest version: approve it for the approver, or leave it for him")
+    s.add_argument("id")
+    g = s.add_mutually_exclusive_group(required=True)
+    g.add_argument("--approve", action="store_true", help="approve it for him (only recorded and shown in a dry run)")
+    g.add_argument("--his", action="store_true", help="leave it for him")
+    s.add_argument("--why", required=True, help="one or two sentences for the approver, under 300 characters")
+    s.set_defaults(fn=cmd_call)
+
+    s = sub.add_parser("history", help="cards newest first, each with what happened on it in order")
+    s.add_argument("--agent", help="part of the asking agent's name")
+    s.add_argument("--type", choices=list(cards.TYPES))
+    s.add_argument("--days", type=int, help="only cards posted in the last N days")
+    s.add_argument("--limit", type=int, default=20, help="at most this many cards (default 20)")
+    s.add_argument("--calls", action="store_true", help="only cards the deputy called")
+    s.set_defaults(fn=cmd_history)
+
+    s = sub.add_parser("pictures", help="save a card's pictures, as uploaded to Slack, into a folder and print their paths")
+    s.add_argument("id")
+    s.add_argument("--dir", help="where to save them (default: a new temporary folder)")
+    s.set_defaults(fn=cmd_pictures)
 
     s = sub.add_parser("show")
     s.add_argument("id")

@@ -431,6 +431,31 @@ def removed(rec):
     return rec.get("status") == "withdrawn" and bool((rec.get("withdrawn") or {}).get("by"))
 
 
+def call_on(rec, n):
+    """The deputy's call on version n, or None."""
+    return next((c for c in rec.get("calls") or [] if c["version"] == n), None)
+
+
+def auto_approved(rec):
+    """Approved for the approver by the deputy, and not taken back."""
+    return (rec.get("decision") or {}).get("where") == "deputy" and rec.get("status") in ("approved", "done")
+
+
+def call_line(rec, n):
+    """The deputy's call on a card still waiting on the approver, in one gray line above the footer."""
+    c = call_on(rec, n)
+    if not c:
+        return None
+    if c["call"] == "his":
+        return ctx(f"🤖 {esc(c['by'])} left this for you: {esc(c['why'])}")
+    return ctx(f"🤖 Dry run · {esc(c['by'])} would have approved this for you: {esc(c['why'])}")
+
+
+def take_back_row(rec, n):
+    return {"type": "actions", "block_id": f"ap|{rec['id']}|{n}|takeback", "elements": [
+        button("Take it back", f"{rec['id']}|{n}|takeback")]}
+
+
 def waiting_on(rec):
     """Someone other than the approver the card waits on, until a later line of what happened."""
     if rec.get("status") in ("withdrawn", "done", "declined"):
@@ -520,6 +545,11 @@ def _card_blocks(rec, n, mode, compact=False):
         row = _buttons(rec, n)
         if row:
             blocks.append({"type": "actions", "block_id": f"ap|{rec['id']}|{n}", "elements": row})
+        line = call_line(rec, n)
+        if line:
+            blocks.append(line)
+    if mode == "final" and auto_approved(rec):
+        blocks.append(take_back_row(rec, n))
     blocks.append(_footer(rec, n, mode))
     return blocks
 
@@ -796,6 +826,10 @@ def _final_head(rec, card):
     d = rec.get("decision") or {}
     if verdict in ("approved", None) and rec.get("headline"):
         return f"✅ {rec['headline']}"
+    if auto_approved(rec):
+        return f"🤖 Auto-approved: {card['title']}"
+    if rec.get("taken_back"):
+        return f"↩️ You took it back: {card['title']}"
     if verdict == "approved" and d.get("choice"):
         return f"✅ You picked {d['choice']}"
     if verdict == "approved" and d.get("items") is not None and len(d["items"]) < len(card.get("items") or []):
@@ -818,8 +852,10 @@ def _final_blocks(rec, n):
     blocks += _timeline_blocks(rec, card)
     if card.get("offer") and _verdict(rec) == "approved":
         blocks += _offer_blocks(rec, n, card)
-    blocks.append({"type": "actions", "block_id": f"ap|{rec['id']}|{n}|see", "elements": [
-        button("See the card", f"{rec['id']}|{n}|see")]})
+    see = [button("See the card", f"{rec['id']}|{n}|see")]
+    if auto_approved(rec):
+        see += take_back_row(rec, n)["elements"]
+    blocks.append({"type": "actions", "block_id": f"ap|{rec['id']}|{n}|see", "elements": see})
     blocks.append(_footer(rec, n, "final"))
     return blocks
 
@@ -840,7 +876,14 @@ def _timeline_blocks(rec, card):
     where = f" · {esc(d['where'])}" if d.get("where") not in (None, "button", "pop-up", "rows") else ""
     at = when(datetime.fromisoformat(d["at"])) if d.get("at") else ""
     verdict = _verdict(rec)
-    if verdict == "approved" and not card.get("parts"):
+    approval = next((c for c in reversed(rec.get("calls") or []) if c["call"] == "approve" and c["live"]), None)
+    if rec.get("taken_back") and approval:
+        tb = rec["taken_back"]
+        lines.append(f"↩️ Auto-approval taken back by {who}, {when(datetime.fromisoformat(tb['at']))}. "
+                     f"{esc(approval['by'])} had approved it: {esc(approval['why'])}")
+    elif auto_approved(rec):
+        lines.append(f"🤖 Approved for you by {esc(d['by'])}, {at}: {esc(d.get('why') or '')}")
+    elif verdict == "approved" and not card.get("parts"):
         verb = "Picked" if d.get("choice") else "Approved"
         line = f"✅ {verb} by {who}, {at}{where}"
         if d.get("items") is not None and card.get("items"):

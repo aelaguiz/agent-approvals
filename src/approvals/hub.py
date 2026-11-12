@@ -75,6 +75,13 @@ class Client:
         if self.call("PUT", "/reviewer", {"reviewer": rv})[0] != 200:
             raise store.StoreError(f"the approvals hub on {config.hub()} runs a version without reviewers; update it first")
 
+    def deputy(self):
+        return self.call("GET", "/deputy")[1].get("deputy")   # a hub from before the deputy has none
+
+    def set_deputy(self, d):
+        if self.call("PUT", "/deputy", {"deputy": d})[0] != 200:
+            raise store.StoreError(f"the approvals hub on {config.hub()} runs a version without the deputy; update it first")
+
     def health(self):
         return self.call("GET", "/health")[1]
 
@@ -105,13 +112,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"machine": config.machine(), "id_prefix": config.settings()["id_prefix"]})
             if method == "GET" and parts == ["due"]:
                 recs, machine = store.local_all(), q.get("machine", [""])[0]
-                due, strays = core.to_deliver(recs, machine, store.local_reviewer())
+                due, strays = core.to_deliver(recs, machine, store.local_reviewer(), store.local_deputy())
                 return self._send(200, {"due": due, "strays": strays, "basecamp": basecamp.due(recs, machine)})
             if parts == ["reviewer"]:
                 if method == "GET":
                     return self._send(200, {"reviewer": store.local_reviewer()})
                 if method == "PUT":
                     store.local_set_reviewer(self._body()["reviewer"])
+                    return self._send(200, {})
+            if parts == ["deputy"]:
+                if method == "GET":
+                    return self._send(200, {"deputy": store.local_deputy()})
+                if method == "PUT":
+                    store.local_set_deputy(self._body()["deputy"])
                     return self._send(200, {})
             if parts == ["records"]:
                 if method == "GET":

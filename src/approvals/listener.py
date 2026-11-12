@@ -124,6 +124,7 @@ class Listener:
         "withdrawn": "The agent withdrew this one, so there's nothing to decide.",
         "removed": "You removed this one from your list, so there's nothing to decide.",
         "gone": "That button doesn't match the card any more; use the newest card's buttons.",
+        "taken": "You already took this one back.",
     }
 
     def handle_click(self, payload):
@@ -145,6 +146,8 @@ class Listener:
             return lambda: self.open_view(rid, n, what, trigger, user, thread_ts)
         if user != self.s["approver"]:
             return lambda: slackapi.ephemeral(user, f"Only {self.s['approver_name']} can decide approvals.", thread_ts)
+        if rid == "deputy":
+            return self.switch_deputy(what == "live", payload, user)
         if what in ("change", "edit", "items") or what.endswith(":change"):
             return lambda: self.open_view(rid, n, what, trigger, user, thread_ts)
         r = store.update(rid, lambda rec: core.press(rec, n, what, by=user))
@@ -152,6 +155,24 @@ class Listener:
         if r in self.REFUSED:
             return lambda: slackapi.ephemeral(user, self.REFUSED[r], thread_ts)
         return lambda: (self.try_refresh(rid), self.refresh_list())
+
+    def switch_deputy(self, live, payload, user):
+        """Turn auto-approval on or pause it, from the morning summary's button: saved before the ack, then the
+        summary is redrawn with the other button and who switched it when."""
+        d = store.deputy()
+        if not d:
+            return lambda: slackapi.ephemeral(user, "No session is the deputy now, so there's nothing to switch.")
+        store.set_deputy(dict(d, live=live, live_since=store.iso() if live else None))
+        log.info("auto-approval %s from the summary", "on" if live else "paused")
+        msg = payload.get("message") or {}
+        ts = (payload.get("container") or {}).get("message_ts") or msg.get("ts")
+
+        def redraw():
+            try:
+                slackapi.update(ts, digest.switched(msg.get("blocks") or [], live, store.now()), msg.get("text") or "")
+            except Exception as e:
+                log.warning("redrawing the deputy's summary failed: %s", e)
+        return redraw
 
     def refresh_list(self):
         """A press, on the card or on the list, crosses its line off the list now rather than at the next sweep, so
@@ -335,7 +356,7 @@ class Listener:
     def deliver_due(self):
         """On the hub, every few seconds: what's due for this machine's sessions, and ⏳ kept true on the cards."""
         recs = [r for r in store.all_records() if r.get("thread_ts")]
-        due, strays = core.to_deliver(recs, self.me, store.reviewer())
+        due, strays = core.to_deliver(recs, self.me, store.reviewer(), store.deputy())
         self.queue_steps(basecamp.due(recs, self.me))
         self.queue(due)
         self.take_strays(strays)
@@ -451,16 +472,17 @@ class Listener:
         if item.get("delivered_at"):
             return
         to = item.get("to")
-        reach = ((store.reviewer() or {}).get("reach") if to else rec.get("reach")) or {}
+        role = {"reviewer": store.reviewer, "deputy": store.deputy}[to]() if to else None
+        reach = ((role or {}).get("reach") if to else rec.get("reach")) or {}
         start = time.monotonic()
         store.update(rid, lambda r: self._sending(r, ref))
         saved = time.monotonic()
         res = router.deliver(reach, item["text"], ref, request_id=rid, resume=False, confirm=False)
-        log.info("%s %s%s: %s (%s); saving took %.1fs, typing %.1fs", rid, ref, " (reviewer)" if to else "", res.status,
+        log.info("%s %s%s: %s (%s); saving took %.1fs, typing %.1fs", rid, ref, f" ({to})" if to else "", res.status,
                  res.reason, saved - start, time.monotonic() - saved)
         sid = res.reach.get("session_id")
         if to:
-            res.reach, res.moves = {}, []   # where the reviewer is moves nothing of the asker's
+            res.reach, res.moves = {}, []   # where the reviewer or the deputy is moves nothing of the asker's
         self.record(rid, ref, res)
         if res.status == "sent":
             self.awaiting[(rid, ref)] = (reach.get("runtime"), sid, time.monotonic())
@@ -495,7 +517,7 @@ class Listener:
                 slackapi.react(item["react_ts"], "incoming_envelope")
             except Exception as e:
                 log.warning("reaction failed: %s", e)
-        if note and not item.get("to"):   # the approver's thread isn't told about the reviewer's deliveries
+        if note and not item.get("to"):   # the approver's thread isn't told about the reviewer's or deputy's deliveries
             try:
                 slackapi.note(rec["thread_ts"], note)
             except Exception as e:

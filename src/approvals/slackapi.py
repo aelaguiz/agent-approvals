@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 import time
+import urllib.request
 from pathlib import Path
 
 from slack_sdk import WebClient
@@ -144,6 +145,16 @@ def upload_to_thread(path, thread_ts, title, comment=None):
     r = client().files_upload_v2(file=str(path), title=title[:200], channel=channel(), thread_ts=thread_ts, initial_comment=comment)
     f = r.get("file") or (r.get("files") or [{}])[0]
     return f.get("permalink")
+
+
+def download(file_id, folder, name):
+    """Save an uploaded file into folder as name plus its own extension; returns the path."""
+    f = client().files_info(file=file_id)["file"]
+    path = Path(folder) / (name + (Path(f.get("name") or "").suffix or f".{f.get('filetype') or 'bin'}"))
+    req = urllib.request.Request(f["url_private_download"], headers={"Authorization": f"Bearer {config.bot_token()}"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        path.write_bytes(r.read())
+    return path
 
 
 @functools.lru_cache(maxsize=1)
