@@ -63,7 +63,10 @@ class Client:
 
     def history(self, agent, type, since, limit, calls):
         q = {k: v for k, v in (("agent", agent), ("type", type), ("since", since), ("limit", limit), ("calls", 1 if calls else None)) if v}
-        return self.call("GET", "/history?" + urlencode(q))[1]["records"]
+        code, body = self.call("GET", "/history?" + urlencode(q))
+        if code != 200:
+            raise store.StoreError(f"the approvals hub on {config.hub()} runs a version without history; update it first")
+        return body["records"]
 
     def delete(self, rid):
         self.call("DELETE", f"/records/{rid}")
