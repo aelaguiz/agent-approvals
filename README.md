@@ -34,7 +34,7 @@ agent ──approvals submit──▶ card in #approvals ──▶ you: ✅ / �
   - Socket Mode on, and an app-level token with `connections:write`;
   - Interactivity on, which Socket Mode carries;
   - the bot event `message.channels` (`message.groups` for a private channel), so a reply in a thread is read within seconds rather than on the next pass through every card's thread;
-  - bot scopes `chat:write`, `channels:history` (`groups:history` for a private channel), `channels:read`, `reactions:write`, `files:write`, `files:read` and `users:read`;
+  - bot scopes `chat:write`, `chat:write.customize`, `channels:history` (`groups:history` for a private channel), `channels:read`, `reactions:write`, `files:write`, `files:read` and `users:read`;
   - the bot invited to the approvals channel.
 - To deliver into agent sessions: [Herdr](https://herdr.dev), with agents running in Herdr panes. Without it, answers wait in each agent's `approvals inbox`.
 - For Basecamp steps: the Basecamp command-line tool, `basecamp`, and in each agent's folder (or one above it) a `.basecamp/config.json` whose `default_profile` is that agent's own login. Without one, a card's Basecamp step is skipped.
@@ -60,6 +60,7 @@ make install MACHINE=laptop
 | `channel` | The approvals channel's id. |
 | `approver` | The Slack user id whose button presses and replies count. |
 | `approver_name` | What cards and agent messages call them. |
+| `list_as` | Optional. `{"name": "Approval desk", "icon_url": "https://example.com/desk.png"}` gives the morning list, lists asked for, and the deputy's summary their own name and picture. Unset: the app's usual name and picture. |
 | `bot_token_file`, `bot_token_key` | The env-style file holding the bot token, and the variable name in it. |
 | `app_token_file`, `app_token_key` | The same for the Socket Mode app token. |
 | `timezone` | For deadlines shown on cards, and the morning list's 8 am. |
@@ -98,6 +99,7 @@ Agents use the skill. To try it by hand:
 approvals submit card.json --agent "Pricing"   # posts the card, prints AP-0001 and a link
 approvals submit a.json b.json c.json --agent "Revenue"   # a set: three cards together, each its own decision, marked "1 of 3"
 approvals submit card.json --basecamp https://app.basecamp.com/<account>/buckets/<project>/card_tables/cards/<card>   # the Basecamp card it serves; repeatable
+approvals submit card.json --thread 'https://example.slack.com/archives/CEXAMPLE/p1800000000000001'   # the message this card answers
 approvals ask AP-0001 "Mexico at MX$899 or MX$999?"
 approvals revise AP-0001 card-v2.json          # next version, in the same thread
 approvals ack AP-0001 "Got it: setting both prices now"   # the agent's own acknowledgement, in the thread
@@ -120,6 +122,26 @@ approvals pictures AP-0001                     # saves the newest version's pict
 ```
 
 The name a card and its replies show is `--agent`, unless whatever started the agent set `APPROVALS_FROM` (a team's launcher, say "AI pod · lead"): that wins, so the approver can always tell which team and member sent it.
+
+### The sender's name and picture
+
+Put `.approvals.json` in an agent's working folder or a parent folder to give its Slack posts a name and picture:
+
+```json
+{"post_as": {"name": "Design team", "icon_url": "https://example.com/design.png"}}
+```
+
+The nearest file wins. No file, or a nearest file without `post_as`, keeps the app's usual sender. The name must be nonempty and at most 80 characters; the picture must be an HTTPS URL. A malformed sender refuses the command. `list_as` in the workspace config uses the same shape.
+
+Each command uses the sender from its own working folder, so a reviewer's note carries the reviewer's sender. The card keeps the asker's sender for posts the service makes in the conversation it came from. File uploads and the service's delivery notes keep the app's usual name. All messages still belong to the approvals app, so their buttons reach the same listener.
+
+### The Slack thread a card answers
+
+Use `--thread <message link>`, or `"thread": "<message link>"` in the card JSON, to name the Slack message the card answers. `--thread` overrides the JSON on every card in a set. The link must be an HTTPS message link in the same Slack workspace, with an optional `thread_ts` query. The command finds that message's thread root.
+
+The full card opens with a link to the conversation and, when readable and written by a person, a short quote of the message. The conversation gets a small card with its current state and a link to the full one. A plain yes-or-no card has the same answer buttons there; picks, rows and batches link to the full card. New versions, answers and status changes update the small card, and your replies on the full card are copied into the conversation once.
+
+If the app cannot read the conversation, the full card still carries its link. The command says that the thread will not show the card and tells the agent to link it there itself.
 
 A card is JSON. [skills/approvals/references/cards.md](skills/approvals/references/cards.md) describes every field, type and kind, with an example of each.
 

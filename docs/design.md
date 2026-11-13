@@ -19,6 +19,26 @@
 
 **The Slack connection.** The hub holds it with Slack's built-in Socket Mode client, which opens a new connection by itself when one dies. That client reads every connection, and answers Slack's pings, on one long-lived thread. When a TLS write fails with a system error such as a broken pipe, Python's `ssl` module leaves that error queued on the thread, and the next read there that has to wait for data reports it again, on whatever connection it's reading. So one ping answered on a dead connection made every later connection fail on its first read. On November 8, 2026 that left the hub reconnecting every 5 seconds for 42 minutes, hearing no button presses, until the service restarted. `listener.SlackConnection` empties that thread's error queue before it reads each connection.
 
+## The sender
+
+An agent's Slack posts can carry its team's name and picture. The command looks for `.approvals.json` in its working folder, then each parent, and stops at the first file. Its `post_as` is `{"name": "Design team", "icon_url": "https://example.com/design.png"}`. No file, or no `post_as` in that nearest file, keeps the app's usual sender. A present sender needs a nonempty name of at most 80 characters and an HTTPS picture URL; a malformed one refuses the command before it posts.
+
+Every message a command posts uses that command's sender: cards, versions and their notices, questions, answers, acknowledgements, evidence posted as text, status notes, the reviewer's read and the deputy's line. The reviewer's own folder supplies its sender. At submit the record keeps the asker's sender as `as`, so the service can use it in the conversation the card came from. The service's own notes in the card's thread, including delivery failures and acknowledgement warnings, keep the app's name. Slack file uploads cannot carry a custom sender, so they also keep the app's name.
+
+The workspace's optional `list_as`, in the same shape, supplies the sender for morning lists, lists asked for and the deputy's morning summary. Without it those posts look as before. Custom senders are `username` and `icon_url` on `chat.postMessage`, using the app's token and `chat:write.customize`. Every post still belongs to the approvals app, so Slack keeps sending its button presses to the hub.
+
+## The card and the thread it came from
+
+A card may answer a message in an existing Slack conversation: `approvals submit --thread <message link>`, or `thread` in its JSON. The command's link wins for every card in a set. All links are checked before anything is posted, as Basecamp links are: an HTTPS Slack message link in this workspace, optionally with `thread_ts`. The record's `thread` keeps the link, channel, message timestamp and thread root. The card's own thread in the approvals channel remains `thread_ts`.
+
+At submit the command reads the named message and channel name. A person's words are saved as plain text, with readable mentions and links, shortened to about 300 characters, and marked when they are the approver's. Right under the card's frame line, a small line says which sender and channel the conversation is with and links to it; the saved words sit below, starting with “You:” when they are his. An answered card keeps just the link line. When the card would exceed Slack's 50 blocks, these optional blocks are dropped before any material needed to decide.
+
+After the full card is posted, the conversation gets a small card under the asker's sender. `cards.small_blocks(rec)` always draws the newest version: while it waits, its title, the first editable quote (else the first quote), what a yes covers and its answer buttons. Only a plain yes-or-no card has buttons there, with the full card's values; a pick, rows or batch takes the approver to the full card. After his reply it says the agent is changing it. After a decision or closure it says what happened, by whom and when, and the newest status or done line. Every state ends with the card number and a link to the full card, with the version from the second one on.
+
+The record keeps the small card's timestamp. Every redraw of the full card redraws it too, in its own channel; a failed small-card update is logged and leaves the full card's update standing. A refusal after pressing there answers in the channel and thread of that press. The listener also copies each of the approver's replies on the full card, including words from a pop-up, into the conversation once, under the asker's sender, with his name, the approvals channel and the time above the quote. The record keeps those post timestamps so `purge-tests` can delete them along with the small card.
+
+When the app cannot read the conversation, such as a direct message with another app, the full card keeps its link and no small card is posted. The command tells the agent that the thread will not show the card and to link it there itself. Records without `as` or `thread` behave as before.
+
 ## One thread per request
 
 The card is the first post. Everything about the request stays in its thread:

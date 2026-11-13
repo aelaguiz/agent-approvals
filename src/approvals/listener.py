@@ -9,7 +9,7 @@ import queue
 import ssl
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from slack_sdk.socket_mode import SocketModeClient
 from slack_sdk.socket_mode.response import SocketModeResponse
@@ -141,19 +141,20 @@ class Listener:
             return None   # a link button: Slack opens it
         thread_ts = ((payload.get("container") or {}).get("thread_ts")
                      or (payload.get("message") or {}).get("thread_ts"))
+        channel_id = (payload.get("channel") or {}).get("id") or (payload.get("container") or {}).get("channel_id")
         trigger = payload.get("trigger_id")
         if what == "see" or what.startswith(("read:", "pic:")):
-            return lambda: self.open_view(rid, n, what, trigger, user, thread_ts)
+            return lambda: self.open_view(rid, n, what, trigger, user, thread_ts, channel_id)
         if user != self.s["approver"]:
-            return lambda: slackapi.ephemeral(user, f"Only {self.s['approver_name']} can decide approvals.", thread_ts)
+            return lambda: slackapi.ephemeral(user, f"Only {self.s['approver_name']} can decide approvals.", thread_ts, channel_id=channel_id)
         if rid == "deputy":
             return self.switch_deputy(what == "live", payload, user)
         if what in ("change", "edit", "items") or what.endswith(":change"):
-            return lambda: self.open_view(rid, n, what, trigger, user, thread_ts)
+            return lambda: self.open_view(rid, n, what, trigger, user, thread_ts, channel_id)
         r = store.update(rid, lambda rec: core.press(rec, n, what, by=user))
         log.info("click %s v%s %s -> %s", rid, n, what, r)
         if r in self.REFUSED:
-            return lambda: slackapi.ephemeral(user, self.REFUSED[r], thread_ts)
+            return lambda: slackapi.ephemeral(user, self.REFUSED[r], thread_ts, channel_id=channel_id)
         return lambda: (self.try_refresh(rid), self.refresh_list())
 
     def switch_deputy(self, live, payload, user):
@@ -182,7 +183,7 @@ class Listener:
         except Exception as e:
             log.warning("the list's refresh after a press failed, the sweep will retry: %s", e)
 
-    def open_view(self, rid, n, what, trigger, user, thread_ts):
+    def open_view(self, rid, n, what, trigger, user, thread_ts, channel_id=None):
         """Open the pop-up a button asks for, unless the card moved on since it was drawn."""
         rec = store.load(rid)
         if what != "see" and not what.startswith(("read:", "pic:")):
@@ -193,7 +194,7 @@ class Listener:
             if not bad and not j and (rec.get("decision") or {}).get("version") == n:
                 bad = "already"
             if bad:
-                return slackapi.ephemeral(user, self.REFUSED[bad], thread_ts)
+                return slackapi.ephemeral(user, self.REFUSED[bad], thread_ts, channel_id=channel_id)
         if what == "see":
             view = cards.see_view(rec, n)
         elif what.startswith("read:"):
@@ -251,13 +252,15 @@ class Listener:
         log.info("pop-up %s v%s %s -> %s", rid, n, what, r)
         if r in self.REFUSED:
             return {"response_action": "errors", "errors": {first: self.REFUSED[r]}}, None
-        return None, lambda: self.after_submission(rid, what, words)
+        return None, lambda: self.after_submission(rid, what, words, view["id"])
 
-    def after_submission(self, rid, what, words):
+    def after_submission(self, rid, what, words, view_id):
         """His words from a pop-up go in the thread too, so the thread keeps the whole record."""
         self.try_refresh(rid)
         rec = store.load(rid)
         who = self.s["approver_name"]
+        if words and (what == "edit" or what.endswith("change")):
+            self.copy_to_source(rec, words, "view:" + view_id, store.now())
         try:
             if what == "edit":
                 slackapi.note(rec["thread_ts"], f"✍️ {who} approved it with these words:\n{cards.quoted(words)}")
@@ -266,6 +269,24 @@ class Listener:
                 slackapi.note(rec["thread_ts"], f"✏️ {who} asked for a change{row}:\n{cards.quoted(words)}")
         except Exception as e:
             log.warning("thread note for %s failed: %s", rid, e)
+
+    def copy_to_source(self, rec, words, key, at):
+        source = rec.get("thread") or {}
+        if not source.get("small_ts") or key in source.get("copied_keys", []):
+            return
+        line = cards.ctx(f"💬 {cards.esc(self.s['approver_name'])}, on the card in <#{self.s['channel']}> · {cards.when(at)}")
+        try:
+            # One quote when it fits a section's 3,000 characters once escaped, as nearly every reply does; else in pieces.
+            chunks = ([cards.md(cards.quoted(words))] if len(cards.quoted(words)) <= 2900
+                      else [cards.md(cards.quoted(words[i:i + 500])) for i in range(0, len(words), 500)])
+            ts = slackapi.post([line, *chunks[:49]], words, thread_ts=source["root_ts"], channel_id=source["channel"],
+                               sender=rec.get("as"))
+            def saved(r):
+                r["thread"].setdefault("copied_keys", []).append(key)
+                r["thread"].setdefault("copied_ts", []).append(ts)
+            store.update(rec["id"], saved)
+        except Exception as e:
+            log.warning("copying reply to source for %s failed: %s", rec["id"], e)
 
     def try_refresh(self, rid):
         try:
@@ -329,6 +350,9 @@ class Listener:
         kind = store.update(rec["id"], apply)
         if kind:
             log.info("%s: %d repl%s from the approver -> %s", rec["id"], len(mine), "y" if len(mine) == 1 else "ies", kind)
+            for ts, words in mine:
+                self.copy_to_source(store.load(rec["id"]), words, "reply:" + ts,
+                                    datetime.fromtimestamp(float(ts), tz=timezone.utc))
             if store.load(rec["id"]).get("card_dirty"):
                 self.try_refresh(rec["id"])
 

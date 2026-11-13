@@ -12,6 +12,7 @@ import hmac
 import json
 import os
 import socket
+from urllib.parse import urlparse
 from pathlib import Path
 
 ROOT = Path.home() / ".approvals"
@@ -52,6 +53,30 @@ DEFAULTS = {
 
 class ConfigError(RuntimeError):
     pass
+
+
+def sender(value, label="post_as"):
+    if not isinstance(value, dict) or not isinstance(value.get("name"), str) or not value["name"].strip() or len(value["name"]) > 80:
+        raise ConfigError(f"{label} needs a nonempty name of at most 80 characters")
+    url = value.get("icon_url")
+    if not isinstance(url, str) or urlparse(url).scheme != "https" or not urlparse(url).netloc:
+        raise ConfigError(f"{label} needs an https icon_url")
+    return {"name": value["name"], "icon_url": url}
+
+
+def folder_sender(cwd=None):
+    here = Path(cwd or os.getcwd()).resolve()
+    for folder in (here, *here.parents):
+        path = folder / ".approvals.json"
+        if path.is_file():
+            try:
+                data = json.loads(path.read_text())
+                if not isinstance(data, dict):
+                    raise ValueError("expected an object")
+                return sender(data["post_as"]) if "post_as" in data else None
+            except (ValueError, OSError) as e:
+                raise ConfigError(f"{path}: {e}") from e
+    return None
 
 
 def settings(home=None):

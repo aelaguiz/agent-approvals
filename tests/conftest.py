@@ -13,6 +13,7 @@ TEST_CONFIG = {
 @pytest.fixture(autouse=True)
 def tmp_home(tmp_path, monkeypatch):
     """Every test gets its own record store and a made-up config."""
+    monkeypatch.chdir(tmp_path)
     home = tmp_path / "home"
     home.mkdir()
     (home / "config.json").write_text(json.dumps(TEST_CONFIG))
@@ -26,7 +27,12 @@ def tmp_home(tmp_path, monkeypatch):
     importlib.reload(config)
     for mod in ("store", "cards", "core", "reach", "router", "listener", "hub"):
         importlib.reload(importlib.import_module(f"approvals.{mod}"))
-    from approvals import router
+    from approvals import router, slackapi
+    from slack_sdk import WebClient
+    def no_real_slack(*args, **kwargs):
+        raise AssertionError("a test tried to connect to Slack")
+    monkeypatch.setattr(WebClient, "api_call", no_real_slack)
+    monkeypatch.setattr(slackapi, "POST_AS", None)
 
     def no_real_herdr(cmd, **kw):
         raise AssertionError(f"a test tried to start a real Herdr server: {cmd}")

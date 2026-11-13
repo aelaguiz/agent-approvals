@@ -1,11 +1,13 @@
 """Thin wrapper over Slack's Web API, as ops_bot."""
 import functools
+import html
 import os
 import re
 import subprocess
 import time
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlparse, parse_qs
 
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
@@ -37,8 +39,14 @@ def _media_retry(call):
             time.sleep(2)
 
 
-def post(blocks, text, thread_ts=None, broadcast=False):
-    kw = dict(channel=channel(), blocks=blocks, text=text, unfurl_links=False, unfurl_media=False)
+POST_AS = None
+
+def _sender(value):
+    return {"username": value["name"], "icon_url": value["icon_url"]} if value else {}
+
+
+def post(blocks, text, thread_ts=None, broadcast=False, channel_id=None, sender=None):
+    kw = dict(channel=channel_id or channel(), blocks=blocks, text=text, unfurl_links=False, unfurl_media=False, **_sender(sender or POST_AS))
     if thread_ts:
         kw["thread_ts"] = thread_ts
         if broadcast:
@@ -46,13 +54,13 @@ def post(blocks, text, thread_ts=None, broadcast=False):
     return _media_retry(lambda: client().chat_postMessage(**kw)["ts"])
 
 
-def update(ts, blocks, text):
-    _media_retry(lambda: client().chat_update(channel=channel(), ts=ts, blocks=blocks, text=text))
+def update(ts, blocks, text, channel_id=None):
+    _media_retry(lambda: client().chat_update(channel=channel_id or channel(), ts=ts, blocks=blocks, text=text))
 
 
-def note(thread_ts, text):
+def note(thread_ts, text, channel_id=None, sender=None):
     """A plain one-line reply in a thread."""
-    return client().chat_postMessage(channel=channel(), thread_ts=thread_ts, text=text, unfurl_links=False)["ts"]
+    return client().chat_postMessage(channel=channel_id or channel(), thread_ts=thread_ts, text=text, unfurl_links=False, **_sender(sender or POST_AS))["ts"]
 
 
 def react(ts, name):
@@ -71,8 +79,8 @@ def unreact(ts, name):
             raise
 
 
-def ephemeral(user, text, thread_ts=None):
-    kw = dict(channel=channel(), user=user, text=text)
+def ephemeral(user, text, thread_ts=None, channel_id=None):
+    kw = dict(channel=channel_id or channel(), user=user, text=text)
     if thread_ts:
         kw["thread_ts"] = thread_ts
     client().chat_postEphemeral(**kw)
@@ -103,6 +111,68 @@ def message_url(ts):
     return f"{_team_url()}archives/{channel()}/p{ts.replace('.', '')}"
 
 
+def thread_link(link):
+    """Validate a link before any card in the set is posted."""
+    if not isinstance(link, str):
+        raise ValueError("thread must be a Slack message link")
+    u = urlparse(link)
+    match = re.fullmatch(r"/archives/([A-Za-z0-9]+)/p(\d+)", u.path)
+    query = parse_qs(u.query, keep_blank_values=True)
+    root = (query.get("thread_ts") or [None])[0]   # Slack's link to a reply carries thread_ts, and cid beside it
+    if (u.scheme != "https" or not re.fullmatch(r"[a-zA-Z0-9-]+\.slack\.com", u.netloc) or not match
+            or (root is not None and not re.fullmatch(r"\d+\.\d+", root))):
+        raise ValueError("thread must be an https Slack message link in this workspace")
+    if u.netloc.lower() != urlparse(_team_url()).netloc.lower():
+        raise ValueError("thread is in a different Slack workspace")
+    digits = match[2]
+    if len(digits) <= 6:
+        raise ValueError("thread link has an invalid message timestamp")
+    thread = {"link": link, "channel": match[1], "ts": digits[:-6] + "." + digits[-6:]}
+    thread["root_ts"] = root
+    return thread
+
+
+def read_thread(thread):
+    c = client()
+    args = dict(channel=thread["channel"], oldest=thread["ts"], latest=thread["ts"], inclusive=True)
+    if thread.get("root_ts"):
+        # replies also returns the thread's first message, so a limit of one would be only that
+        messages = c.conversations_replies(ts=thread["root_ts"], limit=5, **args)["messages"]
+    else:
+        messages = c.conversations_history(limit=1, **args)["messages"]
+    msg = next((m for m in messages if m.get("ts") == thread["ts"]), None)
+    if not msg:
+        raise ValueError("the linked message could not be read")
+    info = c.conversations_info(channel=thread["channel"])["channel"]
+    thread["root_ts"] = msg.get("thread_ts") or thread.get("root_ts") or msg["ts"]
+    thread["channel_name"] = info.get("name") or thread["channel"]
+    text = (msg.get("text") or "") if msg.get("user") and not msg.get("bot_id") and msg.get("subtype") != "bot_message" else ""
+    def mention(m):
+        if m[2]:
+            return "@" + m[2]
+        try:
+            user = c.users_info(user=m[1])["user"]
+            return "@" + (user.get("real_name") or user.get("name") or m[1])
+        except Exception:
+            return "@" + m[1]
+    text = re.sub(r"<@([A-Z0-9]+)(?:\|([^>]*))?>", mention, text)
+    def channel_name(m):
+        if m[2]:
+            return "#" + m[2]
+        try:
+            return "#" + (c.conversations_info(channel=m[1])["channel"].get("name") or m[1])
+        except Exception:
+            return "#" + m[1]
+    text = re.sub(r"<#([A-Z0-9]+)(?:\|([^>]*))?>", channel_name, text)
+    text = re.sub(r"<(https?://[^>|]+)\|([^>]+)>", r"\2 (\1)", text)
+    text = re.sub(r"<(https?://[^>]+)>", r"\1", text)
+    text = html.unescape(text)
+    thread["text"] = text[:299].rstrip() + "…" if len(text) > 300 else text
+    thread["approver"] = msg.get("user") == config.settings().get("approver")
+    thread["readable"] = True
+    return thread
+
+
 def views_open(trigger_id, view):
     client().views_open(trigger_id=trigger_id, view=view)
 
@@ -111,8 +181,8 @@ def views_update(view_id, view, hash_=None):
     client().views_update(view_id=view_id, view=view, **({"hash": hash_} if hash_ else {}))
 
 
-def delete(ts):
-    client().chat_delete(channel=channel(), ts=ts)
+def delete(ts, channel_id=None):
+    client().chat_delete(channel=channel_id or channel(), ts=ts)
 
 
 def upload_private_image(path, title):

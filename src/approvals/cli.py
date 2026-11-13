@@ -111,16 +111,31 @@ def cmd_submit(a):
     if len(a.card) > cards.SET_MAX:
         _die(f"A set holds up to {cards.SET_MAX} cards; more than that won't be read as one piece of work.")
     loaded = [_load_card(p) for p in a.card]
+    threads = []
     for i, card in enumerate(loaded, 1):
         errs = cards.validate(card) + basecamp.problems(basecamp.urls(card.get("basecamp")) + (a.basecamp or []))
+        link = getattr(a, "thread", None) or card.get("thread")
+        thread = None
+        if link is not None:
+            try:
+                thread = slackapi.thread_link(link)
+            except ValueError as e:
+                errs.append(str(e))
+        threads.append(thread)
         if errs:
             which = f"Card {i} of {len(loaded)} ({a.card[i - 1]}) refused; nothing was posted" if len(loaded) > 1 else "Card refused"
             _die(which + ":\n- " + "\n- ".join(errs))
+    for thread in threads:
+        if thread:
+            try:
+                slackapi.read_thread(thread)
+            except Exception as e:
+                print(f"The linked thread won't show the card: {core.one_line(e)}; link the approval card there yourself.", file=sys.stderr)
     for i, card in enumerate(loaded, 1):
-        _submit_one(card, a, {"n": i, "of": len(loaded)} if len(loaded) > 1 else None)
+        _submit_one(card, a, {"n": i, "of": len(loaded)} if len(loaded) > 1 else None, threads[i - 1])
 
 
-def _submit_one(card, a, set_pos):
+def _submit_one(card, a, set_pos, thread=None):
     who = reach.capture(card.get("agent") or a.agent)
     if not who["session_id"]:
         # A card with no asker can never have its answer typed back: every reply would wait in an inbox. The way
@@ -138,6 +153,10 @@ def _submit_one(card, a, set_pos):
         "last_seen": None, "open_question": None, "decision": None, "done": None,
         "events": [], "outbox": [], "reach": None, "moves": [], "card_dirty": False,
     }
+    if slackapi.POST_AS:
+        rec["as"] = slackapi.POST_AS
+    if thread:
+        rec["thread"] = thread
     if set_pos:
         rec["set"] = set_pos
     bc = basecamp.entries(basecamp.urls(card.get("basecamp")) + (a.basecamp or []))
@@ -149,14 +168,19 @@ def _submit_one(card, a, set_pos):
     rec["thread_ts"] = ts
     rec["last_seen"] = ts
     link = slackapi.permalink(ts)
-    if bc:
-        rec["link"] = link
+    rec["link"] = link
     version["ts"] = ts
     store.event(rec, "submitted")
     core.tell_reviewer(rec, f"{rec['agent']} posted it for {core.who()}'s answer. Your read goes in its thread with "
                             f"`approvals note {rec['id']} --file <note.md>`; he may answer first, and nothing waits on it.")
     core.tell_deputy(rec, f"a {rec['type']} card from {rec['agent']}, posted for {core.who()}'s answer. {core.make_your_call(rec)}")
     store.save(rec)
+    if thread and thread.get("readable"):
+        try:
+            small_ts = slackapi.post(cards.small_blocks(rec), cards.card_text(rec, 1), thread_ts=thread["root_ts"], channel_id=thread["channel"])
+            store.update(rec["id"], lambda r: r["thread"].__setitem__("small_ts", small_ts))
+        except Exception as e:
+            print(f"Could not post in the linked Slack conversation ({e}); link the approval card there yourself.", file=sys.stderr)
     if cards.pictures(card):
         _share_pictures(rec["id"], 1)
         core.refresh_and_clear(rec["id"])
@@ -680,6 +704,13 @@ def cmd_purge_tests(a):
     for rec in store.all_records():
         if not rec.get("test") or (a.only and rec["id"] not in a.only):
             continue
+        source = rec.get("thread") or {}
+        for ts in ([source.get("small_ts")] + source.get("copied_ts", [])):
+            if ts:
+                try:
+                    slackapi.delete(ts, channel_id=source["channel"])
+                except Exception:
+                    pass
         if rec.get("thread_ts"):
             try:
                 for m in slackapi.replies(rec["thread_ts"]):
@@ -729,6 +760,7 @@ def main(argv=None):
 
     s = sub.add_parser("submit", help="post a new request, or several as a set; prints each number")
     s.add_argument("card", nargs="+", help="card JSON file, or - for stdin; several files post a set, each its own decision, showing '1 of 3'")
+    s.add_argument("--thread", help="Slack message link to the conversation this request follows")
     s.add_argument("--agent", help="your agent name, as the approver knows it (e.g. Monetization)")
     s.add_argument("--test", action="store_true", help=argparse.SUPPRESS)
     s.add_argument("--deadline-minutes", type=int, help=argparse.SUPPRESS)
@@ -873,8 +905,10 @@ def main(argv=None):
             config.use(config.choose(rid))
         except config.ConfigError as e:
             _die(str(e))
+    slackapi.POST_AS = None
     if a.cmd in POSTS:
         try:
+            slackapi.POST_AS = config.folder_sender()
             config.bot_token()
         except config.ConfigError as e:
             _die(f"This machine can't post the cards of the Slack workspace set up in {config.HOME}: {e}")

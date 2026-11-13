@@ -1,5 +1,6 @@
 """What happens to a request: decisions, replies, deadlines, card refreshes, messages to the agent."""
 import json
+import logging
 import secrets
 from datetime import datetime, timedelta
 
@@ -685,6 +686,12 @@ def refresh_cards(rec):
     latest = len(rec["versions"])
     mode = mode_for(rec)
     slackapi.update(rec["thread_ts"], cards.card_blocks(rec, latest, mode), cards.card_text(rec, latest))
+    source = rec.get("thread") or {}
+    if source.get("small_ts"):
+        try:
+            slackapi.update(source["small_ts"], cards.small_blocks(rec), cards.card_text(rec, latest), channel_id=source["channel"])
+        except Exception:
+            logging.getLogger(__name__).exception("source card refresh for %s failed", rec["id"])
     for v in rec["versions"]:
         if not v.get("copy_ts"):
             continue

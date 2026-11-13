@@ -509,10 +509,16 @@ def card_blocks(rec, n, mode="open"):
     blocks = _card_blocks(rec, n, mode)
     # Each fact gets a block of its own, for room between them; a card that would pass Slack's limit that way keeps
     # its facts in one block instead.
-    return blocks if len(blocks) <= BLOCKS_MAX else _card_blocks(rec, n, mode, compact=True)
+    if len(blocks) <= BLOCKS_MAX:
+        return blocks
+    blocks = _card_blocks(rec, n, mode, origin="link")
+    if len(blocks) <= BLOCKS_MAX:
+        return blocks
+    blocks = _card_blocks(rec, n, mode, origin=False)
+    return blocks if len(blocks) <= BLOCKS_MAX else _card_blocks(rec, n, mode, compact=True, origin=False)
 
 
-def _card_blocks(rec, n, mode, compact=False):
+def _card_blocks(rec, n, mode, compact=False, origin=True):
     card = rec["versions"][n - 1]["card"]
     blocks = [test_tag()] if rec.get("test") else []
     title = card["title"]
@@ -523,6 +529,8 @@ def _card_blocks(rec, n, mode, compact=False):
     frame = frame_line(rec, card)
     if frame:
         blocks.append(frame)
+    if origin:
+        blocks += origin_blocks(rec, include_quote=mode != "final" and origin != "link")
     if card.get("why"):
         blocks.append(md(f"*Why:* {esc(card['why'])}"))
     if n > 1 and card.get("changes"):
@@ -581,6 +589,88 @@ def frame_line(rec, card):
     else:
         head = [f"Part of: {esc(part_of)}"] if part_of else [] if pos else ["Stands alone"]
     return ctx(" · ".join(head + ([pos] if pos else []) + [esc(rec["agent"])]))
+
+
+def origin_blocks(rec, include_quote=True):
+    thread = rec.get("thread") or {}
+    if not thread.get("link"):
+        return []
+    name = (rec.get("as") or {}).get("name") or rec["agent"]
+    channel = thread.get("channel") or ""
+    where = f"in <#{channel}>" if channel[:1] in ("C", "G") else "in a direct message"
+    line = ctx(f"↩ From your thread with {esc(name)} {where} · <{thread['link']}|Open the thread>")
+    text = thread.get("text")
+    if include_quote and text:
+        return [line, md(("*You:*\n" if thread.get("approver") else "") + quoted(text))]
+    return [line]
+
+
+def _small_trim(text):
+    return text if len(text) <= 1900 else text[:1899] + "…"
+
+
+def small_blocks(rec):
+    n = len(rec["versions"])
+    card = rec["versions"][-1]["card"]
+    status = rec.get("status")
+    blocks = []
+    if status in ("pending", "question"):
+        blocks += [ctx("Needs your approval"), md(f"*{esc(card['title'])}*")]
+        quotes = card.get("quotes") or [q for part in card.get("parts") or [] for q in part.get("quotes") or []]
+        quote = next((q for q in quotes if q.get("edit")), None) or (quotes[0] if quotes else None)
+        if quote:
+            text = quote["text"]
+            text = text[:299].rstrip() + "…" if len(text) > 300 else text
+            blocks.append(md(quoted(text)))
+        blocks.append(ctx(_small_trim(f"Your approval covers {esc(card['approves'])}")))
+        if not any(card.get(shape) for shape in SHAPES):
+            row = [b for b in _buttons(rec, n) if b.get("value", "").rsplit("|", 1)[-1] in ("approve", "change", "edit", "decline")]
+            if row:
+                blocks.append({"type": "actions", "block_id": f"ap|{rec['id']}|{n}|small", "elements": row})
+    elif status == "revising":
+        blocks += [md(f"*{esc(card['title'])}*"), ctx(f"{esc(rec['agent'])} is changing it")]
+    else:
+        blocks += [md(f"*{esc(card['title'])}*"), ctx(_small_trim(_small_state(rec)))]
+        updates = [e for e in rec.get("timeline") or [] if e.get("text")]
+        if rec.get("done"):
+            updates.append(dict(rec["done"], kind="done"))
+        if updates:
+            latest = max(updates, key=lambda e: e["at"])
+            blocks.append(ctx(_small_trim(esc(latest["text"]))))
+    version = f" · version {n}" if n > 1 else ""
+    blocks.append(ctx(f"<{rec['link']}|{rec['id']}>{version} · The full card is in #approvals"))
+    return blocks
+
+
+def _small_state(rec):
+    d = rec.get("decision") or {}
+    who = esc(config.settings()["approver_name"])
+    status = rec.get("status")
+    if status == "done" and rec.get("done"):
+        return f"✅ Done by {esc(rec['agent'])}, {when(datetime.fromisoformat(rec['done']['at']))}"
+    if rec.get("taken_back"):
+        at = when(datetime.fromisoformat(rec["taken_back"]["at"]))
+        return f"↩️ Auto-approval taken back by {who}, {at}"
+    if auto_approved(rec):
+        at = when(datetime.fromisoformat(d["at"]))
+        return f"🤖 Approved for you by {esc(d['by'])}, {at}"
+    if status in ("approved", "declined"):
+        mark, verb = ("✅", "Picked" if d.get("choice") else "Approved") if status == "approved" else ("❌", "Declined")
+        at = when(datetime.fromisoformat(d["at"])) if d.get("at") else ""
+        line = f"{mark} {verb} by {who}, {at}"
+        items = rec["versions"][-1]["card"].get("items") or []
+        if d.get("items") is not None and items:
+            held = [item_name(it) for i, it in enumerate(items, 1) if i not in d["items"]]
+            line += f" · {len(d['items'])} of {len(items)}" + (f" · held back: {esc(', '.join(held))}" if held else "")
+        return line
+    if status == "expired":
+        return f"⌛ No answer by {when(datetime.fromisoformat(rec['deadline']))}, so not approved."
+    if status == "withdrawn":
+        w = rec.get("withdrawn") or {}
+        at = when(datetime.fromisoformat(w["at"])) if w.get("at") else ""
+        return (f"🗑️ Removed from your list by {who}, {at}. Nothing still waiting on it was approved." if removed(rec)
+                else f"↩️ Withdrawn by {esc(rec['agent'])}, {at}: {esc(w.get('text') or '')}")
+    return esc(status or "")
 
 
 def _replaced_blocks(rec, n):
@@ -853,6 +943,7 @@ def _final_blocks(rec, n):
     frame = frame_line(rec, card)
     if frame:
         blocks.append(frame)
+    blocks += origin_blocks(rec, include_quote=False)
     blocks += _timeline_blocks(rec, card)
     if card.get("offer") and _verdict(rec) == "approved":
         blocks += _offer_blocks(rec, n, card)

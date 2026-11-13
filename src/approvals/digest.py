@@ -218,7 +218,9 @@ def _tick(now, asked):
             "posted_at": store.iso(now), "updated_at": None,
         }
         blocks, text, content = render(new, records)
-        new["ts"] = slackapi.post(blocks, text)
+        sender = config.settings().get("list_as")
+        sender = config.sender(sender, "list_as") if sender is not None else None
+        new["ts"] = slackapi.post(blocks, text, sender=sender) if sender else slackapi.post(blocks, text)
         new["content"] = content
         _save_state(new)
         log.info("%s posted: %d waiting, %d closed with no answer", "morning list" if morning else "list asked for",
@@ -229,7 +231,7 @@ def _tick(now, asked):
             try:
                 rendered = summary(store.deputy(), eight - timedelta(days=1), records)
                 if rendered:
-                    slackapi.post(*rendered)
+                    slackapi.post(*rendered, sender=sender) if sender else slackapi.post(*rendered)
                     log.info("the deputy's summary posted")
             except Exception as e:
                 log.warning("the deputy's summary wasn't posted: %s", e)

@@ -47,7 +47,7 @@ def slack(monkeypatch):
     monkeypatch.setattr(slackapi, "upload_pictures_to_thread", lambda items, ts, comment: posts.append({"pictures": [str(p) for p, _ in items], "thread": ts})
                         or [{"id": f"F{next(n)}", "url": "https://slack/f"} for _ in items])
     monkeypatch.setattr(slackapi, "permalink", lambda ts: "https://slack/x")
-    monkeypatch.setattr(slackapi, "ephemeral", lambda user, text, thread_ts=None: posts.append({"ephemeral": text}))
+    monkeypatch.setattr(slackapi, "ephemeral", lambda user, text, thread_ts=None, channel_id=None: posts.append({"ephemeral": text}))
     monkeypatch.setattr(slackapi, "views_open", lambda trigger, view: posts.append({"view": view}))
     monkeypatch.setattr(slackapi, "views_update", lambda vid, view, h=None: posts.append({"view_update": view}))
     return posts
@@ -390,7 +390,7 @@ def press_payload(value, user=None, trigger="t1"):
 
 def submit_payload(meta, values, user=None):
     return {"type": "view_submission", "user": {"id": user or config.settings()["approver"]},
-            "view": {"callback_id": "approvals", "private_metadata": meta, "state": {"values": values}}}
+            "view": {"id": "V_TEST", "callback_id": "approvals", "private_metadata": meta, "state": {"values": values}}}
 
 
 def run(follow):
