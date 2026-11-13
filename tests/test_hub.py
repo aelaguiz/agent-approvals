@@ -218,3 +218,63 @@ def test_history_is_filtered_on_the_hub_so_only_matching_cards_cross(hubbox):
     assert [r["id"] for r in got] == ["AP-0003", "AP-0001"]
     assert [r["id"] for r in store.history_records(limit=1)] == ["AP-0003"]
     assert store.history_records(calls=True) == []
+
+
+def test_fork_families_survive_a_hub_round_trip(hubbox, capsys):
+    cli.main(["fork", "fork"])
+    before = config.FORKS.read_bytes()
+    cli.main(["fork", "fork", "--same-as", "missing"])
+    assert config.FORKS.read_bytes() == before
+    store.add_fork("another-fork", "fork")
+    assert store.forks() == {"fork": "fork", "another-fork": "fork"}
+    assert json.loads(config.FORKS.read_text()) == store.forks()
+    capsys.readouterr()
+    cli.main(["fork"])
+    assert capsys.readouterr().out.splitlines() == ["another-fork fork", "fork fork"]
+
+
+def test_fork_reads_from_the_hub_are_cached_for_15_seconds(hubbox, monkeypatch):
+    now = [100.0]
+    monkeypatch.setattr(store.time, "monotonic", lambda: now[0])
+    calls, call = [], hub.Client.call
+    def counted(self, method, path, body=None):
+        calls.append((method, path))
+        return call(self, method, path, body)
+    monkeypatch.setattr(hub.Client, "call", counted)
+    assert store.forks() == store.forks() == {}
+    assert calls == [("GET", "/forks")]
+    store.add_fork("fork")
+    assert store.forks() == {"fork": "fork"}
+    assert calls == [("GET", "/forks"), ("PUT", "/forks")]
+    now[0] += 15
+    assert store.forks() == {"fork": "fork"}
+    assert calls[-1] == ("GET", "/forks") and len(calls) == 3
+
+
+def test_peek_counts_on_the_hub_in_one_call_without_handing_answers_out(hubbox, monkeypatch, capsys):
+    store.add_fork("fork")
+    store.add_fork("earlier-fork", "fork")
+    rec = make_rec(SAMPLES["money"], reach={"session_id": "fork", "earlier_ids": ["earlier-fork", "lead"]})
+    for text in ("waiting", "delivered", "seen"):
+        core.enqueue(rec, "feedback", text)
+    rec["outbox"][1]["delivered_at"] = store.iso()
+    rec["outbox"][2]["seen_by_agent"] = True
+    core.enqueue(rec, "feedback", "review this", to="reviewer")
+    core.enqueue(rec, "feedback", "make a call", to="deputy")
+    store.save(rec)
+    store.set_reviewer({"reach": {"session_id": "reviewer"}})
+    store.set_deputy({"reach": {"session_id": "deputy"}})
+    before = config.REQUESTS.joinpath(rec["id"] + ".json").read_bytes()
+    calls, call = [], hub.Client.call
+
+    def counted(self, method, path, body=None):
+        calls.append((method, path))
+        return call(self, method, path, body)
+    monkeypatch.setattr(hub.Client, "call", counted)
+    monkeypatch.setattr(reach, "capture", lambda *a: pytest.fail("peek captured the caller instead of the named session"))
+    for sid, count in (("fork", 1), ("earlier-fork", 1), ("lead", 0), ("reviewer", 1), ("deputy", 1), ("absent", 0)):
+        calls.clear()
+        cli.main(["inbox", "--peek", "--session", sid])
+        assert capsys.readouterr().out == f"{count}\n"
+        assert calls == [("GET", f"/inbox?session={sid}")]
+        assert config.REQUESTS.joinpath(rec["id"] + ".json").read_bytes() == before

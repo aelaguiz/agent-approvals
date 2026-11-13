@@ -2,7 +2,7 @@
 
 ## Unit tests
 
-`make test` runs 235 tests, with no network. They cover:
+`make test` runs the unit tests without external network access; hub tests use a temporary localhost server. They cover:
 - every card type rendering, required fields, escaping;
 - 20 processes submitting at once and getting distinct numbers;
 - the first button press winning, and old versions refusing;
@@ -10,6 +10,7 @@
 - routing decisions with fake `herdr` and `aim`: live pane, focused pane (sent straight away), a closed session left alone with its answer waiting (and resumed only when a caller asks, as agent-email does), moved session, a different session in the pane, an already delivered message, another machine, this machine under a changed name;
 - sessions stopped at their usage limit: the answer goes to a session continuing the work, nothing is typed into the stopped one or into the usage-limit menu, and a resume that lands on that menu closes its pane;
 - continuations and moved copies against real transcript files, including copies whose session ids were rewritten;
+- fork families: matching histories never let a registered fork and an unregistered lead (including a moved lead), or two different fork families, receive each other's answers; a fork's own cards still reach it, and a later id takes its answers only after registration in the same family; inbox claims, earlier ids, reach updates and repointing keep the same separation, while two unregistered sessions and an operator's `inbox --all` keep their existing behavior; idempotent registration, workspace isolation, the 15-second registry cache and hub round trips; inbox peek counts waiting asker and role messages in one hub call without collecting any;
 - new versions: approvable after an earlier yes, refused after a decline, announced in the channel, posted once with the old version never posted again, an older copy shrunk to a line that opens it, the new card linking back, and the older version's line in the channel taken down; answers: verdict first in bold, the card handed back with no new version, nothing changed on an approved card; any post of the agent's counting as its acknowledgement; a card waiting on someone else shown on its face and kept off the morning list; the why line required; rows named by id; a card too long for a block per fact keeping its facts together; withdrawn cards;
 - evidence: one block of text is one post, and files named in evidence are uploaded;
 - an approved card whose question was answered recorded as approved again so it can be marked done, while a second press still counts once; `approvals repoint` handing a saved session's open cards to the session running now, and leaving finished cards and other sessions' cards alone;
@@ -85,7 +86,7 @@ Each card is screenshotted in desktop Slack and compared with its mock in psbrai
 
 The question is whether, with many agents and many requests open at once, every answer reaches the session that asked, exactly once, and no other. A request's routing comes from the session that submitted it. Every command the agent runs refreshes it, and the service changes it when it resumes or finds a session.
 
-**The rule these cases enforce.** Another session counts as the asker only if it is a copy of the asker: AI Manager moved it to another account (same first prompt), and its history contains the request number. Tomorrow's run of a scheduled agent, a second agent in the same folder, and a sub-agent may all start the same way, but none of them made this request.
+**The rule these cases enforce.** Another session counts as the asker only when their fork families are equal (two unregistered sessions both have none) and it is a moved copy or a continuation. A moved copy has the same first prompt and reply and holds the request number; a continuation's opening summary names the earlier transcript. A registered fork and a session outside its family cannot take, receive or redirect each other's answers, including through inbox claims by agent name. Within one family, and between two unregistered sessions, the existing behavior stays the same. An operator's explicit `inbox --all` stays the same too.
 
 | # | Case | Must happen | Proved by |
 | --- | --- | --- | --- |
@@ -100,6 +101,9 @@ The question is whether, with many agents and many requests open at once, every 
 | R9 | The agent is mid-task when its answer arrives | It lands, and the agent acts on it after the task | Live L4 |
 | R10 | The service restarts between sending and recording | Nothing is sent twice | Unit (passed October 18) |
 | R11 | A later run of the same agent checks its inbox while the earlier run is running and its answer is being delivered, and reads that request | It isn't handed the answer and doesn't count as the asker; the earlier run is told. It gets the answer only when the service isn't delivering it: the earlier run isn't running, or delivery failed. | Unit + live L1 (found live on October 18: the later run took the answer) |
+| R12 | A registered fork and its lead, including a moved lead, share their opening and request numbers | Neither receives, collects or redirects the other's answers; different fork families stay separate too | Unit |
+| R13 | A fork moves or continues under a later session id | It receives the fork's answers after `fork <new> --same-as <earlier>` registers it in the same family, provided the usual transcript checks pass | Unit |
+| R14 | A launcher's idle check runs `inbox --peek --session <id>` | One hub call prints the count for that recorded id and changes no answer | Unit |
 
 **Acknowledgements.** These checks run on every answer in every live test:
 - **A1:** the agent posts an acknowledgement in the thread, in its own words, before it acts. Its transcript shows `approvals ack` before the action.
@@ -128,6 +132,28 @@ A test hub must not connect to Slack: a second connection with the workspace's a
 **Clean-up:** `approvals purge-tests --only <ids>` with the test folder's settings, then stop both services, close the agent and any Herdr session the test started, and delete the scratch folders.
 
 ## Results
+
+### November 13, 2026: fork families
+
+Unit tests: 287 of 287. The family checks cover live delivery and resuming, inbox claims by recorded id, earlier id, transcript history and agent name, reach changes and repointing. The reviewer's and the deputy's roles are untouched: no fork of either exists. Tests also cover registration, workspace isolation, the 15-second cache and one-call inbox peek without collecting answers. Unregistered sessions and an operator's `inbox --all` keep their existing behavior. The live run is below it in this section once made.
+
+### November 13, 2026: a card's sender, and the thread it came from
+
+Unit tests: 262 of 262. Then a live run in the real approvals channel, with TEST cards posted from a Claude session in a folder that has a `.approvals.json`, the hub running the published commit.
+
+| Check | Result |
+| --- | --- |
+| The sender | Pass. The card, the agent's acknowledgement and the new-version notice read back from Slack with the folder's name and picture; buttons and the record were unchanged. Slack returns these posts without a `user`, as bot messages with a `username`. |
+| The thread on the card | Pass for a thread started by an app: the card showed "From your thread with ... in #channel" and the link, with no quote, since no person wrote the linked message. The quote of a person's message is covered by the unit tests only. |
+| The small card | Pass. It was posted in the named thread under the asker's sender, with the card's title, its editable quote, what a yes covers and the card's own three buttons. |
+| A press on the small card | Pass. A real press by the approver, in a thread in a channel he is a member of, was logged by the hub as a click on the card, approved it, was typed into the asking session, and redrew the small card to approved; after `approvals done` it showed the done line. In a channel the approver only previews, Slack draws the buttons but disables them, so a small card there can be read and not pressed. |
+| A reply on the card, copied into the thread | Pass, with the stand-in approver's `[test reply]`: about 10 seconds after the reply the thread held "💬 ..., on the card in #channel" and the quoted words, once, and the reply was typed into the asking session. |
+| A new version | Pass. `approvals revise` redrew the small card in place with the new words and "version 2". |
+| Clean-up | `approvals purge-tests --only` removed the cards, the small cards and the copied reply. It left the new-version notice in the channel, which was deleted by hand; a card posted before the hub restarted onto this commit lost its channel post, not seen again. |
+
+Found by the live run and changed: the small card kept its buttons after a reply put the card back with its agent, because the card itself isn't redrawn for a reply; the small card is now redrawn when a reply is copied.
+
+Not seen live: the quote of a person's message, a thread the app can't read (a direct message with another app), and `list_as` on the morning list, which posts the next morning.
 
 ### November 12, 2026: the deputy
 

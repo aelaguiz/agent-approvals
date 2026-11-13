@@ -5,6 +5,8 @@ import os
 import re
 from pathlib import Path
 
+from . import store
+
 HOME = Path.home()
 
 
@@ -195,6 +197,8 @@ def is_copy(runtime, asker, candidate, request_id):
         return False
     if candidate == asker:
         return True
+    if not store.same_family(asker, candidate):
+        return False
     if _moved_copy(runtime, asker, candidate, request_id):
         return True
     if runtime != "claude":

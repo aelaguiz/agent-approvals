@@ -108,6 +108,10 @@ approvals status AP-0001 "Brazil live; Mexico waiting for Google's review" --nex
 approvals status AP-0001 --part-of "Prices that fit each country"                    # set what a posted card belongs to, in place
 approvals done AP-0001 "Set both prices; read them back from the store"
 approvals inbox --agent "Pricing"              # answers that came while the agent wasn't running, or couldn't be typed in
+approvals inbox --peek --session <session id>  # prints only the number waiting for this recorded session; hands nothing out
+approvals fork <session id>                    # register a new fork, whose family is its first session id
+approvals fork <new session id> --same-as <earlier session id>  # keep a moved or continued fork in its family
+approvals fork                                # list registered ids, one session and family per line
 approvals record AP-0001 --approved --words "yes do it" --where "phone call"   # also after an answered question that lets it go ahead as it stands
 approvals repoint <old session> <new session>   # a launcher that starts an agent again in a fresh session (a pod restore) hands it the old one's open cards
 approvals list --open
@@ -122,6 +126,8 @@ approvals pictures AP-0001                     # saves the newest version's pict
 ```
 
 The name a card and its replies show is `--agent`, unless whatever started the agent set `APPROVALS_FROM` (a team's launcher, say "AI pod · lead"): that wins, so the approver can always tell which team and member sent it.
+
+Whatever creates a fork registers it in the workspace's folder and registers each later session id with `--same-as` when it moves or continues. A registered fork cannot collect or redirect answers belonging to an unregistered session or another fork family, even when their histories and agent names match. Within one family, the usual copy and continuation checks still apply; two unregistered sessions behave as before. Registry reads are cached for 15 seconds. `inbox --peek --session` asks the hub for a count without collecting answers; an operator's `inbox --all` still collects all waiting asker answers.
 
 ### The sender's name and picture
 
@@ -154,6 +160,7 @@ A card is JSON. [skills/approvals/references/cards.md](skills/approvals/referenc
 - **The list:** the newest list's message and what it lists, in `~/.approvals/digest.json`, on the hub.
 - **The reviewer:** which session reviews which card types, in `~/.approvals/reviewer.json`, on the hub.
 - **The deputy:** which session it is and whether auto-approval is on, in `~/.approvals/deputy.json`, on the hub.
+- **Fork families:** each registered session and its first fork session id, in `~/.approvals/forks.json`, on the hub.
 - **Restart the service:** `launchctl kickstart -k gui/$(id -u)/com.agent-approvals.listener`, or `systemctl --user restart agent-approvals` on Linux.
 - Another workspace's records, log and service are the same paths in its own folder, and `com.agent-approvals.listener.<folder name>`.
 

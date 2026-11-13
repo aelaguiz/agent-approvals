@@ -6,7 +6,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 
-from . import config, transcripts
+from . import config, store, transcripts
 
 CONFIRM_SECONDS = 90
 READY_SECONDS = 180
@@ -180,7 +180,8 @@ def find_pane_for_pid(pid, first_session=None, run=subprocess.run):
 def already_delivered(reach, ref):
     runtime = reach.get("runtime")
     ids = [reach.get("session_id")] + list(reach.get("earlier_ids", []))
-    return any(transcripts.contains(transcripts.transcript(runtime, i), ref) for i in ids if i)
+    return any(transcripts.contains(transcripts.transcript(runtime, i), ref)
+               for i in ids if i and store.same_family(reach.get("session_id"), i))
 
 
 def live_askers(reach, request_id, run=subprocess.run):
@@ -313,6 +314,9 @@ def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sl
         else:
             return Result("retry", "the resumed session didn't come up: " + h.read(pane, 8)[-300:], moves=moves,
                           reach={"herdr_session": h.session, "herdr_pane": pane, "herdr_tab": tab, "herdr_workspace": workspace})
+        if real and not store.same_family(target, real):
+            h.close(pane)
+            return Result("waiting", "the resumed session belongs to a different fork family")
         if real and real != target:
             moves.append([target, real])
         sid = real or target

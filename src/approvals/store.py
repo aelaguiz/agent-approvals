@@ -10,6 +10,8 @@ import hashlib
 import json
 import os
 import tempfile
+import threading
+import time
 from datetime import datetime, timezone
 
 from . import config
@@ -17,6 +19,8 @@ from . import config
 STATUSES = {"pending", "question", "revising", "approved", "declined", "expired", "done"}
 OPEN = {"pending", "question", "revising", "expired", "approved"}  # threads still watched for replies
 UPDATE_TRIES = 20
+_fork_cache = {}
+_fork_cache_lock = threading.RLock()
 
 
 class StoreError(RuntimeError):
@@ -136,6 +140,38 @@ def set_deputy(d):
         h.set_deputy(d)
     else:
         local_set_deputy(d)
+
+
+def forks():
+    """The workspace's registered session ids and their fork families."""
+    with _fork_cache_lock:
+        key = str(config.HOME)
+        cached = _fork_cache.get(key)
+        now = time.monotonic()
+        if cached is None or now - cached[0] >= 15:
+            h = hub_client()
+            cached = (now, h.forks() if h else local_forks())
+            _fork_cache[key] = cached
+        return dict(cached[1])
+
+
+def add_fork(fork, same_as=None):
+    h = hub_client()
+    family = h.add_fork(fork, same_as) if h else local_add_fork(fork, same_as)
+    with _fork_cache_lock:
+        cached = _fork_cache.get(str(config.HOME))
+        if cached:
+            cached[1][fork] = family
+
+
+def same_family(first, second):
+    families = forks()
+    return families.get(first) == families.get(second)
+
+
+def inbox_count(session_id):
+    h = hub_client()
+    return h.inbox_count(session_id) if h else local_inbox_count(session_id)
 
 
 def waiting(rec):
@@ -273,3 +309,34 @@ def local_deputy():
 
 def local_set_deputy(d):
     _write_role(config.DEPUTY, d)
+
+
+def local_forks():
+    return _read_role(config.FORKS) or {}
+
+
+def local_add_fork(fork, same_as=None):
+    with locked():
+        families = local_forks()
+        if fork not in families:
+            if same_as and same_as not in families:
+                raise StoreError(f"No fork is registered as {same_as}")
+            families[fork] = families[same_as] if same_as else fork
+            _write_role(config.FORKS, families)
+        return families[fork]
+
+
+def local_inbox_count(session_id):
+    """Count undelivered answers for a recorded session id without handing any out."""
+    families = local_forks()
+    roles = {to: bool(role) and session_id == role["reach"].get("session_id")
+             for to, role in (("reviewer", local_reviewer()), ("deputy", local_deputy()))}
+    count = 0
+    for rec in local_all():
+        r = rec.get("reach") or {}
+        own = (session_id in [r.get("session_id"), *r.get("earlier_ids", [])]
+               and families.get(r.get("session_id")) == families.get(session_id))
+        count += sum(1 for i in rec.get("outbox", [])
+                     if not i.get("delivered_at") and not i.get("seen_by_agent")
+                     and (roles.get(i["to"], False) if i.get("to") else own))
+    return count

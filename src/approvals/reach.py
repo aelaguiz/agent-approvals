@@ -75,7 +75,7 @@ def take_over(rec, old, new):
     from a save starts each member in a new session that carries none of the old one's history, so nothing else can
     tell they are the same agent. Returns False when the record's answers don't go to `old`."""
     r = rec.get("reach") or {}
-    if r.get("session_id") != old:
+    if r.get("session_id") != old or not store.same_family(old, new["session_id"]):
         return False
     ids = [i for i in r.get("earlier_ids", []) if i != new["session_id"]]
     if old not in ids:

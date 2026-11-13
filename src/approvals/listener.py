@@ -285,6 +285,11 @@ class Listener:
                 r["thread"].setdefault("copied_keys", []).append(key)
                 r["thread"].setdefault("copied_ts", []).append(ts)
             store.update(rec["id"], saved)
+            # His reply puts the card back with its agent; the card itself isn't redrawn for that, the small card is,
+            # so the thread doesn't show buttons above the words that just overtook them.
+            now = store.load(rec["id"])
+            slackapi.update(source["small_ts"], cards.small_blocks(now), cards.card_text(now, len(now["versions"])),
+                            channel_id=source["channel"])
         except Exception as e:
             log.warning("copying reply to source for %s failed: %s", rec["id"], e)
 

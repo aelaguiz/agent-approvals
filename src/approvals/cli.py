@@ -413,7 +413,7 @@ def cmd_repoint(a):
     if reach.running(a.old):
         _die(f"Session {a.old} is still running, so its answers stay with it; nothing was changed.")
     homes = [config.HOME] if os.environ.get("APPROVALS_HOME") else config.homes()
-    moved = []
+    moved, blocked = [], []
     for home in homes:
         config.use(home)
         try:
@@ -421,6 +421,9 @@ def cmd_repoint(a):
             config.bot_token()
         except config.ConfigError:
             continue   # a workspace this machine can't serve has no cards from it
+        if not store.same_family(a.old, a.new):
+            blocked.append(str(home))
+            continue
         for rec in store.all_records():
             if rec["status"] in store.OPEN and (rec.get("reach") or {}).get("session_id") == a.old:
                 if store.update(rec["id"], lambda r: reach.take_over(r, a.old, new)):
@@ -433,8 +436,12 @@ def cmd_repoint(a):
         if d and d["reach"].get("session_id") == a.old:   # and the deputy's
             store.set_deputy(dict(d, reach=dict(new, agent=d["reach"].get("agent"))))
             moved.append("the deputy's role")
-    print(f"Answers to {', '.join(moved)} now go to session {a.new}." if moved else
-          f"No open request was waiting on session {a.old}.")
+    if moved:
+        print(f"Answers to {', '.join(moved)} now go to session {a.new}.")
+    elif not blocked:
+        print(f"No open request was waiting on session {a.old}.")
+    if blocked:
+        print(f"Sessions {a.old} and {a.new} belong to different fork families in {', '.join(blocked)}; nothing there was changed.")
 
 
 def cmd_review(a):
@@ -637,11 +644,24 @@ def cmd_pictures(a):
         print(f"video: {url}")
 
 
+def cmd_fork(a):
+    if a.fork:
+        store.add_fork(a.fork, a.same_as)
+    families = store.forks()
+    for fork, family in sorted(families.items()):
+        print(f"{fork} {family}")
+    if not families:
+        print("No forks registered.")
+
+
 def cmd_inbox(a):
     """Answers not typed into their asker's session: ones that came while it wasn't running, and ones the
     service can't type in. Each answer goes to exactly one session: the asker gets anything not yet delivered;
     another run of the same agent gets only answers the service isn't delivering, and taking one here stops the
     service from delivering it too."""
+    if getattr(a, "peek", False):
+        print(store.inbox_count(a.session))
+        return
     me = reach.capture(a.agent)
     shown = 0
     roles = {to: bool(role and me.get("session_id")) and me["session_id"] == role["reach"].get("session_id")
@@ -667,11 +687,12 @@ def cmd_inbox(a):
         return taken
     for rec in store.waiting_records():
         r = rec.get("reach") or {}
-        own = bool(me.get("session_id")) and me["session_id"] in [r.get("session_id"), *r.get("earlier_ids", [])]
+        same_family = store.same_family(r.get("session_id"), me.get("session_id"))
+        own = bool(me.get("session_id")) and same_family and me["session_id"] in [r.get("session_id"), *r.get("earlier_ids", [])]
         waiting = any(not i.get("delivered_at") and not i.get("seen_by_agent") for i in rec.get("outbox", []))
         if not own and waiting and me.get("session_id") and me.get("runtime") == r.get("runtime") and me.get("cwd") == r.get("cwd"):
             own = transcripts.is_copy(r.get("runtime"), r.get("session_id"), me["session_id"], rec["id"])   # it continues the asker
-        theirs = own or a.all or r.get("agent") == me["agent"]
+        theirs = a.all or (same_family and (own or r.get("agent") == me["agent"]))
         if theirs or any(roles.values()):
             taken = store.update(rec["id"], lambda x, own=own, theirs=theirs: take(x, own or a.all, theirs))
             if taken and rec.get("basecamp"):
@@ -714,7 +735,7 @@ def cmd_purge_tests(a):
         if rec.get("thread_ts"):
             try:
                 for m in slackapi.replies(rec["thread_ts"]):
-                    if m.get("user") == slackapi.bot_user() or m["ts"] == rec["thread_ts"]:
+                    if m.get("user") == slackapi.bot_user() or (m.get("bot_id") and m.get("bot_id") == slackapi.bot_id()) or m["ts"] == rec["thread_ts"]:
                         try:
                             slackapi.delete(m["ts"])
                         except Exception:
@@ -829,7 +850,14 @@ def main(argv=None):
     s = sub.add_parser("inbox", help="answers waiting for you")
     s.add_argument("--agent")
     s.add_argument("--all", action="store_true")
+    s.add_argument("--peek", action="store_true", help="print only the count, without handing answers out; requires --session")
+    s.add_argument("--session", help="the session whose waiting answers to count, with --peek")
     s.set_defaults(fn=cmd_inbox)
+
+    s = sub.add_parser("fork", help="register a fork session; alone, list the families")
+    s.add_argument("fork", nargs="?", help="the fork's session id")
+    s.add_argument("--same-as", help="an earlier session id of this fork")
+    s.set_defaults(fn=cmd_fork)
 
     s = sub.add_parser("repoint", help="send the answers of every open request asked from session OLD to session NEW, which has taken over its work (a pod restore runs this)")
     s.add_argument("old")
@@ -899,6 +927,10 @@ def main(argv=None):
     s.set_defaults(fn=cmd_role)
 
     a = p.parse_args(argv)
+    if a.cmd == "fork" and a.same_as and not a.fork:
+        p.error("fork --same-as needs a fork session id")
+    if a.cmd == "inbox" and bool(a.peek) != bool(a.session):
+        p.error("inbox --peek requires --session; --session is only for --peek")
     if not os.environ.get("APPROVALS_HOME"):   # the services and tests name their folder
         rid = getattr(a, "id", None) or (getattr(a, "only", None) or [None])[0]
         try:

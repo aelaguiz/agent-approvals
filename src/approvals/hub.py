@@ -92,6 +92,15 @@ class Client:
     def health(self):
         return self.call("GET", "/health")[1]
 
+    def forks(self):
+        return self.call("GET", "/forks")[1]["forks"]
+
+    def add_fork(self, fork, same_as=None):
+        return self.call("PUT", "/forks", {"fork": fork, "same_as": same_as})[1]["family"]
+
+    def inbox_count(self, session_id):
+        return self.call("GET", "/inbox?" + urlencode({"session": session_id}))[1]["count"]
+
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -137,6 +146,15 @@ class Handler(BaseHTTPRequestHandler):
                 if method == "PUT":
                     store.local_set_deputy(self._body()["deputy"])
                     return self._send(200, {})
+            if parts == ["forks"]:
+                if method == "GET":
+                    return self._send(200, {"forks": store.local_forks()})
+                if method == "PUT":
+                    body = self._body()
+                    family = store.local_add_fork(body["fork"], body.get("same_as"))
+                    return self._send(200, {"family": family})
+            if method == "GET" and parts == ["inbox"]:
+                return self._send(200, {"count": store.local_inbox_count(q["session"][0])})
             if parts == ["records"]:
                 if method == "GET":
                     recs = store.local_all()

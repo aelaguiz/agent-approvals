@@ -130,6 +130,15 @@ def test_closed_session_is_resumed_then_told(reach, world):
     assert fake.sent_to("w1:p9") and res.reach["herdr_pane"] == "w1:p9"
 
 
+def test_resume_does_not_send_when_it_opens_a_different_fork_family(reach, world):
+    store.add_fork("fork")
+    world.pid_sid = {4242: "fork"}
+    fake = FakeHerdr(panes={})
+    res = run(world, fake, reach)
+    assert res.status == "waiting" and not res.moves
+    assert ["pane", "close", "w1:p9"] in fake.calls and not fake.sent_to("w1:p9")
+
+
 def test_R3_a_different_session_in_the_pane_is_not_prompted(reach, world):
     world.pid_sid = {1: "someone-else", 4242: "sid-1"}
     fake = FakeHerdr(panes={"w1:p1": {"focused": False}}, procs={"w1:p1": [{"pid": 1}]})

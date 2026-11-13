@@ -232,6 +232,12 @@ def bot_user():
     return client().auth_test()["user_id"]
 
 
+@functools.lru_cache(maxsize=1)
+def bot_id():
+    """A post made under a sender's name comes back from Slack with no user, only the app's bot id."""
+    return client().auth_test().get("bot_id")
+
+
 def share_video(path, title, description):
     """Publish a video with the configured share command and return the page that plays it, or None if none is set."""
     cmd = config.settings().get("video_share_command")
