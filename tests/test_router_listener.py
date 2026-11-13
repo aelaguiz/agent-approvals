@@ -130,6 +130,39 @@ def test_closed_session_is_resumed_then_told(reach, world):
     assert fake.sent_to("w1:p9") and res.reach["herdr_pane"] == "w1:p9"
 
 
+@pytest.mark.parametrize("shell", ["zsh", "-bash", "sh", "fish"])
+def test_closed_session_reuses_its_shell_pane(reach, world, shell):
+    world.pid_sid = {4242: "sid-1"}
+    reach.update(herdr_workspace="old-workspace", herdr_tab="old-tab")
+    fake = FakeHerdr(panes={"w1:p1": {"tab_id": "w1:t1", "workspace_id": "w1"}},
+                     procs={"w1:p1": [{"pid": 1, "name": shell}]})
+    res = run(world, fake, reach)
+    assert res.status == "delivered" and fake.resumes()[0][2] == "w1:p1"
+    assert fake.sent_to("w1:p1")
+    assert not [c for c in fake.calls if c[:2] in (["tab", "create"], ["workspace", "create"])]
+    assert {k: res.reach[k] for k in ("herdr_session", "herdr_pane", "herdr_workspace", "herdr_tab")} == {
+        "herdr_session": "brain", "herdr_pane": "w1:p1", "herdr_workspace": "w1", "herdr_tab": "w1:t1"}
+
+
+def test_closed_session_opens_a_tab_when_its_pane_is_busy(reach, world):
+    world.pid_sid = {4242: "sid-1"}
+    fake = FakeHerdr(panes={"w1:p1": {"tab_id": "w1:t1", "workspace_id": "w1"}},
+                     procs={"w1:p1": [{"pid": 1, "name": "vim"}]})
+    res = run(world, fake, reach)
+    assert res.status == "delivered" and fake.resumes()[0][2] == "w1:p9"
+    assert [c for c in fake.calls if c[:2] == ["tab", "create"]]
+    assert not [c for c in fake.calls if c[:2] == ["workspace", "create"]]
+
+
+def test_closed_session_names_a_new_workspace_for_its_agent(reach, world):
+    world.pid_sid = {4242: "sid-1"}
+    fake = FakeHerdr(workspaces=())
+    res = run(world, fake, reach)
+    assert res.status == "delivered" and fake.resumes()[0][2] == "w7:p1"
+    assert [c for c in fake.calls if c[:2] == ["workspace", "create"]] == [
+        ["workspace", "create", "--cwd", "/tmp/x", "--label", "approvals-Tester", "--no-focus"]]
+
+
 def test_resume_does_not_send_when_it_opens_a_different_fork_family(reach, world):
     store.add_fork("fork")
     world.pid_sid = {4242: "fork"}

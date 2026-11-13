@@ -276,15 +276,20 @@ def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sl
         label = f"{prefix}-{reach.get('agent', 'agent')}"[:40]
         cwd = reach.get("cwd") or str(config.HOME)
         try:
-            if workspace and workspace in h.workspaces():
+            recorded = reach.get("herdr_pane")
+            if (hs == reach.get("herdr_session") and recorded and (info := h.pane(recorded))
+                    and (procs := h.procs(recorded))
+                    and all((p.get("name") or "").removeprefix("-") in ("zsh", "bash", "sh", "fish") for p in procs)):
+                pane, tab, workspace = recorded, info["tab_id"], info["workspace_id"]
+            elif workspace and workspace in h.workspaces():
                 pane, tab, workspace = h.new_tab(workspace, cwd, label)
             else:
-                pane, tab, workspace = h.new_workspace(cwd, prefix)
+                pane, tab, workspace = h.new_workspace(cwd, label)
         except HerdrError as e:
             h = Herdr(default, run=run)
             try:
                 ensure_herdr(default, run=run, popen=popen, sleep=sleep)
-                pane, tab, workspace = h.new_workspace(cwd, prefix)
+                pane, tab, workspace = h.new_workspace(cwd, label)
             except HerdrError:
                 return Result("retry", f"couldn't open a Herdr pane: {e}", moves=moves)
         resume = "aim claude resume" if runtime == "claude" else "aim codex resume"
