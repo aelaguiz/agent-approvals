@@ -41,6 +41,13 @@ def contains(path, needle):
         return needle.encode() in f.read()
 
 
+def typed(path, ref):
+    """Whether the message typed with this ref shows in the transcript. A typed message ends "(ref <ref>)"; the ref's
+    six characters alone turn up by chance inside the ids and hashes a long transcript is full of, which marked
+    messages delivered that were never typed."""
+    return contains(path, f"(ref {ref})")
+
+
 def claude_session_for_pid(pid):
     """Claude writes <config dir>/sessions/<pid>.json naming the session the process is running."""
     for d in claude_config_dirs():

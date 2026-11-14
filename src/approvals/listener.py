@@ -526,7 +526,7 @@ class Listener:
         """A message typed into a session is delivered once it shows up in the session's transcript, which is when
         the agent takes it in. One that doesn't within TYPED_SECONDS is tried again later, as a failed one is."""
         for key, (runtime, sid, at) in list(self.awaiting.items()):
-            if transcripts.contains(transcripts.transcript(runtime, sid), key[1]):
+            if transcripts.typed(transcripts.transcript(runtime, sid), key[1]):
                 res = router.Result("delivered", "seen in the transcript")
             elif time.monotonic() - at >= core.TYPED_SECONDS:
                 res = router.Result("retry", "sent, but not seen in the transcript yet")

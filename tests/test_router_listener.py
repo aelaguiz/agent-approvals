@@ -477,3 +477,11 @@ def test_a_later_run_of_the_same_job_takes_an_answer_waiting_for_a_run_that_stop
     cli.main(["inbox", "--agent", "Tester"])
     assert "Amir approved it" in capsys.readouterr().out
     assert store.load("AP-0001")["outbox"][0]["claimed_by"] == "run-2"
+
+
+def test_a_ref_found_by_chance_inside_a_longer_id_is_not_a_delivery(tmp_path):
+    t = tmp_path / "t.jsonl"
+    t.write_text('{"uuid": "0f4d77abc1239e5b"}\n')
+    assert transcripts.contains(str(t), "abc123") and not transcripts.typed(str(t), "abc123")
+    t.write_text('{"content": "[Approvals] AP-0001 was approved (ref abc123)"}\n')
+    assert transcripts.typed(str(t), "abc123")

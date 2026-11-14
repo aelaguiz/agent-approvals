@@ -180,7 +180,7 @@ def find_pane_for_pid(pid, first_session=None, run=subprocess.run):
 def already_delivered(reach, ref):
     runtime = reach.get("runtime")
     ids = [reach.get("session_id")] + list(reach.get("earlier_ids", []))
-    return any(transcripts.contains(transcripts.transcript(runtime, i), ref)
+    return any(transcripts.typed(transcripts.transcript(runtime, i), ref)
                for i in ids if i and store.same_family(reach.get("session_id"), i))
 
 
@@ -334,7 +334,7 @@ def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sl
         return Result("sent", "typed in", reach=updates, moves=moves)
     start = clock()
     while clock() - start < CONFIRM_SECONDS:
-        if transcripts.contains(transcripts.transcript(runtime, sid), ref):
+        if transcripts.typed(transcripts.transcript(runtime, sid), ref):
             return Result("delivered", "seen in the transcript", reach=updates, moves=moves)
         sleep(3)
     return Result("retry", "sent, but not seen in the transcript yet", reach=updates, moves=moves)

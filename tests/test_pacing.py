@@ -187,7 +187,7 @@ def test_a_typed_message_is_delivered_once_it_shows_up_in_the_transcript(monkeyp
     monkeypatch.setattr(listener.transcripts, "contains", lambda path, ref: ref in seen)
     L.confirm_typed()
     assert store.load("AP-0001")["outbox"][0]["delivered_at"] is None and L.awaiting
-    seen.add(first)
+    seen.add(f"(ref {first})")
     L.confirm_typed()
     item = store.load("AP-0001")["outbox"][0]
     assert item["delivered_at"] and not L.awaiting and ("📨", "5.0") in typed
