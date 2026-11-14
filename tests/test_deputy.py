@@ -486,14 +486,15 @@ def test_a_set_taken_back_shows_its_rows_not_approved(monkeypatch, slack):
 
 def test_the_morning_list_crosses_an_auto_approved_card_off_as_auto_approved(monkeypatch, slack):
     posted, updated = [], []
+    now = datetime.now(timezone.utc).replace(hour=9, minute=0, second=0, microsecond=0)
     monkeypatch.setattr(digest.slackapi, "post", lambda blocks, text: posted.append(blocks) or "100.1")
     monkeypatch.setattr(digest.slackapi, "update", lambda ts, blocks, text: updated.append(blocks))
     monkeypatch.setattr(digest.slackapi, "message_url", lambda ts: f"https://x.slack.com/p{ts}")
     card()
     card("AP-0002")
-    digest.tick()
+    digest.tick(now)
     auto_approved(monkeypatch)
-    digest.tick()
+    digest.tick(now)
     assert "🤖 Auto-approved by Exec · approver, " in txt(updated[-1])
 
 

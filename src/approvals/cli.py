@@ -5,10 +5,12 @@ import os
 import re
 import sys
 import tempfile
+import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import basecamp, cards, config, core, pictures, reach, slackapi, store, transcripts
+from . import basecamp, cards, config, core, pictures, reach, reader, slackapi, store, transcripts
 
 
 def _load_card(path):
@@ -19,6 +21,57 @@ def _load_card(path):
 def _die(msg):
     print(msg, file=sys.stderr)
     sys.exit(1)
+
+
+def cmd_read(a):
+    loaded = []
+    for path in a.card:
+        try:
+            card = json.loads(Path(path).read_text())
+            if not isinstance(card, dict):
+                raise ValueError("expected a JSON object")
+            loaded.append(card)
+        except (OSError, UnicodeError, ValueError) as e:
+            print(f"{path}: {e}", file=sys.stderr)
+            raise SystemExit(2)
+    try:
+        settings = config.settings()
+        briefs = [reader.brief(card, settings) for card in loaded]
+    except (OSError, UnicodeError, ValueError, TypeError, KeyError, AttributeError) as e:
+        print(f"Cannot prepare reader: {e}", file=sys.stderr)
+        raise SystemExit(2)
+    which = a.reader or ("claude" if "CLAUDECODE" in os.environ else "codex")
+    with ThreadPoolExecutor(max_workers=len(briefs)) as pool:
+        futures = [pool.submit(reader.run, brief, which) for brief in briefs]
+        failed = False
+        needs_newline = False
+        for path, future in zip(a.card, futures):
+            try:
+                result = future.result()
+                if result.returncode:
+                    raise subprocess.CalledProcessError(result.returncode, result.args, result.stdout, result.stderr)
+                if len(briefs) > 1:
+                    if needs_newline:
+                        print()
+                    print(f"{path}:")
+                print(result.stdout, end="")
+                needs_newline = bool(result.stdout) and not result.stdout.endswith("\n")
+            except (OSError, subprocess.SubprocessError) as e:
+                failed = True
+                if isinstance(e, subprocess.TimeoutExpired):
+                    reason = "timed out after 5 minutes"
+                else:
+                    reason = str(e)
+                output = getattr(e, "stdout", None) or getattr(e, "output", None) or ""
+                stderr = getattr(e, "stderr", None) or ""
+                if isinstance(output, bytes):
+                    output = output.decode(errors="replace")
+                if isinstance(stderr, bytes):
+                    stderr = stderr.decode(errors="replace")
+                tail = "\n".join((output + "\n" + stderr).strip().splitlines()[-20:])
+                print(f"{path}: reader {reason}" + (f"\n{tail}" if tail else ""), file=sys.stderr)
+    if failed:
+        raise SystemExit(1)
 
 
 def _prepare_media(card, version):
@@ -778,6 +831,11 @@ CHANGES = {"ask", "revise", "answer", "ack", "done", "withdraw", "record", "stat
 def main(argv=None):
     p = argparse.ArgumentParser(prog="approvals", description="Ask for approval as a Slack card; the answer comes back into this session.")
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("read", help="have a fresh reader check cards before they are posted")
+    s.add_argument("card", nargs="+", help="card JSON files")
+    s.add_argument("--with", dest="reader", choices=("claude", "codex"), help="choose the reader")
+    s.set_defaults(fn=cmd_read)
 
     s = sub.add_parser("submit", help="post a new request, or several as a set; prints each number")
     s.add_argument("card", nargs="+", help="card JSON file, or - for stdin; several files post a set, each its own decision, showing '1 of 3'")

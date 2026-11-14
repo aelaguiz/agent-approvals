@@ -38,6 +38,8 @@ REQUIRED = ["channel", "approver", "bot_token_file", "app_token_file"]
 
 DEFAULTS = {
     "approver_name": "the approver",
+    "reader_rules": None,          # Markdown file, optionally #heading, for the card reader
+    "reader_knows": None,          # what the card reader should assume the approver knows
     "bot_token_key": "SLACK_BOT_TOKEN",
     "app_token_key": "SLACK_APP_TOKEN",
     "timezone": "UTC",

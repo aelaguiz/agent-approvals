@@ -2,6 +2,8 @@
   "channel": "C0XXXXXXXXX",
   "approver": "U0XXXXXXXXX",
   "approver_name": "Sam",
+  "reader_rules": null,
+  "reader_knows": null,
   "bot_token_file": "~/.config/agent-approvals/slack.env",
   "bot_token_key": "SLACK_BOT_TOKEN",
   "app_token_file": "~/.config/agent-approvals/slack.env",

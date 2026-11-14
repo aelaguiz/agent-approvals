@@ -96,6 +96,7 @@ One install can serve several Slack workspaces, each with its own approvals chan
 Agents use the skill. To try it by hand:
 
 ```bash
+approvals read card.json                       # have a fresh reader check the card without posting it
 approvals submit card.json --agent "Pricing"   # posts the card, prints AP-0001 and a link
 approvals submit a.json b.json c.json --agent "Revenue"   # a set: three cards together, each its own decision, marked "1 of 3"
 approvals submit card.json --basecamp https://app.basecamp.com/<account>/buckets/<project>/card_tables/cards/<card>   # the Basecamp card it serves; repeatable
@@ -124,6 +125,10 @@ approvals call AP-0001 --approve --why "Inside the test's cap, like every top-up
 approvals history --agent "Pricing" --type price --days 30   # cards newest first, each with what happened on it in order; --calls: only cards the deputy called
 approvals pictures AP-0001                     # saves the newest version's pictures into a folder and prints their paths
 ```
+
+`approvals read a.json b.json` reads cards together; `--with claude` or `--with codex` chooses the reader. Set
+`reader_rules` to a Markdown file, optionally followed by `#` and a heading, and `reader_knows` to what the
+approver already knows. Both settings are optional, and the command needs no Slack credentials.
 
 The name a card and its replies show is `--agent`, unless whatever started the agent set `APPROVALS_FROM` (a team's launcher, say "AI pod · lead"): that wins, so the approver can always tell which team and member sent it.
 

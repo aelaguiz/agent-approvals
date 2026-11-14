@@ -19,6 +19,10 @@
 
 **The Slack connection.** The hub holds it with Slack's built-in Socket Mode client, which opens a new connection by itself when one dies. That client reads every connection, and answers Slack's pings, on one long-lived thread. When a TLS write fails with a system error such as a broken pipe, Python's `ssl` module leaves that error queued on the thread, and the next read there that has to wait for data reports it again, on whatever connection it's reading. So one ping answered on a dead connection made every later connection fail on its first read. On November 8, 2026 that left the hub reconnecting every 5 seconds for 42 minutes, hearing no button presses, until the service restarted. `listener.SlackConnection` empties that thread's error queue before it reads each connection.
 
+## Reading a card before posting
+
+`approvals read` gives each card to a fresh headless reader with the approver's configured writing rules and knowledge, so the writer can find places that are hard to understand without the writer's context. It prints the reader's observations without posting or saving a request. The reader is not the approver and is not a gate: `submit` neither calls it nor requires it.
+
 ## The sender
 
 An agent's Slack posts can carry its team's name and picture. The command looks for `.approvals.json` in its working folder, then each parent, and stops at the first file. Its `post_as` is `{"name": "Design team", "icon_url": "https://example.com/design.png"}`. No file, or no `post_as` in that nearest file, keeps the app's usual sender. A present sender needs a nonempty name of at most 80 characters and an HTTPS picture URL; a malformed one refuses the command before it posts.
