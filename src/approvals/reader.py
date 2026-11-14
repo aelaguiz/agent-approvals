@@ -24,12 +24,17 @@ def card_text(c):
     if t:
         L.append("TABLE: " + " | ".join(str(x) for x in t.get("columns", [])))
         for r in t.get("rows", []): L.append("  " + " | ".join(str(x) for x in r))
-    for o in c.get("options") or []: L.append("OPTION: " + " ".join(str(o.get(k) or "") for k in ("name", "title", "detail")).strip())
+    for o in c.get("options") or []:
+        L.append(f"CHOICE BUTTON: {o.get('name')}" + (" (the writer's pick)" if o.get("name") == c.get("pick") else "")
+                 + (f"\n  (line above the buttons: {o['title']})" if o.get("title") else ""))
     for j, p in enumerate(c.get("parts") or [], 1):
         L.append(f"ROW {j}: {p.get('title')}" + (f" ({p['note']})" if p.get("note") else ""))
         for q in p.get("quotes") or []:
             L.append(f"    SHOWN WORD FOR WORD ({q.get('label') or q.get('who') or ''}):\n{q.get('text')}" + (f"\n      (note: {q['note']})" if q.get("note") else ""))
         for f in p.get("facts") or []: L.append(f"    {f[0]}: {lines(f[1], '      ')}" if isinstance(f, (list, tuple)) and len(f) >= 2 else "    " + str(f))
+        for o in p.get("options") or []:
+            L.append(f"    CHOICE BUTTON: {o.get('name')}" + (" (the writer's pick)" if o.get("name") == p.get("pick") else "")
+                     + (f" ({o['title']})" if o.get("title") else ""))
     for s in c.get("sections") or []:
         section_lines = []
         for line in s.get("lines") or []:
@@ -59,7 +64,7 @@ HE WOULD STOP AT:
 WHAT HE'D THINK YOU ARE ASKING: <one sentence in words he would use, or "can't tell">
 WHAT HE'D THINK A YES MAKES HAPPEN: <one sentence, or "can't tell">
 
-A stop is: a name or phrase the writer made up, or that only makes sense inside the writer's work; an approval, decision, card number or earlier message he is expected to remember, with no statement of what it was; a sentence where he can't tell who does what, or what is true now; a plain-word stand-in where the real engineering or poker term would tell him more. Small roughness he would read past is not a stop. Don't suggest rewrites."""
+A stop is: a name or phrase the writer made up, or that only makes sense inside the writer's work; an approval, decision, card number or earlier message he is expected to remember, with no statement of what it was; a sentence where he can't tell who does what, or what is true now; a button whose words don't say what tapping it makes happen, or a choice called by a key (A, B, 2) instead of what it does; a plain-word stand-in where the real engineering or poker term would tell him more. Small roughness he would read past is not a stop. Don't suggest rewrites."""
 
 def brief(card, settings):
     name = settings["approver_name"]

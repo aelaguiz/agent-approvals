@@ -18,7 +18,7 @@ def test_card_drawing_keeps_the_words_and_table_whole():
         "facts": [["Markets", ["US", "UK"]]],
         "quotes": [{"label": "Customer", "text": quote, "note": "Exact"}],
         "table": {"columns": ["Today", "Proposed"], "rows": [["old", cell]]},
-        "options": [{"name": "A", "title": "Lower price", "detail": "Now"}],
+        "options": [{"name": "Lower the price", "title": "to $59.99 in the US"}], "pick": "Lower the price",
         "parts": [{"title": "First", "note": "Test", "facts": [["Where", "US"]],
                    "quotes": [{"label": "Reply", "text": quote}]}],
         "sections": [{"title": "Details", "lines": ["Plain", ["Who", "Sam"], {"text": "Ready", "tag": "today"}]}],
@@ -26,7 +26,7 @@ def test_card_drawing_keeps_the_words_and_table_whole():
     }
     text = reader.card_text(card)
     for part in ("Markets:   - US\n  - UK", f"SHOWN WORD FOR WORD (Customer):\n{quote}",
-                 f"TABLE: Today | Proposed\n  old | {cell}", "OPTION: A Lower price Now",
+                 f"TABLE: Today | Proposed\n  old | {cell}", "CHOICE BUTTON: Lower the price (the writer's pick)\n  (line above the buttons: to $59.99 in the US)",
                  "ROW 1: First (Test)", f"SHOWN WORD FOR WORD (Reply):\n{quote}",
                  "SECTION Details:\n  - Plain\n  - Who: Sam\n  - Ready · today", "A YES COVERS: Change the price"):
         assert part in text

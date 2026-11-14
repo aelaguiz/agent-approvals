@@ -69,10 +69,10 @@ KINDS = {
         facts=[["✅ Their link tested", "App Store on iPhone, Google Play on Android"]], yes_label="Send as you"),
     "choice": k(
         type="content", title="Pick how users see the hand they just played", why="What it gets the business, in one sentence.", part_of="Coaching at the table feels smooth",
-        options=[{"name": "A", "title": "a panel from the hand count", "image": SCREEN},
-                 {"name": "B", "title": "a rail of past hands", "image": SCREEN}],
-        pick="A", no_label="Neither", links=[["Play both at real speed", "https://example.com/clips"]],
-        facts=[["Our pick is A", "it answers the tap about 300 users a week already make, and keeps every hand"]]),
+        options=[{"name": "Build the hand-count panel", "title": "a panel that opens from the hand count", "image": SCREEN},
+                 {"name": "Build the rail of past hands", "title": "a rail of past hands", "image": SCREEN}],
+        pick="Build the hand-count panel", no_label="Neither", links=[["Play both at real speed", "https://example.com/clips"]],
+        facts=[["Why the panel", "it answers the tap about 300 users a week already make, and keeps every hand"]]),
     "test": k(
         type="experiment", title="Build and test two screens on the onboarding paywall", why="What it gets the business, in one sentence.", part_of="More new users pay when they first see Plus",
         gallery=[{"image": SCREEN, "label": "TEST HALF · mock"}, {"image": SCREEN, "label": "Today · real"}],

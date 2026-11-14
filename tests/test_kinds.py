@@ -6,7 +6,7 @@ from datetime import timedelta
 import pytest
 
 from approvals import basecamp, cards, cli, config, core, digest, listener, slackapi, store
-from kinds import KINDS
+from kinds import KINDS, k
 from samples import SAMPLES
 from test_cards_store import make_rec
 
@@ -211,11 +211,26 @@ def test_a_pick_is_one_message_naming_the_option():
     rec = rec_for(KINDS["choice"])
     blocks = cards.card_blocks(rec, 1, "open")
     slides = next(b for b in blocks if b["type"] == "carousel")["elements"]
-    assert slides[0]["subtitle"]["text"] == "🔹 *Our pick*" and slides[0]["actions"][0]["text"]["text"] == "Pick A"
+    assert slides[0]["subtitle"]["text"] == "🔹 *Our pick*" and slides[0]["actions"][0]["text"]["text"] == "Build the hand-count panel"
     assert values(blocks) == ["AP-0001|1|decline"]
     core.press(rec, 1, "pick:0", "U")
-    assert 'picked A ("a panel from the hand count")' in rec["outbox"][-1]["text"]
-    assert cards.card_blocks(rec, 1, "final")[0]["text"]["text"] == "✅ You picked A"
+    assert 'picked Build the hand-count panel ("a panel that opens from the hand count")' in rec["outbox"][-1]["text"]
+    assert cards.card_blocks(rec, 1, "final")[0]["text"]["text"] == "✅ You picked Build the hand-count panel"
+
+
+def test_a_choice_says_what_each_button_does_and_is_never_named_by_a_key():
+    """November 14: buttons Pick A, Pick B, Pick C, with what each meant nowhere on the card."""
+    opts = [{"name": "Give everyone the Ticket back", "title": "the held-out 20% too"},
+            {"name": "Only never-played users keep it", "title": "users who play meet the Tickets gate"}]
+    rec = rec_for(k(type="experiment", title="End the holdout", why="Why.", facts=[], options=opts, pick=opts[1]["name"]))
+    blocks = cards.card_blocks(rec, 1, "open")
+    buttons = [e["text"]["text"] for b in blocks if b["type"] == "actions" for e in b["elements"]]
+    assert buttons == ["Give everyone the Ticket back", "Only never-played users keep it"]
+    shown = [b["text"]["text"] for b in blocks if b["type"] == "section"]
+    assert "• *Only never-played users keep it* · our pick: users who play meet the Tickets gate" in "\n".join(shown)
+    for key in ("C", "2", "Option B", "plan 3"):
+        bad = k(type="experiment", title="t", why="w", facts=[], options=[{"name": key}, {"name": "Keep it"}], pick="Keep it")
+        assert any("a key he would have to look up" in e for e in cards.validate(bad))
 
 
 def test_a_batch_picked_in_the_pop_up_names_what_to_do_and_what_to_leave_out():
@@ -296,8 +311,8 @@ def test_record_takes_a_row_or_a_choice_from_the_thread(slack):
     assert store.load("AP-0001")["answers"]["2"]["verdict"] == "approved"
     choice = rec_for(KINDS["choice"], id="AP-0002")
     store.save(choice)
-    cli.main(["record", "AP-0002", "--choice", "B", "--words", "B, but slower", "--where", "Slack thread"])
-    assert store.load("AP-0002")["decision"]["choice"] == "B"
+    cli.main(["record", "AP-0002", "--choice", "Build the rail of past hands", "--words", "the rail, but slower", "--where", "Slack thread"])
+    assert store.load("AP-0002")["decision"]["choice"] == "Build the rail of past hands"
 
 
 def test_an_answer_that_lets_an_approved_card_go_ahead_is_recorded_so_it_can_be_done(slack):

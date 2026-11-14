@@ -77,7 +77,7 @@ The same harness, with one brief per kind of ask (`tests/live/scenarios/k*.md`),
 | K6 | A push and an email to users | Approve | The push word for word, the email as designed at phone width, who, when and where a tap goes |
 | K7 | A release, with a row per store | Approve two stores, then the iPhone row again once Apple approves | Changes grouped by initiative and tagged for who gets them; no Approve all; the version asking again keeps the other rows |
 | K8 | A message sent as the approver | Edit the words, send | The chat as it will look; the agent sends his words exactly; their reply lands on the card |
-| K9 | A choice between two designs | Pick A, then a thread reply with a condition | Options side by side with the pick marked; the condition shows as waiting on the approver |
+| K9 | A choice between two designs | Tap the pick's button, then a thread reply with a condition | Options side by side with the pick marked; the condition shows as waiting on the approver |
 | K10 | A test to build and read | Build and test, then the first reads | The card links its deck; each read lands on the card after the yes |
 
 Each card is screenshotted in desktop Slack and compared with its mock in psbrain's `projects/asks-in-pieces/cards/mocks/`.

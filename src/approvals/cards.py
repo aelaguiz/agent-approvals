@@ -48,10 +48,19 @@ def part_id(part, j):
     return str(part.get("id") or j)
 
 
+# A choice named by a key ("C", "Option 2") sends him to look up what it stands for, on a card that may not say.
+KEY_NAME = re.compile(r"(?:option|choice|plan)?\s*(?:[a-z]|\d{1,2})[.):]?", re.I)
+
+
 def option_button(o):
-    """An option with a title is named by a short key ("A") and its button says "Pick A"; one without a title is
-    named by its action, which is its button."""
-    return o.get("button") or (f"Pick {o['name']}" if o.get("title") else o["name"])
+    """An option's name is its button, so it says what a tap makes happen ("Keep training")."""
+    return o["name"]
+
+
+def option_lines(options, pick):
+    """The options' titles, drawn right above their buttons: what each one means when its button can't say it all."""
+    return md("\n".join(f"• *{esc(o['name'])}*" + (" · our pick" if o["name"] == pick else "")
+                        + (f": {esc(o['title'])}" if o.get("title") else "") for o in options))
 
 
 def item_name(it):
@@ -264,6 +273,9 @@ def _validate_options(options, pick, where, pictures):
             errs.append(f"{where}: option {i} needs a name, under {BUTTON_MAX} characters")
             continue
         names.append(o["name"])
+        if KEY_NAME.fullmatch(o["name"].strip()):
+            errs.append(f'{where}: option {i} is named "{o["name"]}", a key he would have to look up; name it for what '
+                        'a tap on it makes happen, like "Keep training"')
         if o.get("title") is not None and not _text(o["title"], LABEL_MAX):
             errs.append(f"{where}: option {i}'s title must be under {LABEL_MAX} characters")
         if o.get("image"):
@@ -731,9 +743,9 @@ def _body(rec, n, mode, compact=False):
         blocks.append(table_block(card["table"]))
     if card.get("items"):
         blocks += _items(card, rec.get("decision") if mode == "final" else None)
-    if mode == "view" and card.get("options") and not any(o.get("image") for o in card["options"]):
-        blocks.append(md("\n".join(f"• {esc(option_button(o))}" + (" · *our pick*" if o["name"] == card.get("pick") else "")
-                               for o in card["options"])))
+    opts = card.get("options")
+    if opts and not any(o.get("image") for o in opts) and (mode == "view" or any(o.get("title") for o in opts)):
+        blocks.append(option_lines(opts, card.get("pick")))
     return blocks
 
 
@@ -828,6 +840,8 @@ def _rows(rec, n, mode):
             sec["accessory"] = picture(files[f"part:{j}"], p["title"])
         out.append(sec)
         out += [quote_block(q) for q in p.get("quotes") or []]   # the row's own words, right above its buttons
+        if any(o.get("title") for o in p.get("options") or []):
+            out.append(option_lines(p["options"], p.get("pick")))
         under = ([answer_line(a, deadline)] if a else []) + status_lines(rec, pid)
         if under:
             out.append(ctx("\n".join(under)))

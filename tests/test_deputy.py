@@ -148,7 +148,7 @@ def test_the_deputy_hears_what_the_approver_says_or_does_but_not_a_plain_yes(mon
     assert 'Sam approved it with his own edited words (in Slack' in said["AP-0004"][0] and '"Hi there"' in said["AP-0004"][0]
     assert "removed it from his list" in said["AP-0005"][0]
     assert "approved items 1, 2 of 11" in said["AP-0006"][0] and said["AP-0007"] == []
-    assert "Sam picked A" in said["AP-0008"][0]
+    assert "Sam picked Build the hand-count panel" in said["AP-0008"][0]
     assert len(said["AP-0009"]) == 1 and 'asked for a change to part 2' in said["AP-0009"][0] and '"shorter"' in said["AP-0009"][0]
     # The asker's own messages are what they always were.
     assert [i["kind"] for i in to("AP-0003")] == ["feedback"] and [i["kind"] for i in to("AP-0002")] == ["decision"]
@@ -276,20 +276,20 @@ def test_an_approve_takes_the_pick_the_card_names_and_says_so_to_the_asker_and_o
     call("AP-0001", "--approve", "--why", "The design he already chose in the deck.")
     rec = store.load("AP-0001")
     d = rec["decision"]
-    assert rec["status"] == "approved" and d["where"] == "deputy" and d["choice"] == "A" and d["by"] == "Exec · approver"
-    assert [e.get("choice") for e in rec["events"] if e["kind"] == "decision"] == ["A"]
+    assert rec["status"] == "approved" and d["where"] == "deputy" and d["choice"] == "Build the hand-count panel" and d["by"] == "Exec · approver"
+    assert [e.get("choice") for e in rec["events"] if e["kind"] == "decision"] == ["Build the hand-count panel"]
     [msg] = to("AP-0001")
     assert msg["kind"] == "decision" and msg["needs_ack"]
-    assert ('It counts as his yes, for exactly what the card describes. It took the pick the card names, A ("a panel from the hand count"). '
+    assert ('It counts as his yes, for exactly what the card describes. It took the pick the card names, Build the hand-count panel ("a panel that opens from the hand count"). '
             'First acknowledge' in msg["text"])
-    assert "Then do exactly what the card describes for A, nothing else, and" in msg["text"] and "approvals done AP-0001" in msg["text"]
+    assert "Then do exactly what the card describes for Build the hand-count panel, nothing else, and" in msg["text"] and "approvals done AP-0001" in msg["text"]
     assert to("AP-0001", "deputy") == []   # its own pick doesn't come back to it
     final = txt(cards.card_blocks(rec, 1, "final"))
-    assert "🤖 Auto-approved: Pick how users see" in final and "🤖 Approved for you by Exec · approver, taking the card's pick, A, " in final
+    assert "🤖 Auto-approved: Pick how users see" in final and "🤖 Approved for you by Exec · approver, taking the card's pick, Build the hand-count panel, " in final
     assert "You picked" not in final and values(cards.card_blocks(rec, 1, "final")) == ["AP-0001|1|see", "AP-0001|1|takeback"]
     monkeypatch.setattr(slackapi, "message_url", lambda ts: f"https://x.slack.com/p{ts}")
     blocks, _ = digest.summary(store.deputy(), datetime.fromisoformat(rec["created"]) - timedelta(hours=1), [rec])
-    assert "· took the card's pick, A" in txt(blocks)
+    assert "· took the card's pick, Build the hand-count panel" in txt(blocks)
     # Taken back, it is his decline like any other auto-approval.
     assert press("AP-0001", "takeback") == "ok"
     rec = store.load("AP-0001")
@@ -340,7 +340,7 @@ def test_in_a_dry_run_a_pick_and_own_yes_rows_are_called_and_nothing_is_approved
         rec = store.load(rid)
         assert rec["status"] == "pending" and rec["outbox"] == [] and not rec.get("answers") and not rec.get("decision")
         assert rec["calls"][-1]["call"] == "approve" and rec["calls"][-1]["live"] is False
-    assert ("🤖 Dry run · Exec · approver would have approved this for you, taking the card's pick, A: Routine."
+    assert ("🤖 Dry run · Exec · approver would have approved this for you, taking the card's pick, Build the hand-count panel: Routine."
             in txt(cards.card_blocks(store.load("AP-0001"), 1, "open")))
     assert "🤖 Dry run · Exec · approver would have approved this for you: Routine." in txt(cards.card_blocks(store.load("AP-0003"), 1, "open"))
 

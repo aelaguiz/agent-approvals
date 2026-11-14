@@ -118,7 +118,7 @@ def _buttons(rec):
         yes = [cards.button(label, f"{base}|all", "primary")] if rows else []
     elif c.get("options"):
         yes = [] if any(o.get("image") for o in c["options"]) else [
-            cards.button(f"{o['name']}: {o['title']}" if o.get("title") else cards.option_button(o), f"{base}|pick:{i}",
+            cards.button(cards.option_button(o), f"{base}|pick:{i}",
                          "primary" if o["name"] == c.get("pick") else None) for i, o in enumerate(c["options"])]
     else:
         yes = [cards.button(f"Approve all {len(c['items'])}" if c.get("items") else "Approve", f"{base}|approve", "primary")]

@@ -208,8 +208,8 @@ def test_each_waiting_line_answers_its_card_in_one_tap(slack):
     shaped(3, parts=[{"title": "a"}, {"title": "b"}])
     shaped(4, parts=[{"title": "a"}, {"title": "b", "own_yes": True}])
     shaped(5, items=["x", "y", "z"])
-    shaped(6, options=[{"name": "A", "title": "a panel"}, {"name": "B", "title": "a rail"}], pick="B")
-    shaped(7, options=[{"name": "A", "title": "a panel", "image": "a.png"}, {"name": "B", "title": "a rail", "image": "b.png"}])
+    shaped(6, options=[{"name": "Build the panel", "title": "a panel"}, {"name": "Build the rail", "title": "a rail"}], pick="Build the rail")
+    shaped(7, options=[{"name": "Build the panel", "image": "a.png"}, {"name": "Build the rail", "image": "b.png"}])
     rec = card(8, status="approved")   # approved, with a condition only the approver can clear: listed, nothing to tap
     rec["timeline"] = [{"text": "play it before it merges", "kind": "on_you", "part": None, "at": rec["created"]}]
     store.save(rec)
@@ -221,7 +221,7 @@ def test_each_waiting_line_answers_its_card_in_one_tap(slack):
         [("Approve all 2", "AP-0003|1|all")] + no(3),
         [("Approve 1 of 2", "AP-0004|1|all")] + no(4),
         [("Approve all 3", "AP-0005|1|approve")] + no(5),
-        [("A: a panel", "AP-0006|1|pick:0"), ("B: a rail", "AP-0006|1|pick:1")] + no(6),
+        [("Build the panel", "AP-0006|1|pick:0"), ("Build the rail", "AP-0006|1|pick:1")] + no(6),
         no(7),   # a choice in pictures is decided by looking at them
     ]
     assert "AP-0008" in text_of(posted[0][0]) and "waiting on you: play it before it merges" in text_of(posted[0][0])
