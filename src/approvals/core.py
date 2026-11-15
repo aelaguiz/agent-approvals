@@ -820,12 +820,13 @@ ALARM_SECONDS = 60
 
 
 def overdue(records, now):
-    """Asker messages the tool has failed to deliver, as (record, item, reason)."""
+    """Asker messages the tool has failed to deliver, as (record, item, reason). A decision the agent acknowledged
+    is one it has, however it got it: three answers acted on weeks before raised an alarm the first time this ran."""
     hold = held(records)
     out = []
     for rec in records:
         for item in rec.get("outbox", []):
-            if (item.get("to") or item.get("delivered_at") or item.get("seen_by_agent")
+            if (item.get("to") or item.get("delivered_at") or item.get("seen_by_agent") or item.get("acked_at")
                     or item.get("waiting_for_agent") or item.get("alarmed_at")
                     or (rec["id"], item["ref"]) in hold
                     or now - store.parse(item["created"]) < timedelta(seconds=ALARM_SECONDS)):

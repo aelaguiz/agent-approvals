@@ -602,6 +602,7 @@ def test_overdue_answers_and_exclusions(monkeypatch):
     add("deputy", to="deputy", last_error="failed")
     add("delivered", delivered_at=store.iso(now), last_error="failed")
     add("seen", seen_by_agent=True, last_error="failed")
+    add("acknowledged", inbox_only=True, acked_at=store.iso(now))
     found = {item["ref"]: reason for _, item, reason in core.overdue([rec], now)}
     assert found == {"error": "Herdr failed", "inbox": "the answer can only be picked up from the agent's inbox",
                      "inbox_after_sent": "sent, but not seen in the transcript yet",
