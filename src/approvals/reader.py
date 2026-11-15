@@ -1,6 +1,7 @@
 """A fresh reader for an approval card, before it is posted."""
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -114,4 +115,13 @@ def run(brief_text, reader):
         cmd = ["codex", "exec", "--skip-git-repo-check", "-m", "gpt-6.1-terra",
                "-c", 'model_reasoning_effort="xhigh"', "-"]
     with tempfile.TemporaryDirectory() as directory:
-        return subprocess.run(cmd, input=brief_text, text=True, capture_output=True, cwd=directory, env=env, timeout=300)
+        run_it = lambda command: subprocess.run(command, input=brief_text, text=True, capture_output=True, cwd=directory,
+                                                env=env, timeout=300)
+        if reader != "claude" and shutil.which("aim"):
+            # Where AI Manager is installed it starts Codex on a pooled account with room: a machine's own Codex login
+            # can go stale while the pooled accounts still work. It refuses on a machine with a single Codex account,
+            # and there the machine's own login is the one to use.
+            pooled = run_it(["aim", "codex", "run", "--"] + cmd[1:])
+            if pooled.returncode == 0:
+                return pooled
+        return run_it(cmd)
