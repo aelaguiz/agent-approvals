@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 def lines(v, pad="  "):
@@ -115,13 +116,22 @@ def run(brief_text, reader):
         cmd = ["codex", "exec", "--skip-git-repo-check", "-m", "gpt-6.1-terra",
                "-c", 'model_reasoning_effort="xhigh"', "-"]
     with tempfile.TemporaryDirectory() as directory:
-        run_it = lambda command: subprocess.run(command, input=brief_text, text=True, capture_output=True, cwd=directory,
-                                                env=env, timeout=300)
+        run_it = lambda command, timeout=300: subprocess.run(command, input=brief_text, text=True, capture_output=True, cwd=directory,
+                                                             env=env, timeout=timeout)
         if reader != "claude" and shutil.which("aim"):
             # Where AI Manager is installed it starts Codex on a pooled account with room: a machine's own Codex login
             # can go stale while the pooled accounts still work. It refuses on a machine with a single Codex account,
             # and there the machine's own login is the one to use.
+            start = time.monotonic()
             pooled = run_it(["aim", "codex", "run", "--"] + cmd[1:])
             if pooled.returncode == 0:
                 return pooled
+            remaining = 300 - (time.monotonic() - start)
+            if remaining <= 0:
+                return pooled
+            direct = run_it(cmd, remaining)
+            if direct.returncode:
+                direct.stderr = (f"Pooled attempt:\n{pooled.stdout or ''}\n{pooled.stderr or ''}\n"
+                                 f"Direct attempt:\n{direct.stdout or ''}\n{direct.stderr or ''}")
+            return direct
         return run_it(cmd)

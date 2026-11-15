@@ -68,6 +68,7 @@ def test_missing_rules_fail_before_any_reader(rules, tmp_path, monkeypatch, caps
 @pytest.mark.parametrize("which", ["claude", "codex", "codex through AI Manager"])
 def test_reader_command_and_isolation(which, monkeypatch):
     calls = []
+    result = SimpleNamespace(returncode=0, stdout="read\n")
     managed = which == "codex through AI Manager"
     monkeypatch.setattr(reader.shutil, "which", lambda name: "/somewhere/aim" if managed or which == "claude" else None)
     which, start = ("codex", ["aim", "codex", "run", "--"]) if managed else (which, ["codex"])
@@ -75,9 +76,10 @@ def test_reader_command_and_isolation(which, monkeypatch):
     def fake_run(cmd, **kw):
         assert Path(kw["cwd"]).is_dir() and list(Path(kw["cwd"]).iterdir()) == []
         calls.append((cmd, kw))
-        return SimpleNamespace(returncode=0, stdout="read\n")
+        return result
     monkeypatch.setattr(reader.subprocess, "run", fake_run)
-    reader.run("the brief", which)
+    assert reader.run("the brief", which) is result
+    assert len(calls) == 1
     cmd, kw = calls[0]
     assert kw["input"] == "the brief" and kw["timeout"] == 300 and kw["capture_output"] and kw["text"]
     assert not Path(kw["cwd"]).exists()
@@ -90,14 +92,62 @@ def test_reader_command_and_isolation(which, monkeypatch):
 
 def test_codex_reader_uses_the_machines_own_login_when_ai_manager_refuses(monkeypatch):
     calls = []
+    pooled = SimpleNamespace(returncode=1, stdout="pooled output", stderr="pooled error")
+    direct = SimpleNamespace(returncode=0, stdout="read\n", stderr="")
     monkeypatch.setattr(reader.shutil, "which", lambda name: "/somewhere/aim")
+    times = iter([100, 112])
+    monkeypatch.setattr(reader.time, "monotonic", lambda: next(times))
+    def fake_run(cmd, **kw):
+        calls.append((cmd, kw))
+        return pooled if cmd[0] == "aim" else direct
+    monkeypatch.setattr(reader.subprocess, "run", fake_run)
+    assert reader.run("the brief", "codex") is direct
+    assert len(calls) == 2
+    assert [cmd[0] for cmd, _ in calls] == ["aim", "codex"] and calls[0][0][4:] == calls[1][0][1:]
+    assert calls[0][1]["timeout"] == 300 and calls[1][1]["timeout"] == 288
+    assert direct.stdout == "read\n" and direct.stderr == ""
+
+
+def test_codex_reader_reports_both_failures(monkeypatch):
+    pooled = subprocess.CompletedProcess(["aim"], 1, stdout="pooled output", stderr="pooled error")
+    direct = subprocess.CompletedProcess(["codex"], 2, stdout="direct output", stderr="direct error")
+    results = iter([pooled, direct])
+    monkeypatch.setattr(reader.shutil, "which", lambda name: "aim")
+    monkeypatch.setattr(reader.subprocess, "run", lambda *args, **kwargs: next(results))
+    result = reader.run("the brief", "codex")
+    assert result is direct and result.returncode == 2
+    assert result.stderr.index("pooled output") < result.stderr.index("direct output")
+    assert "pooled error" in result.stderr and "direct error" in result.stderr
+
+
+def test_codex_reader_does_not_fallback_when_budget_is_gone(monkeypatch):
+    pooled = subprocess.CompletedProcess(["aim"], 1, stdout="", stderr="failed")
+    times = iter([100, 400])
+    monkeypatch.setattr(reader.shutil, "which", lambda name: "aim")
+    monkeypatch.setattr(reader.time, "monotonic", lambda: next(times))
+    calls = []
     def fake_run(cmd, **kw):
         calls.append(cmd)
-        return SimpleNamespace(returncode=1 if cmd[0] == "aim" else 0, stdout="read\n")
+        return pooled
     monkeypatch.setattr(reader.subprocess, "run", fake_run)
-    assert reader.run("the brief", "codex").returncode == 0
-    assert [cmd[0] for cmd in calls] == ["aim", "codex"] and calls[0][4:] == calls[1][1:]
-    assert len(calls) == 2
+    assert reader.run("the brief", "codex") is pooled
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("attempt", [0, 1])
+def test_codex_reader_propagates_timeout(monkeypatch, attempt):
+    error = subprocess.TimeoutExpired("codex", 300)
+    calls = []
+    monkeypatch.setattr(reader.shutil, "which", lambda name: "aim")
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        if len(calls) == attempt + 1:
+            raise error
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="failed")
+    monkeypatch.setattr(reader.subprocess, "run", fake_run)
+    with pytest.raises(subprocess.TimeoutExpired) as exc:
+        reader.run("the brief", "codex")
+    assert exc.value is error and len(calls) == attempt + 1
 
 
 def test_all_cards_are_checked_before_starting(tmp_path, monkeypatch, capsys):
