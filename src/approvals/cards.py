@@ -446,6 +446,10 @@ def pending_lines(rec, part=None):
             out[e["kind"]] = e
     if "on_you" in out and out["on_you"]["at"] < (answer.get("at") or ""):
         del out["on_you"]
+    # A new version puts the card back in front of the approver, so an older "waiting on someone else" line ends.
+    revised = max([e["at"] for e in rec.get("events") or [] if e["kind"] == "revised"] or [""])
+    if part is None and "waiting" in out and out["waiting"]["at"] < revised:
+        del out["waiting"]
     return out
 
 

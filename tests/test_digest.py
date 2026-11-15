@@ -137,6 +137,22 @@ def test_cards_closed_with_no_answer_since_the_last_list(slack):
     assert "AP-0001" in body and "closed Sun 5:00 pm" in body and "AP-0002" not in body
 
 
+def test_a_new_version_puts_a_card_back_on_the_list_after_a_waiting_line(slack):
+    """Its agent said the card waited on someone else, then posted a new version: it waits on the approver again.
+    A waiting line posted after the newest version still keeps the card off the list."""
+    posted, _ = slack
+    hours_ago = lambda h: store.iso(MON_8AM - timedelta(hours=h))
+    rec = card(1, events=[{"kind": "revised", "version": 2, "at": hours_ago(1)}])
+    rec["timeline"] = [{"text": "the designer redrawing it", "kind": "waiting", "part": None, "at": hours_ago(2)}]
+    store.save(rec)
+    rec = card(2, events=[{"kind": "revised", "version": 2, "at": hours_ago(3)}])
+    rec["timeline"] = [{"text": "the designer redrawing it", "kind": "waiting", "part": None, "at": hours_ago(2)}]
+    store.save(rec)
+    digest.tick(MON_8AM)
+    listed = text_of(posted[0][0])
+    assert "AP-0001" in listed and "AP-0002" not in listed
+
+
 def test_nothing_waiting_is_one_line_and_mentions_no_one(slack):
     posted, _ = slack
     card(1, status="done")
