@@ -53,6 +53,7 @@ ACK_MINUTES = 10         # a delivered answer the agent hasn't acknowledged by t
 FETCH_SECONDS = 5        # how often a machine other than the hub asks it for answers to deliver
 WAITING = "hourglass_flowing_sand"   # ⏳ on a card while its decision waits for the agent to catch up
 STRAY_SECONDS = 60       # how often a machine looks for answers whose session turned up on it
+QUIET = 60               # reconnect when Slack hasn't answered a ping for this long
 
 
 def is_approver(msg, rec):
@@ -650,6 +651,16 @@ class Listener:
                 log.exception("%s failed", fn.__name__)
             self.stop.wait(every)
 
+    def quiet(self, client, now=None):
+        """Seconds since the last pong, or since this listener first saw the current session."""
+        now = time.time() if now is None else now
+        cur = client.current_session
+        seen, since = getattr(self, "_conn", (None, now))
+        if cur is not seen:
+            since = now
+        self._conn = (cur, since)
+        return now - max(since, getattr(cur, "last_ping_pong_time", None) or 0)
+
     def run(self):
         if not config.is_hub():
             return self.run_delivery()
@@ -674,6 +685,16 @@ class Listener:
         try:
             while not self.stop.is_set():
                 time.sleep(1)
+                quiet = self.quiet(sm)
+                if quiet <= QUIET:
+                    continue
+                # Slack's client reconnects a closed connection itself. It never doubts one that has had no pong
+                # yet, so that one is replaced here, the client's own way: a new address, under its lock.
+                log.warning("no answer from Slack for %s seconds; reconnecting", int(quiet))
+                try:
+                    sm.connect_to_new_endpoint(force=True)
+                except Exception:
+                    log.exception("reconnecting to Slack failed")
         finally:
             self.stop.set()
             sm.close()

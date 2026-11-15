@@ -8,12 +8,27 @@ import ssl
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 from slack_sdk import WebClient
 
 from approvals import listener
 
 PEM = str(Path(__file__).with_name("localhost.pem"))
+
+
+def test_quiet_counts_from_the_session_or_its_latest_pong():
+    listener_instance = listener.Listener.__new__(listener.Listener)
+    client = SimpleNamespace(current_session=SimpleNamespace(last_ping_pong_time=None))
+
+    assert listener_instance.quiet(client, now=1000.0) == 0
+    assert listener_instance.quiet(client, now=1061.0) == 61
+    assert listener_instance.quiet(client, now=1061.0) > listener.QUIET
+    client.current_session.last_ping_pong_time = 1058.0
+    assert listener_instance.quiet(client, now=1061.0) == 3
+    client.current_session = SimpleNamespace(last_ping_pong_time=None)
+    assert listener_instance.quiet(client, now=1061.0) == 0
+    assert listener_instance.quiet(client, now=1100.0) == 39
 
 
 def tls_server(plan):
