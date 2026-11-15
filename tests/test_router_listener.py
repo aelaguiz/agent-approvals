@@ -574,3 +574,140 @@ def test_a_ref_found_by_chance_inside_a_longer_id_is_not_a_delivery(tmp_path):
     assert transcripts.contains(str(t), "abc123") and not transcripts.typed(str(t), "abc123")
     t.write_text('{"content": "[Approvals] AP-0001 was approved (ref abc123)"}\n')
     assert transcripts.typed(str(t), "abc123")
+
+
+def test_overdue_answers_and_exclusions(monkeypatch):
+    from datetime import timedelta
+
+    now = store.now()
+    monkeypatch.setattr(store, "now", lambda: now)
+    rec = make_rec(SAMPLES["money"])
+    def add(ref, **fields):
+        core.enqueue(rec, "feedback", "answer")
+        item = rec["outbox"][-1]
+        item.update(ref=ref, created=store.iso(now - timedelta(seconds=60)), **fields)
+        return item
+
+    add("error", last_error="Herdr failed")
+    add("inbox", inbox_only=True)
+    add("inbox_after_sent", inbox_only=True, last_error="sent, but not seen in the transcript yet")
+    add("untouched")
+    add("stopped", inbox_only=True, waiting_for_agent=True)
+    add("transcript", last_error="sent, but not seen in the transcript yet", sent_at=store.iso(now))
+    add("typed", typed_at=store.iso(now))
+    add("sent", sent_at=store.iso(now))
+    add("young", last_error="failed")["created"] = store.iso(now - timedelta(seconds=59))
+    add("alarmed", last_error="failed", alarmed_at=store.iso(now))
+    add("reviewer", to="reviewer", last_error="failed")
+    add("deputy", to="deputy", last_error="failed")
+    add("delivered", delivered_at=store.iso(now), last_error="failed")
+    add("seen", seen_by_agent=True, last_error="failed")
+    found = {item["ref"]: reason for _, item, reason in core.overdue([rec], now)}
+    assert found == {"error": "Herdr failed", "inbox": "the answer can only be picked up from the agent's inbox",
+                     "inbox_after_sent": "sent, but not seen in the transcript yet",
+                     "untouched": "nothing has typed the answer into the agent's session"}
+
+    first = make_rec(SAMPLES["money"], id="AP-0002", reach={"session_id": "same"})
+    second = make_rec(SAMPLES["money"], id="AP-0003", reach={"session_id": "same"})
+    for r in (first, second):
+        core.enqueue(r, "decision", "yes")
+        r["outbox"][0]["created"] = store.iso(now - timedelta(seconds=60))
+    first["outbox"][0]["sent_at"] = store.iso(now)
+    assert (second["id"], second["outbox"][0]["ref"]) in core.held([first, second])
+    assert core.overdue([first, second], now) == []
+
+
+def test_alarm_posts_and_wakes_once_and_skips_test_cards(monkeypatch):
+    from datetime import timedelta
+
+    now = store.now()
+    monkeypatch.setattr(store, "now", lambda: now)
+    calls, wakes = [], []
+    monkeypatch.setattr(listener.slackapi, "message_url", lambda ts: "https://slack.test/thread/" + ts)
+    def post(blocks, text, channel_id):
+        assert any(i.get("alarmed_at") for i in store.load(text.split(" on ")[1].split()[0])["outbox"])
+        calls.append((text, channel_id))
+    monkeypatch.setattr(listener.slackapi, "post", post)
+    monkeypatch.setattr(listener.subprocess, "run", lambda cmd, **kw: wakes.append((cmd, kw)))
+    rec = make_rec(SAMPLES["money"], reach={"machine": "mini-5"})
+    core.enqueue(rec, "feedback", "answer")
+    rec["outbox"][0].update(created=store.iso(now - timedelta(seconds=75)), last_error="Herdr failed")
+    core.enqueue(rec, "feedback", "another")
+    rec["outbox"][1].update(created=store.iso(now - timedelta(seconds=75)), last_error="Another failure")
+    store.save(rec)
+    test_rec = make_rec(SAMPLES["money"], id="AP-0002", test=True)
+    core.enqueue(test_rec, "feedback", "test")
+    test_rec["outbox"][0].update(created=store.iso(now - timedelta(seconds=75)), last_error="test failure")
+    store.save(test_rec)
+    L = listener.Listener()
+    L.alarm()
+    assert not calls and not wakes and not store.load(rec["id"])["outbox"][0].get("alarmed_at")
+    L.s["alarm"] = {"channel": "COPS", "wake": ["~/wake", "--owner"]}
+    L.alarm()
+    L.alarm()
+    assert len(calls) == len(wakes) == 2
+    line, channel = calls[0]
+    assert channel == "COPS" and line.startswith("🚨 Sam's answer on AP-0001")
+    assert rec["title"] in line and "Tester" in line and "75 seconds" in line and "Herdr failed" in line
+    assert "https://slack.test/thread/1.1" in line
+    cmd, kw = wakes[0]
+    assert cmd == [listener.os.path.expanduser("~/wake"), "--owner"]
+    assert kw["timeout"] == 60 and kw["check"] and kw["text"]
+    assert all(word in kw["input"] for word in ("not a person", "AP-0001", "Tester", "mini-5", "Herdr failed",
+                                                "safe on the hub", "approvals inbox", "~/.approvals/logs/listener.log"))
+    assert all(i.get("alarmed_at") for i in store.load(rec["id"])["outbox"])
+    assert not store.load(test_rec["id"])["outbox"][0].get("alarmed_at")
+    monkeypatch.setenv("APPROVALS_TEST", "1")
+    L.alarm()
+    assert len(calls) == len(wakes) == 3
+
+
+def test_alarm_failures_do_not_repeat_or_stop_other_alarms(monkeypatch, caplog):
+    from datetime import timedelta
+
+    rec = make_rec(SAMPLES["money"])
+    for _ in range(2):
+        core.enqueue(rec, "feedback", "answer")
+        rec["outbox"][-1].update(created=store.iso(store.now() - timedelta(seconds=75)), last_error="failed")
+    store.save(rec)
+    posts, wakes = [], []
+    monkeypatch.setattr(listener.slackapi, "message_url", lambda ts: "link")
+    def post(*args, **kw):
+        posts.append(1)
+        raise RuntimeError("post failed")
+    def wake(*args, **kw):
+        wakes.append(1)
+        raise subprocess.TimeoutExpired("wake", 60)
+    monkeypatch.setattr(listener.slackapi, "post", post)
+    monkeypatch.setattr(listener.subprocess, "run", wake)
+    L = listener.Listener()
+    L.s["alarm"] = {"channel": "COPS", "wake": ["wake"]}
+    L.alarm()
+    L.alarm()
+    assert len(posts) == len(wakes) == 2
+    assert "alarm post" in caplog.text and "alarm wake" in caplog.text
+
+
+def test_delivery_worker_records_exception(monkeypatch):
+    rec = make_rec(SAMPLES["money"])
+    core.enqueue(rec, "feedback", "answer")
+    store.save(rec)
+    ref = rec["outbox"][0]["ref"]
+    L = listener.Listener()
+    def fail(rid, ref):
+        L.stop.set()
+        raise RuntimeError("Herdr is broken")
+    monkeypatch.setattr(L, "deliver_one", fail)
+    L.queue([(rec["id"], ref)])
+    L.delivery_worker()
+    assert store.load(rec["id"])["outbox"][0]["last_error"] == "RuntimeError: Herdr is broken"
+
+
+def test_a_missing_herdr_is_never_read_as_a_closed_pane():
+    def missing(*args, **kw):
+        raise FileNotFoundError("herdr")
+    h = router.Herdr("default", run=missing)
+    for ask in (lambda: h.call("pane", "get", "p1"), lambda: h.pane("p1")):
+        with pytest.raises(RuntimeError, match="herdr isn't on this service's PATH on testbox") as e:
+            ask()
+        assert not isinstance(e.value, router.HerdrError)

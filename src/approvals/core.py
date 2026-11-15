@@ -816,6 +816,33 @@ def held(records):
     return out
 
 
+ALARM_SECONDS = 60
+
+
+def overdue(records, now):
+    """Asker messages the tool has failed to deliver, as (record, item, reason)."""
+    hold = held(records)
+    out = []
+    for rec in records:
+        for item in rec.get("outbox", []):
+            if (item.get("to") or item.get("delivered_at") or item.get("seen_by_agent")
+                    or item.get("waiting_for_agent") or item.get("alarmed_at")
+                    or (rec["id"], item["ref"]) in hold
+                    or now - store.parse(item["created"]) < timedelta(seconds=ALARM_SECONDS)):
+                continue
+            error = item.get("last_error")
+            if error and error != "sent, but not seen in the transcript yet":
+                reason = error
+            elif item.get("inbox_only"):
+                reason = error or "the answer can only be picked up from the agent's inbox"
+            elif not item.get("sent_at") and not item.get("typed_at") and not error:
+                reason = "nothing has typed the answer into the agent's session"
+            else:
+                continue
+            out.append((rec, item, reason))
+    return out
+
+
 def to_deliver(records, machine, reviewer=None, deputy=None):
     """What one machine delivers now: [request id, ref] of each request's next message that is due, for sessions
     on that machine, except decisions held for their agent to catch up, and its next message for the reviewer (and

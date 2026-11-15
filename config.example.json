@@ -12,6 +12,7 @@
   "default_herdr_session": "default",
   "video_share_command": null,
   "test_approver": null,
+  "alarm": null,
   "hub": null,
   "hub_url": null
 }

@@ -5,8 +5,10 @@ to the other machines. On every other machine it only delivers to the sessions t
 """
 import logging
 import logging.handlers
+import os
 import queue
 import ssl
+import subprocess
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -491,9 +493,9 @@ class Listener:
                 continue
             try:
                 self.deliver_one(rid, ref)
-            except Exception:
+            except Exception as e:
                 log.exception("delivery %s %s crashed", rid, ref)
-                store.update(rid, lambda r: self._after(r, ref, router.Result("retry", "delivery crashed; see the log")))
+                store.update(rid, lambda r: self._after(r, ref, router.Result("retry", f"{type(e).__name__}: {e}")))
             finally:
                 self.in_flight.discard((rid, ref))
 
@@ -641,6 +643,52 @@ class Listener:
 
     # ----- run -----
 
+    def alarm(self):
+        """The hub, every 30 seconds: an answer this tool has failed to deliver is said in the alarm channel and to the
+        agent that owns the tool. From November 12 to 15, 2026 one machine's deliveries all failed; the card threads were
+        told "delivery crashed; see the log", which reached the approver and nobody who could fix it."""
+        alarm = self.s.get("alarm")
+        if not alarm:
+            return
+        records = store.all_records()
+        now = store.now()
+        for rec, item, reason in core.overdue(records, now):
+            if rec.get("test") and not config.is_test_run():
+                continue
+            rid, ref = rec["id"], item["ref"]
+
+            def mark(r):
+                i = next(i for i in r["outbox"] if i["ref"] == ref)
+                if i.get("alarmed_at") or i.get("delivered_at"):
+                    return None
+                i["alarmed_at"] = store.iso(now)
+                return r, i
+
+            marked = store.update(rid, mark)   # saved before anything is sent, so a crash never repeats an alarm
+            if not marked:
+                continue
+            r, i = marked
+            age = int((now - store.parse(i["created"])).total_seconds())
+            machine = core.machine_of(r)
+            try:
+                line = (f"🚨 {core.who()}'s answer on {rid} ({core.one_line(r['title'])}) hasn't reached "
+                        f"{core.one_line(r['agent'])} after {age} seconds: {core.one_line(reason)}. "
+                        f"{slackapi.message_url(r['thread_ts'])}")
+                slackapi.post([], line, channel_id=alarm["channel"])
+            except Exception:
+                log.exception("alarm post for %s %s failed", rid, ref)
+            paragraph = (f"This is an alarm from the approvals service on the hub, not a person. "
+                         f"{core.who()}'s answer on {rid} ({core.one_line(r['title'])}) has not reached "
+                         f"{core.one_line(r['agent'])} on {machine}: {core.one_line(reason)}. "
+                         f"The answer is safe on the hub and will be typed in as soon as delivery works, "
+                         f"or handed over when the agent runs `approvals inbox`. "
+                         f"Look at {machine}'s ~/.approvals/logs/listener.log.")
+            try:
+                cmd = [os.path.expanduser(alarm["wake"][0]), *alarm["wake"][1:]]
+                subprocess.run(cmd, input=paragraph, text=True, timeout=60, check=True)
+            except Exception:
+                log.exception("alarm wake for %s %s failed", rid, ref)
+
     def loop(self, every, fn):
         while not self.stop.is_set():
             try:
@@ -675,6 +723,7 @@ class Listener:
             threading.Thread(target=self.loop, args=(5, self.poll_once), daemon=True),
             threading.Thread(target=self.loop, args=(self.s["sweep_seconds"], self.sweep), daemon=True),
             threading.Thread(target=self.loop, args=(5, self.deliver_due), daemon=True),
+            threading.Thread(target=self.loop, args=(30, self.alarm), daemon=True),
             threading.Thread(target=self.loop, args=(5, self.lists), daemon=True),   # answers an ask within seconds
             threading.Thread(target=self.delivery_worker, daemon=True),
             threading.Thread(target=self.loop, args=(3, self.confirm_typed), daemon=True),

@@ -67,6 +67,7 @@ make install MACHINE=laptop
 | `default_herdr_session` | Where the listener opens panes when an agent's own Herdr session is gone. |
 | `video_share_command` | Optional. A command that publishes a video and prints `URL: <link>`. Without it, videos go into the card's thread, where Slack plays them. |
 | `test_approver` | For test runs only. A user whose `[test reply]` posts count, and only on TEST cards. |
+| `alarm` | Optional. `{"channel": "<Slack channel id>", "wake": ["<program>", "<arg>"]}` posts delivery alarms to that channel and runs the command with the alarm on standard input. A leading `~` in the program path is expanded. |
 | `id_prefix` | Optional. What request numbers start with; `AP` unless set. Each Slack workspace needs its own. |
 | `folders` | Optional. Agents working in these folders, or inside them, use this workspace. See [More than one Slack workspace](#more-than-one-slack-workspace). |
 | `hub`, `hub_url` | Optional. The machine that holds the records and the Slack connection, and where the others reach it. See [More than one machine](#more-than-one-machine). |

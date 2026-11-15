@@ -46,6 +46,7 @@ DEFAULTS = {
     "default_herdr_session": "default",
     "video_share_command": None,   # e.g. ["bash", "/path/to/cf_share.sh"]; must print "URL: <url>"
     "test_approver": None,         # a Slack user id whose "[test reply]" posts count, on TEST cards only
+    "alarm": None,                 # channel and command for delivery failures
     "sweep_seconds": 30,
     "id_prefix": "AP",             # request numbers, AP-0001; each workspace needs its own
     "folders": [],                 # agents working in these folders use this workspace

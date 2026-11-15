@@ -26,7 +26,12 @@ class Herdr:
 
     def call(self, *args, timeout=30):
         cmd = ["herdr", "--session", self.session, *args]
-        r = self.run(cmd, capture_output=True, text=True, timeout=timeout)
+        try:
+            r = self.run(cmd, capture_output=True, text=True, timeout=timeout)
+        except FileNotFoundError as e:
+            # Not a HerdrError: callers that catch that would read a missing program as a closed pane and report
+            # "its session isn't running", which tells nobody (one Mac, November 12 to 15, 2026).
+            raise RuntimeError(f"herdr isn't on this service's PATH on {config.machine()}") from e
         if r.returncode != 0:
             raise HerdrError((r.stderr or r.stdout or "").strip()[:400])
         out = (r.stdout or "").strip()
