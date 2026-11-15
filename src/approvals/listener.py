@@ -56,6 +56,7 @@ FETCH_SECONDS = 5        # how often a machine other than the hub asks it for an
 WAITING = "hourglass_flowing_sand"   # ⏳ on a card while its decision waits for the agent to catch up
 STRAY_SECONDS = 60       # how often a machine looks for answers whose session turned up on it
 QUIET = 60               # reconnect when Slack hasn't answered a ping for this long
+HELLO = 30               # reconnect when a new connection hasn't heard Slack's hello, which comes within a second or two
 
 
 def is_approver(msg, rec):
@@ -709,6 +710,16 @@ class Listener:
         self._conn = (cur, since)
         return now - max(since, getattr(cur, "last_ping_pong_time", None) or 0)
 
+    def unheard(self, client, now=None):
+        """Seconds the current connection has gone without Slack's hello, or 0 once it has said it.
+
+        Slack says hello on every connection it will send events on. One it never greets is open, answers every
+        ping, and carries nothing: on November 14, 2026 another app of ours sat on one for eight hours and heard
+        no message. A message can be read back later; a button press on a card cannot."""
+        now = time.time() if now is None else now
+        cur, since = getattr(self, "_conn", (None, now))   # kept by quiet(), which every pass calls first
+        return 0 if getattr(self, "_hello", None) is cur else now - since
+
     def run(self):
         if not config.is_hub():
             return self.run_delivery()
@@ -717,6 +728,8 @@ class Listener:
             hub.serve()
         sm = SlackConnection(app_token=config.app_token(), web_client=slackapi.client())
         sm.socket_mode_request_listeners.append(self.on_socket)
+        sm.on_message_listeners.append(
+            lambda raw: '"type":"hello"' in raw[:40] and setattr(self, "_hello", sm.current_session))
         sm.connect()
         log.info("connected to Slack; watching %s", self.s["channel"])
         threads = [
@@ -735,11 +748,15 @@ class Listener:
             while not self.stop.is_set():
                 time.sleep(1)
                 quiet = self.quiet(sm)
-                if quiet <= QUIET:
+                if quiet <= QUIET and self.unheard(sm) <= HELLO:
                     continue
                 # Slack's client reconnects a closed connection itself. It never doubts one that has had no pong
-                # yet, so that one is replaced here, the client's own way: a new address, under its lock.
-                log.warning("no answer from Slack for %s seconds; reconnecting", int(quiet))
+                # yet, or one Slack never greeted, so those are replaced here, the client's own way: a new
+                # address, under its lock.
+                if quiet > QUIET:
+                    log.warning("no answer from Slack for %s seconds; reconnecting", int(quiet))
+                else:
+                    log.warning("no hello from Slack on this connection in %s seconds, so it carries nothing; reconnecting", HELLO)
                 try:
                     sm.connect_to_new_endpoint(force=True)
                 except Exception:

@@ -31,6 +31,20 @@ def test_quiet_counts_from_the_session_or_its_latest_pong():
     assert listener_instance.quiet(client, now=1100.0) == 39
 
 
+def test_unheard_counts_until_slack_greets_the_current_connection():
+    listener_instance = listener.Listener.__new__(listener.Listener)
+    first = SimpleNamespace(last_ping_pong_time=None)
+    client = SimpleNamespace(current_session=first)
+
+    listener_instance.quiet(client, now=1000.0)
+    assert listener_instance.unheard(client, now=1031.0) == 31 > listener.HELLO
+    listener_instance._hello = first                     # Slack's hello arrived on this connection
+    assert listener_instance.unheard(client, now=1031.0) == 0
+    client.current_session = SimpleNamespace(last_ping_pong_time=None)   # a reconnect: a new one, not greeted yet
+    listener_instance.quiet(client, now=1040.0)
+    assert listener_instance.unheard(client, now=1050.0) == 10
+
+
 def tls_server(plan):
     """A loopback TLS server. Each connection takes the next word from `plan`: "close" ends it right after the
     handshake; "hello" sends b"hello" a moment later, so the client's read has to wait for it."""
