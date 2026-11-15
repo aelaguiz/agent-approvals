@@ -213,16 +213,19 @@ def test_each_waiting_line_answers_its_card_in_one_tap(slack):
     rec = card(8, status="approved")   # approved, with a condition only the approver can clear: listed, nothing to tap
     rec["timeline"] = [{"text": "play it before it merges", "kind": "on_you", "part": None, "at": rec["created"]}]
     store.save(rec)
+    # A release: every row needs its own yes, so Approve all covers none and each row gets its own button
+    shaped(9, parts=[{"title": "Server", "own_yes": True}, {"title": "Google Play, 100%", "own_yes": True}])
     digest.tick(MON_8AM)
     no = lambda i, v=1: [("Deny", f"AP-000{i}|{v}|decline"), ("Remove", f"AP-000{i}|{v}|remove")]
     assert buttons_of(posted[0][0]) == [
         [("Approve", "AP-0001|1|approve")] + no(1),
         [("Approve", "AP-0002|2|approve")] + no(2, 2),   # the newest version's
         [("Approve all 2", "AP-0003|1|all")] + no(3),
-        [("Approve 1 of 2", "AP-0004|1|all")] + no(4),
+        [("Approve a", "AP-0004|1|p1:approve"), ("Approve b", "AP-0004|1|p2:approve")] + no(4),
         [("Approve all 3", "AP-0005|1|approve")] + no(5),
         [("Build the panel", "AP-0006|1|pick:0"), ("Build the rail", "AP-0006|1|pick:1")] + no(6),
         no(7),   # a choice in pictures is decided by looking at them
+        [("Approve Server", "AP-0009|1|p1:approve"), ("Approve Google Play, 100%", "AP-0009|1|p2:approve")] + no(9),
     ]
     assert "AP-0008" in text_of(posted[0][0]) and "waiting on you: play it before it merges" in text_of(posted[0][0])
 

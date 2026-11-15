@@ -22,6 +22,7 @@ log = logging.getLogger("approvals")
 HOUR = 8                        # posted at 8:00 am in the workspace's timezone
 WAITING = {"pending", "question"}
 GROUPS = ["🔴 *Expires today*", "🟡 *Expires tomorrow*", "⚪ *Later*"]
+ACTIONS_MAX = 25                # Slack's limit on buttons in one actions block
 
 
 _lock = threading.Lock()        # the sweep and a button press's follow-up both edit the list
@@ -113,9 +114,16 @@ def _buttons(rec):
     c = rec["versions"][-1]["card"]
     base = f"{rec['id']}|{len(rec['versions'])}"
     if c.get("parts"):
+        # Approve all covers two or more plain rows; every other open row (one that needs its own yes, a pick, or the
+        # one plain row left) gets its own button, as on the card, named for its row when the line has several. Without
+        # them a release card, whose rows all need their own yes, showed only Deny and Remove here.
         rows, left = cards.approve_all_rows(rec), cards.open_rows(rec)
-        label = "Approve" if len(left) == 1 else f"Approve all {len(rows)}" if len(rows) == len(left) else f"Approve {len(rows)} of {len(left)}"
-        yes = [cards.button(label, f"{base}|all", "primary")] if rows else []
+        yes = [cards.button(f"Approve all {len(rows)}" if len(rows) == len(left) else f"Approve {len(rows)} of {len(left)}",
+                            f"{base}|all", "primary")] if len(rows) >= 2 else []
+        for j, p in left:
+            if len(rows) < 2 or (j, p) not in rows:
+                yes += _row_buttons(base, j, p, named=len(left) > 1)
+        yes = yes[:ACTIONS_MAX - 2]   # Slack refuses the whole list past 25 buttons in a row; the card has the rest
     elif c.get("options"):
         yes = [] if any(o.get("image") for o in c["options"]) else [
             cards.button(cards.option_button(o), f"{base}|pick:{i}",
@@ -124,6 +132,15 @@ def _buttons(rec):
         yes = [cards.button(f"Approve all {len(c['items'])}" if c.get("items") else "Approve", f"{base}|approve", "primary")]
     return {"type": "actions", "block_id": f"list|{base}",
             "elements": yes + [cards.button("Deny", f"{base}|decline", "danger"), cards.button("Remove", f"{base}|remove")]}
+
+
+def _row_buttons(base, j, p, named):
+    """One row's yes on the list, the same press as its own buttons on the card: Approve, or its options."""
+    title = " ".join(str(p["title"]).split())
+    if p.get("options"):
+        return [cards.button(f"{title}: {cards.option_button(o)}" if named else cards.option_button(o), f"{base}|p{j}:pick:{i}",
+                             "primary" if o["name"] == p.get("pick") else None) for i, o in enumerate(p["options"])]
+    return [cards.button(f"Approve {title}" if named else "Approve", f"{base}|p{j}:approve", "primary")]
 
 
 def _line(rec, day, detail=None):
