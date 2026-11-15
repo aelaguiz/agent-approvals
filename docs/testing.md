@@ -133,6 +133,19 @@ A test hub must not connect to Slack: a second connection with the workspace's a
 
 ## Results
 
+### November 15, 2026: an answer follows an agent to its new session; the list; the service's tools
+
+Unit tests: 318 of 318. They cover an approved card leaving the list once nothing after the yes says it waits on the approver, a button on the list for each row Approve all leaves out, where the same agent runs now (`core.successor`: by a launcher's name from any folder, a typed name from the same folder only, never a folder's own name, an older sighting, another runtime or a fork), and a delivery that finds the asker gone handing the agent's open cards to its newer session, with the 💤 note only when that one isn't running either.
+
+| What was checked live | Result |
+| --- | --- |
+| The list after the fix, on the hub | Pass. Two cards approved days earlier left the list within seconds of the install (their agents had posted "waiting on you" before the yes), and a release card whose rows each need their own yes got a named Approve button per row. |
+| An answer for an agent started again in a new session | Pass, on Mini 4 with the hub on the Studio. A Claude agent launched with a launcher's name (`APPROVALS_FROM`) posted a TEST card and was closed; a second session was started in the same folder under the same name and ran `approvals status` on the card. A reply was then fed to the hub's record the way it takes the approver's own (`core.take_replies`; no stand-in approver is set on the hub). Mini 4 logged "waiting (its session isn't running)", one second later "isn't running as session …; it runs as … on mini-4 now, so its cards go there", and the answer was typed into the new session and seen in its transcript 8 seconds after the reply. The agent acted on it and answered in the thread. |
+| The same rule over the real cards, as a dry run | Of 68 open cards whose asking session ran nowhere, 43 went to the agent's live session by the rule; the rest belonged to agents that no longer run or had no newer session seen yet. 56 were then handed over with `approvals repoint`, one live member at a time. |
+| A machine whose service couldn't find herdr | Pass. On the one Mac where herdr sits in `~/.cargo/bin`, the reinstalled service's PATH holds it and reads a pane; before, 32 deliveries there had failed since November 12. |
+
+Not checked live: an agent that moved to another machine being found from the old machine's "waiting" (the hand-over is the same record change `repoint` makes, which those 56 cards now rest on).
+
 ### November 13, 2026: fork families
 
 Unit tests: 287 of 287. The family checks cover live delivery and resuming, inbox claims by recorded id, earlier id, transcript history and agent name, reach changes and repointing. The reviewer's and the deputy's roles are untouched: no fork of either exists. Tests also cover registration, workspace isolation, the 15-second cache and one-call inbox peek without collecting answers. Unregistered sessions and an operator's `inbox --all` keep their existing behavior. Live, on the installed package after the hub restarted on the published commit: `approvals fork` listed nothing and `approvals inbox --peek --session` printed 0 from a second machine; then a team's listener on a third machine, started on code that registers its forks, registered seven of its eight forks within two minutes (the first try, a minute before that machine had this commit, failed and was tried again by itself). Not seen live: an answer waiting for a closed fork, and a delivery while the lead was out of its pane; a real fork is a copy of a long session and its lead wasn't stopped for a test.
