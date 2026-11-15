@@ -506,6 +506,22 @@ def test_the_same_agents_newest_other_session_is_where_it_runs_now():
     assert core.successor(old, [old] + others[3:]) is None
 
 
+def test_a_name_joins_two_sessions_only_as_far_as_who_gave_it_can_be_trusted():
+    at, later = "2026-11-13T03:43:16+00:00", "2026-11-15T04:06:00+00:00"
+    work = MEMBER + "/work/2026-11-11-a-job"
+    # A member raises a card from a work folder; its launcher's name is the member's wherever a command runs
+    card = make_rec(SAMPLES["money"], reach=seen_as("s-old", "mini-1", at, cwd=work))
+    typed = make_rec(SAMPLES["money"], id="AP-0002", reach=seen_as("s-new", "m3-max", later))
+    by_launcher = make_rec(SAMPLES["money"], id="AP-0003", reach=seen_as("s-new", "m3-max", later, named_by_launcher=True))
+    assert core.successor(card, [card, typed]) is None                # the same typed name from another folder: not enough
+    assert core.successor(card, [card, by_launcher])["session_id"] == "s-new"
+    # A name nobody gave is the folder's own, which every session that runs a command there shares
+    root = "/Users/sam/work"
+    unnamed = make_rec(SAMPLES["money"], reach=seen_as("s-old", "mini-1", at, agent="work", cwd=root))
+    someone_else = make_rec(SAMPLES["money"], id="AP-0002", reach=seen_as("s-other", "mini-2", later, agent="work", cwd=root))
+    assert core.successor(unnamed, [unnamed, someone_else]) is None
+
+
 def test_a_fork_is_never_where_the_agent_it_was_forked_from_runs_now():
     old = make_rec(SAMPLES["money"], reach=seen_as("s-old", "mini-1", "2026-11-13T03:43:16+00:00"))
     fork = make_rec(SAMPLES["money"], id="AP-0002", reach=seen_as("s-fork", "mini-1", "2026-11-14T00:00:00+00:00"))

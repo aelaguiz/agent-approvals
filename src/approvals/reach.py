@@ -18,6 +18,7 @@ def capture(agent_name=None):
     cwd = os.getcwd()
     return {
         "agent": env.get("APPROVALS_FROM") or agent_name or env.get("APPROVALS_AGENT") or Path(cwd).name,
+        "named_by_launcher": bool(env.get("APPROVALS_FROM")),   # the member's own name, whatever folder it works in
         "runtime": runtime,
         "session_id": sid,
         "cwd": cwd,

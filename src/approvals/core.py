@@ -730,18 +730,24 @@ def _folder(cwd):
 
 def successor(rec, records):
     """Where the agent that asked runs now, as reach, once its session is gone: the newest other session seen
-    running an approvals command under the same name, in the same folder and runtime, since this card last heard
-    from its asker. None when there is none.
+    running an approvals command under the same name and runtime since this card last heard from its asker. None
+    when there is none.
 
     An agent started again (a pod member restarted, a pod restored or moved to another machine) is a new session
-    with nothing of the old one's history, so nothing in its transcript ties the two; what its launcher gives both
-    is the name and the folder. Until November 15, 2026 only a launcher's own `approvals repoint` joined them, and
-    68 open cards from 34 agents named a session that ran nowhere: an answer on one got "isn't running" in Slack
-    while the agent worked on, in its new session. A fork is never the agent it was forked from, as everywhere."""
+    with nothing of the old one's history, so nothing in its transcript ties the two; its name does. Until November
+    15, 2026 only a launcher's own `approvals repoint` joined them, and 68 open cards from 34 agents named a session
+    that ran nowhere: an answer on one got "isn't running" in Slack while the agent worked on, in its new session.
+
+    How far a name is trusted follows who gave it. A name its launcher set (APPROVALS_FROM) is the member's own,
+    whatever folder the command ran in: members raise cards from their work folders. A name the agent typed counts
+    only from the same folder. A name nobody gave is the folder's own, shared by every session that ever ran there
+    (ten agents had run a command from the repository's root as "psbrain"), so it joins nothing. A fork is never
+    the agent it was forked from, as everywhere."""
     old = rec.get("reach") or {}
-    who = (old.get("agent"), _folder(old.get("cwd")), old.get("runtime"))
-    if not all(who) or not old.get("session_id"):
+    name, folder = old.get("agent"), _folder(old.get("cwd"))
+    if not name or not old.get("session_id"):
         return None
+    typed = bool(folder) and name != folder.rstrip("/").rsplit("/", 1)[-1]
     families = store.forks()
     known = {old["session_id"], *old.get("earlier_ids", [])}
     best = None
@@ -749,8 +755,9 @@ def successor(rec, records):
         seen = [r.get("reach") or {}] + [e["seen"] for e in r.get("events") or []
                                          if e["kind"] == "used_by_other_session" and e.get("seen")]
         for c in seen:
-            if ((c.get("agent"), _folder(c.get("cwd")), c.get("runtime")) == who and c.get("session_id")
-                    and c["session_id"] not in known and c.get("machine")
+            if (c.get("agent") == name and c.get("runtime") == old.get("runtime")
+                    and (c.get("named_by_launcher") or (typed and _folder(c.get("cwd")) == folder))
+                    and c.get("session_id") and c["session_id"] not in known and c.get("machine")
                     and families.get(c["session_id"]) == families.get(old["session_id"])
                     and (c.get("updated") or "") > max(old.get("updated") or "", (best or {}).get("updated") or "")):
                 best = c
