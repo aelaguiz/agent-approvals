@@ -14,7 +14,10 @@ LEGACY_LABELS    := com.funcountry.approvals
 UNIT             := agent-approvals
 SYSTEMD_DIR      := $(HOME)/.config/systemd/user
 UID              := $(shell id -u)
-TOOL_DIRS        := $(shell for t in herdr aim uv; do p=$$(command -v $$t 2>/dev/null) && dirname "$$p"; done | awk '!seen[$$0]++' | paste -sd: -)
+# Where the service finds the tools it runs. Whoever installs may not have them on PATH (a machine's sync job runs
+# with a bare one), so the usual places are looked in too: on one Mac herdr sat in ~/.cargo/bin, the install's PATH
+# lacked it, and from November 12 to 15, 2026 no answer could be typed into a session there.
+TOOL_DIRS        := $(shell PATH="$$PATH:$(HOME)/.cargo/bin:$(HOME)/.local/bin:/opt/homebrew/bin:/usr/local/bin"; for t in herdr aim uv; do p=$$(command -v $$t 2>/dev/null) && dirname "$$p"; done | awk '!seen[$$0]++' | paste -sd: -)
 SERVICE_PATH     := $(HOME)/.local/bin:$(TOOL_DIRS):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 
 # The main workspace's service is $(LABEL); another workspace's adds its folder name: $(LABEL).<name>.
@@ -25,7 +28,7 @@ unit_for = if [ "$(1)" = "$(APPROVALS_HOME)" ]; then echo $(UNIT); else echo $(U
 # workspace's hub, delivery to this machine's own sessions elsewhere. `approvals role` says which, or why neither.
 served = { role=$$(APPROVALS_HOME=$(1) $(BIN) role); case "$$role" in hub|delivery) true;; *) echo "== $(1): no service here ($$role)"; false;; esac; }
 
-.PHONY: install install_cli install_skill install_config machine_file install_service install_launchd install_systemd verify_install uninstall test test-live
+.PHONY: install install_cli install_skill install_config machine_file install_service service_tools install_launchd install_systemd verify_install uninstall test test-live
 
 install: install_cli install_skill install_config machine_file install_service
 	@for home in $(HOMES); do $(call served,$$home) || continue; echo "== $$home"; APPROVALS_HOME=$$home $(BIN) doctor || exit 1; done
@@ -62,10 +65,14 @@ machine_file:
 
 # launchd on macOS, systemd elsewhere.
 ifeq ($(shell uname),Darwin)
-install_service: install_launchd
+install_service: service_tools install_launchd
 else
-install_service: install_systemd
+install_service: service_tools install_systemd
 endif
+
+# The service types answers into sessions through herdr; without it every delivery fails where only a log shows it.
+service_tools:
+	@PATH="$(SERVICE_PATH)" command -v herdr >/dev/null || { echo "FAIL: herdr is not on the service's PATH ($(SERVICE_PATH)), so answers could not be typed into sessions here"; exit 1; }
 
 install_launchd:
 	@for l in $(LEGACY_LABELS); do launchctl bootout gui/$(UID)/$$l 2>/dev/null || true; rm -f "$(HOME)/Library/LaunchAgents/$$l.plist"; done

@@ -36,7 +36,8 @@ def refresh(rec, new):
 
     Only the asker itself, or a moved copy of it, may update where answers go. Another session running a
     command on this request (a different agent, a later run of the same scheduled agent, a sub-agent) is
-    noted on the record but doesn't take over its answers.
+    noted on the record but doesn't take over its answers while the asker may still be running; once an answer
+    finds the asker gone, the service hands the card to the same agent's newer session (core.successor).
     """
     old = rec.get("reach") or {}
     if not new.get("session_id"):
@@ -44,7 +45,9 @@ def refresh(rec, new):
     if old.get("session_id") and new["session_id"] != old["session_id"]:
         if new.get("runtime") != old.get("runtime") or not transcripts.is_copy(
                 old["runtime"], old["session_id"], new["session_id"], rec.get("id")):
-            store.event(rec, "used_by_other_session", session_id=new["session_id"], agent=new.get("agent"))
+            # Where that session is goes on the record too: if the asker turns out to be gone, this is how its
+            # answers find the same agent's new session (core.successor).
+            store.event(rec, "used_by_other_session", session_id=new["session_id"], agent=new.get("agent"), seen=new)
             return
     ids = list(old.get("earlier_ids", []))
     if old.get("session_id") and old["session_id"] != new["session_id"] and old["session_id"] not in ids:

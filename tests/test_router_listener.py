@@ -479,6 +479,79 @@ def test_a_later_run_of_the_same_job_takes_an_answer_waiting_for_a_run_that_stop
     assert store.load("AP-0001")["outbox"][0]["claimed_by"] == "run-2"
 
 
+# ----- an agent started again in a new session still gets its answers -----
+
+MEMBER = "/Users/sam/work/pods/social/instagram"
+
+
+def seen_as(session, machine, at, agent="Social pod · Instagram member", cwd=MEMBER, **kw):
+    return {"runtime": "claude", "session_id": session, "agent": agent, "cwd": cwd, "machine": machine,
+            "herdr_session": "pods", "herdr_pane": "w3:p1", "updated": at, **kw}
+
+
+def test_the_same_agents_newest_other_session_is_where_it_runs_now():
+    old = make_rec(SAMPLES["money"], agent="Social pod · Instagram member", reach=seen_as("s-old", "mini-1", "2026-11-13T03:43:16+00:00"))
+    others = [
+        make_rec(SAMPLES["money"], id="AP-0002", reach=seen_as("s-mid", "m3-max", "2026-11-14T18:39:00+00:00")),
+        # On Linux the same folder sits under /home; and a command on someone else's card shows where it ran too
+        make_rec(SAMPLES["money"], id="AP-0003", reach=seen_as("s-x", "mini-2", "2026-11-15T01:00:00+00:00", agent="Lessons pod · writer"),
+                 events=[{"kind": "used_by_other_session", "at": "2026-11-15T04:06:00+00:00", "session_id": "s-new",
+                          "seen": seen_as("s-new", "home", "2026-11-15T04:06:00+00:00", cwd="/home/sam/work/pods/social/instagram")}]),
+        make_rec(SAMPLES["money"], id="AP-0004", reach=seen_as("s-before", "mini-1", "2026-11-12T00:00:00+00:00")),   # older than the card's own
+        make_rec(SAMPLES["money"], id="AP-0005", reach=seen_as("s-lead", "m3-max", "2026-11-15T05:00:00+00:00", cwd="/Users/sam/work/pods/social/lead")),
+        make_rec(SAMPLES["money"], id="AP-0006", reach=seen_as("s-codex", "m3-max", "2026-11-15T05:00:00+00:00", runtime="codex")),
+    ]
+    assert core.successor(old, [old] + others)["session_id"] == "s-new"
+    assert core.successor(old, [old] + others[:1])["session_id"] == "s-mid"
+    assert core.successor(old, [old] + others[3:]) is None
+
+
+def test_a_fork_is_never_where_the_agent_it_was_forked_from_runs_now():
+    old = make_rec(SAMPLES["money"], reach=seen_as("s-old", "mini-1", "2026-11-13T03:43:16+00:00"))
+    fork = make_rec(SAMPLES["money"], id="AP-0002", reach=seen_as("s-fork", "mini-1", "2026-11-14T00:00:00+00:00"))
+    assert core.successor(old, [old, fork])["session_id"] == "s-fork"
+    store.add_fork("s-fork")
+    assert core.successor(old, [old, fork]) is None
+
+
+def test_an_answer_for_a_session_that_is_gone_goes_to_the_same_agents_new_session(monkeypatch):
+    """The social pod moved machines on November 14, 2026: each member got a new session, eight of the Instagram
+    member's open cards still named its old one, and Amir's answer on one was told the member wasn't running."""
+    old, new = seen_as("s-old", "mini-1", "2026-11-13T03:43:16+00:00"), seen_as("s-new", "m3-max", "2026-11-15T04:06:00+00:00")
+    name = old["agent"]
+    answered = make_rec(SAMPLES["money"], agent=name, status="approved", reach=dict(old))
+    core.enqueue(answered, "comment", "Amir replied: do it")
+    put(answered)
+    put(make_rec(SAMPLES["money"], id="AP-0002", agent=name, status="approved", reach=dict(old)))   # its other open card
+    put(make_rec(SAMPLES["money"], id="AP-0003", agent=name, status="done", reach=dict(old)))       # a finished one stays
+    put(make_rec(SAMPLES["money"], id="AP-0004", agent=name, reach=dict(new)))                      # raised since it moved
+    monkeypatch.setattr(router, "deliver", lambda reach, text, ref, **kw: router.Result("waiting", "its session isn't running"))
+    notes = []
+    monkeypatch.setattr(listener.slackapi, "note", lambda ts, text: notes.append(text))
+    ref = answered["outbox"][0]["ref"]
+    listener.Listener().deliver_one("AP-0001", ref)
+    rec = store.load("AP-0001")
+    assert rec["reach"]["session_id"] == "s-new" and rec["reach"]["machine"] == "m3-max" and rec["reach"]["earlier_ids"] == ["s-old"]
+    assert rec["reach"]["agent"] == name and rec["moves"] == [["s-old", "s-new"]]
+    assert core.to_deliver([rec], "m3-max")[0] == [["AP-0001", ref]]   # typed in on that machine's next pass
+    assert not rec["outbox"][0].get("waiting_for_agent") and notes == []
+    assert store.load("AP-0002")["reach"]["session_id"] == "s-new"
+    assert store.load("AP-0003")["reach"]["session_id"] == "s-old"
+    # Not running there either: the agent really is stopped, and he is told so once
+    listener.Listener().deliver_one("AP-0001", ref)
+    assert store.load("AP-0001")["outbox"][0]["waiting_for_agent"] and len(notes) == 1 and "isn't running" in notes[0]
+
+
+def test_a_command_from_another_session_says_where_it_ran(monkeypatch):
+    from approvals import reach as where
+    monkeypatch.setattr(transcripts, "is_copy", lambda *a: False)
+    rec = make_rec(SAMPLES["money"], reach=seen_as("s-old", "mini-1", "2026-11-13T03:43:16+00:00"))
+    new = seen_as("s-new", "m3-max", "2026-11-15T04:06:00+00:00")
+    where.refresh(rec, new)
+    assert rec["reach"]["session_id"] == "s-old"                      # the asker may still be running: not yet
+    assert rec["events"][-1]["seen"] == new and core.successor(rec, [rec]) == new
+
+
 def test_a_ref_found_by_chance_inside_a_longer_id_is_not_a_delivery(tmp_path):
     t = tmp_path / "t.jsonl"
     t.write_text('{"uuid": "0f4d77abc1239e5b"}\n')

@@ -1,6 +1,7 @@
 """What happens to a request: decisions, replies, deadlines, card refreshes, messages to the agent."""
 import json
 import logging
+import re
 import secrets
 from datetime import datetime, timedelta
 
@@ -720,6 +721,40 @@ STRAY_DAYS = 14
 def machine_of(rec):
     """The machine the asker last ran an approvals command on; the hub's for cards from before machines had names."""
     return (rec.get("reach") or {}).get("machine") or config.hub()
+
+
+def _folder(cwd):
+    """A folder as its path under the user's home: one checkout is /Users/<name>/... on a Mac and /home/<name>/... on Linux."""
+    return re.sub(r"^/(?:Users|home)/[^/]+/", "~/", cwd or "")
+
+
+def successor(rec, records):
+    """Where the agent that asked runs now, as reach, once its session is gone: the newest other session seen
+    running an approvals command under the same name, in the same folder and runtime, since this card last heard
+    from its asker. None when there is none.
+
+    An agent started again (a pod member restarted, a pod restored or moved to another machine) is a new session
+    with nothing of the old one's history, so nothing in its transcript ties the two; what its launcher gives both
+    is the name and the folder. Until November 15, 2026 only a launcher's own `approvals repoint` joined them, and
+    68 open cards from 34 agents named a session that ran nowhere: an answer on one got "isn't running" in Slack
+    while the agent worked on, in its new session. A fork is never the agent it was forked from, as everywhere."""
+    old = rec.get("reach") or {}
+    who = (old.get("agent"), _folder(old.get("cwd")), old.get("runtime"))
+    if not all(who) or not old.get("session_id"):
+        return None
+    families = store.forks()
+    known = {old["session_id"], *old.get("earlier_ids", [])}
+    best = None
+    for r in records:
+        seen = [r.get("reach") or {}] + [e["seen"] for e in r.get("events") or []
+                                         if e["kind"] == "used_by_other_session" and e.get("seen")]
+        for c in seen:
+            if ((c.get("agent"), _folder(c.get("cwd")), c.get("runtime")) == who and c.get("session_id")
+                    and c["session_id"] not in known and c.get("machine")
+                    and families.get(c["session_id"]) == families.get(old["session_id"])
+                    and (c.get("updated") or "") > max(old.get("updated") or "", (best or {}).get("updated") or "")):
+                best = c
+    return best
 
 
 TYPED_SECONDS = 90   # a message typed into a session should show up in its transcript by then, or it's typed again

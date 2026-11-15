@@ -15,6 +15,7 @@ from slack_sdk.socket_mode import SocketModeClient
 from slack_sdk.socket_mode.response import SocketModeResponse
 
 from . import basecamp, cards, config, core, digest, router, slackapi, store, transcripts
+from . import reach as reach_of
 
 log = logging.getLogger("approvals")
 
@@ -509,6 +510,8 @@ class Listener:
         res = router.deliver(reach, item["text"], ref, request_id=rid, resume=False, confirm=False)
         log.info("%s %s%s: %s (%s); saving took %.1fs, typing %.1fs", rid, ref, f" ({to})" if to else "", res.status,
                  res.reason, saved - start, time.monotonic() - saved)
+        if res.status == "waiting" and not to and self.follow(rec, ref):
+            return
         sid = res.reach.get("session_id")
         if to:
             res.reach, res.moves = {}, []   # where the reviewer or the deputy is moves nothing of the asker's
@@ -521,6 +524,30 @@ class Listener:
             nxt = core.next_item(store.load(rid), to)
             if nxt and nxt["kind"] != "decision" and core.due(nxt):
                 self.queue([[rid, nxt["ref"]]])
+
+    def follow(self, rec, ref):
+        """The session that asked isn't running. If the same agent has been seen in a newer session (it was started
+        again, or its pod moved to another machine), every open card of the old session goes to that one, and this
+        answer is typed in there on the next pass of the machine it is on. True when this card moved; False leaves
+        the answer waiting for an agent that really is stopped."""
+        records = store.all_records()
+        new = core.successor(rec, records)
+        if not new:
+            return False
+        old = rec["reach"]["session_id"]
+
+        def move(r):
+            if not reach_of.take_over(r, old, new):
+                return False
+            for i in r.get("outbox", []):
+                if i["ref"] == ref:
+                    i.pop("sent_at", None)   # nothing was typed
+            return True
+        moved = [r["id"] for r in records if (r["id"] == rec["id"] or r["status"] in store.OPEN)
+                 and (r.get("reach") or {}).get("session_id") == old and store.update(r["id"], move)]
+        log.info("%s: %s isn't running as session %s; it runs as %s on %s now, so its cards go there: %s", rec["id"],
+                 rec["agent"], old, new["session_id"], new["machine"], ", ".join(moved) or "none")
+        return rec["id"] in moved
 
     def confirm_typed(self):
         """A message typed into a session is delivered once it shows up in the session's transcript, which is when
