@@ -227,6 +227,32 @@ def test_each_waiting_line_answers_its_card_in_one_tap(slack):
     assert "AP-0008" in text_of(posted[0][0]) and "waiting on you: play it before it merges" in text_of(posted[0][0])
 
 
+def test_an_approved_card_leaves_the_list_whatever_its_agent_said_waited_on_him_before(slack):
+    """Approved cards stayed on the list as waiting on him (November 12 to 15): one for a 'waiting on you' line its
+    agent posted before his yes, one for a 'waiting on you' line its agent had since followed with 'waiting on the
+    designer'. A condition posted after his yes still waits on him."""
+    posted, _ = slack
+    hours_ago = lambda h: store.iso(MON_8AM - timedelta(hours=h))
+    yes = lambda h: {"verdict": "approved", "version": 1, "by": "U1", "where": "button", "at": hours_ago(h)}
+    rec = card(1, status="approved")
+    rec["timeline"] = [{"text": "the card stands, for your choice", "kind": "on_you", "part": None, "at": hours_ago(5)}]
+    rec["decision"] = yes(4)
+    store.save(rec)
+    rec = card(2, status="approved")
+    rec["timeline"] = [{"text": "after your yes, one thing", "kind": "on_you", "part": None, "at": hours_ago(3.5)},
+                       {"text": "the designer drawing the rest", "kind": "waiting", "part": None, "at": hours_ago(3)}]
+    rec["decision"] = yes(4)
+    store.save(rec)
+    rec = card(3, status="approved")
+    rec["timeline"] = [{"text": "one message from you", "kind": "on_you", "part": None, "at": hours_ago(3)}]
+    rec["decision"] = yes(4)
+    store.save(rec)
+    digest.tick(MON_8AM)
+    listed = text_of(posted[0][0])
+    assert "AP-0001" not in listed and "AP-0002" not in listed
+    assert "waiting on you: one message from you" in listed
+
+
 def test_remove_crosses_it_off_and_tells_the_agent_it_is_closed_without_a_no(slack, monkeypatch):
     posted, updated = slack
     card(1)

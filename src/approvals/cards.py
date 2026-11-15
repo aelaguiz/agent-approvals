@@ -429,14 +429,23 @@ def _scope(rec, part):
 
 
 def pending_lines(rec, part=None):
-    """The newest 'next' and 'waiting on you' lines that nothing has happened after yet."""
+    """The newest 'next' line and the newest line saying who the card waits on, that nothing has happened after yet.
+    It waits on one party at a time, so a 'waiting' line replaces an earlier 'waiting on you' and the other way round.
+    And a 'waiting on you' line stops standing once the approver answers after it: his answer is what it waited for.
+    Without both, an approved card stayed on his list as waiting on him for a line its agent posted before his yes."""
     lines = _scope(rec, part)
     done_at = rec["done"]["at"] if part is None and rec.get("done") else ""
+    answer = ((rec.get("answers") or {}).get(part) if part else rec.get("decision")) or {}
     last_done = max([i for i, e in enumerate(lines) if e["kind"] == "done"] or [-1])
     out = {}
     for i, e in enumerate(lines):
         if i > last_done and e["kind"] in ("next", "on_you", "waiting") and e["at"] > done_at:
+            if e["kind"] != "next":
+                out.pop("on_you", None)
+                out.pop("waiting", None)
             out[e["kind"]] = e
+    if "on_you" in out and out["on_you"]["at"] < (answer.get("at") or ""):
+        del out["on_you"]
     return out
 
 
