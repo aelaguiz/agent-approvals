@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from approvals import cards, core, store
+from approvals import cards, config, core, store
 from samples import SAMPLES
 
 
@@ -64,6 +64,30 @@ def test_parallel_submits_get_distinct_numbers(tmp_home):
         ids = pool.map(_submit_one, [home] * 20)
     assert len(set(ids)) == 20
     assert len(store.all_records()) == 20
+
+
+def test_local_all_reuses_unchanged_records_and_returns_copies(monkeypatch):
+    config.ensure_dirs()
+    first, second = (config.REQUESTS / f"AP-{n:04d}.json" for n in (1, 2))
+    first.write_text(json.dumps({"id": "AP-0001", "values": ["first"]}))
+    second.write_text(json.dumps({"id": "AP-0002", "values": ["second"]}))
+    reads = []
+    read_text = type(first).read_text
+
+    def counted_read(path, *args, **kwargs):
+        if path in (first, second):
+            reads.append(path)
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(type(first), "read_text", counted_read)
+    records = store.local_all()
+    records[1]["values"].append("mutated")
+    first.write_text(json.dumps({"id": "AP-0001", "values": ["changed"]}))
+    assert store.local_all() == [
+        {"id": "AP-0001", "values": ["changed"]},
+        {"id": "AP-0002", "values": ["second"]},
+    ]
+    assert reads == [first, second, first]
 
 
 def test_first_press_wins_and_old_versions_refuse():
