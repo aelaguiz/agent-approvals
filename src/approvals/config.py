@@ -102,11 +102,7 @@ def target(name=None):
     if name not in targets:
         names = ", ".join(sorted(targets)) or "none"
         raise ConfigError(f"Unknown approver {name!r}; configured names: {names}")
-    value = targets[name]
-    if not isinstance(value, dict) or any(not isinstance(value.get(k), str) or not value[k].strip()
-                                          for k in ("channel", "approver", "approver_name")):
-        raise ConfigError(f"Approver {name!r} needs channel, approver and approver_name")
-    return value
+    return targets[name]
 
 
 def card_target(rec):

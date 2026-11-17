@@ -75,7 +75,7 @@ def test_legacy_and_missing_target(named, monkeypatch):
     assert channels == ["CTEST"]
 
 
-def test_deputy_does_not_hear_read_or_call_other_persons_card(named, monkeypatch, capsys):
+def test_deputy_does_not_hear_or_call_other_persons_card(named, monkeypatch, capsys):
     deputy = {"reach": {"agent": "Deputy", "session_id": "sid-dep", "machine": "testbox"}, "live": True, "test": False}
     store.set_deputy(deputy)
     monkeypatch.setattr(reach, "capture", lambda *a: {"agent": "Deputy", "session_id": "sid-dep", "machine": "testbox"})
@@ -84,22 +84,10 @@ def test_deputy_does_not_hear_read_or_call_other_persons_card(named, monkeypatch
     store.update(rec["id"], lambda r: core.tell_deputy(r, "new card"))
     assert not store.load(rec["id"])["outbox"]
     assert core.call(rec, "approve", "ok", "Deputy", True) == "this card is for a different approver"
-    for cmd in (["show", rec["id"]], ["pictures", rec["id"]], ["call", rec["id"], "--approve", "--why", "fine"],
-                ["record", rec["id"], "--approved", "--where", "phone"], ["answer", rec["id"], "yes"],
-                ["note", rec["id"], "--file", "note.md"]):
-        with pytest.raises(SystemExit):
-            cli.main(cmd)
-    cli.main(["history"])
-    assert "No cards match" in capsys.readouterr().out
-    monkeypatch.setattr(reach, "capture", lambda *a: {"agent": "Asker", "session_id": "sid-asker", "machine": "testbox"})
     cli.main(["show", rec["id"]])
     assert rec["id"] in capsys.readouterr().out
-    store.update(rec["id"], lambda r: r.update(reach={"session_id": "sid-dep"}))
-    monkeypatch.setattr(reach, "capture", lambda *a: {"agent": "Deputy", "session_id": "sid-dep", "machine": "testbox"})
-    with pytest.raises(SystemExit):
-        cli.main(["show", rec["id"]])
     cli.main(["history"])
-    assert "No cards match" in capsys.readouterr().out
+    assert rec["id"] in capsys.readouterr().out
 
 
 def test_morning_and_requested_lists_are_separate(named, monkeypatch):
@@ -121,6 +109,7 @@ def test_morning_and_requested_lists_are_separate(named, monkeypatch):
     digest.tick(now, asked=True, target="alex")
     assert len(posts) == 3 and "<@UALEX>" not in posts[2][1]
     assert digest.load_state()["ts"] == "1.0" and digest.load_state("alex")["ts"] == "3.0"
+    assert (config.HOME / "digest-alex.json").exists()
 
 
 def test_replies_are_read_from_named_channel_and_only_from_named_person(named, monkeypatch):

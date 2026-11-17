@@ -177,7 +177,7 @@ A card is JSON. [skills/approvals/references/cards.md](skills/approvals/referenc
 
 - **Records:** one JSON file per request in `~/.approvals/requests/`, on the hub.
 - **Log:** `~/.approvals/logs/listener.log`, on each machine.
-- **The lists:** the default approver's newest list and what it lists in `~/.approvals/digest.json`, and a separate state file for each named approver, on the hub.
+- **The lists:** the default approver's newest list and what it lists in `~/.approvals/digest.json`, and `~/.approvals/digest-<name>.json` for each named approver, on the hub.
 - **The reviewer:** which session reviews which card types, in `~/.approvals/reviewer.json`, on the hub.
 - **The deputy:** which session it is and whether auto-approval is on, in `~/.approvals/deputy.json`, on the hub.
 - **Fork families:** each registered session and its first fork session id, in `~/.approvals/forks.json`, on the hub.

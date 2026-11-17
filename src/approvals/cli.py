@@ -671,24 +671,12 @@ def _happened(rec):
     return out
 
 
-def _deputy_session():
-    deputy = store.deputy()
-    if not deputy:
-        return None
-    session = reach.capture().get("session_id")
-    return session if session and session == deputy["reach"].get("session_id") else None
-
-
-def _deputy_can_read(rec, session):
-    return not session or rec.get("target") is None
-
-
 def cmd_history(a):
     """Cards newest first, each with what happened on it in order: for the deputy to see how an asker's recent cards
     of a kind went, and how its own calls compare with what the approver did. Facts only, no ranking."""
     since = store.iso(store.now() - timedelta(days=a.days)) if a.days else None
     shown = 0
-    for rec in store.history_records(a.agent, a.type, since, a.limit, a.calls, bool(_deputy_session())):
+    for rec in store.history_records(a.agent, a.type, since, a.limit, a.calls):
         print(f"{rec['id']}  {_stamp(rec['created'])}  {rec['type']}  {rec['agent']}: {rec['title']}")
         for line in _happened(rec):
             print(f"    {line}")
@@ -747,8 +735,6 @@ def cmd_inbox(a):
         for item in rec.get("outbox", []):
             if item.get("delivered_at") or item.get("seen_by_agent"):
                 continue
-            if item.get("to") == "deputy" and rec.get("target") is not None:
-                continue
             if item.get("to") and not roles[item["to"]]:
                 continue
             if not item.get("to") and (not theirs or not own and not (item.get("inbox_only") or item.get("noted_failure"))):
@@ -760,8 +746,6 @@ def cmd_inbox(a):
             item["claimed_by"] = me.get("session_id")
         return taken
     for rec in store.waiting_records():
-        if roles["deputy"] and not _deputy_can_read(rec, me.get("session_id")):
-            continue
         r = rec.get("reach") or {}
         same_family = store.same_family(r.get("session_id"), me.get("session_id"))
         own = bool(me.get("session_id")) and same_family and me["session_id"] in [r.get("session_id"), *r.get("earlier_ids", [])]
@@ -791,10 +775,7 @@ def cmd_show(a):
 
 
 def cmd_list(a):
-    deputy = _deputy_session()
     for rec in store.all_records():
-        if not _deputy_can_read(rec, deputy):
-            continue
         if a.open and rec["status"] in ("done", "declined", "withdrawn"):
             continue
         print(f'{rec["id"]}  {rec["status"]:9}  v{len(rec["versions"])}  {rec["agent"]}: {rec["title"]}')
@@ -1034,8 +1015,6 @@ def main(argv=None):
         if a.cmd in {"ask", "revise", "answer", "ack", "done", "withdraw", "record", "status", "note", "show", "pictures"}:
             rec = store.load(a.id)
             config.card_target(rec)
-            if not _deputy_can_read(rec, _deputy_session()):
-                _die("This card is for a different approver.")
         a.fn(a)
     except (store.StoreError, config.ConfigError) as e:
         _die(str(e))

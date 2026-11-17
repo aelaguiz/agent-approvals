@@ -31,7 +31,7 @@ _lock = threading.Lock()        # the sweep and a button press's follow-up both 
 def _path(target=None):
     if target is None:
         return config.HOME / "digest.json"
-    return config.HOME / ("digest-" + hashlib.sha256(target.encode()).hexdigest() + ".json")
+    return config.HOME / f"digest-{target}.json"
 
 
 def load_state(target=None):
