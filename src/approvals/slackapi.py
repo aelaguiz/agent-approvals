@@ -90,6 +90,10 @@ def history(oldest, channel_id=None):
     return client().conversations_history(channel=channel_id or channel(), oldest=oldest, limit=200)["messages"]
 
 
+def open_dm(user):
+    return client().conversations_open(users=user)["channel"]["id"]
+
+
 def replies(ts, oldest=None, channel_id=None):
     kw = dict(channel=channel_id or channel(), ts=ts, limit=200)
     if oldest:

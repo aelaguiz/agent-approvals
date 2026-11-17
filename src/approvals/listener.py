@@ -60,9 +60,8 @@ HELLO = 30               # reconnect when a new connection hasn't heard Slack's 
 
 
 def is_approver(msg, rec):
-    """The approver's own replies count. In tests, a stand-in's "[test reply]" posts count on TEST cards only."""
-    s = config.card_target(rec)
-    if msg.get("user") == s["approver"] and not msg.get("bot_id"):
+    """Replies from someone who can answer count, along with a stand-in's "[test reply]" posts on TEST cards."""
+    if core.can_answer(rec, msg.get("user")) and not msg.get("bot_id"):
         return True
     tester = config.test_approver()
     return (bool(tester) and bool(rec.get("test")) and msg.get("user") == tester
@@ -132,15 +131,31 @@ class Listener:
         "taken": "You already took this one back.",
     }
 
+    def answer_refusal(self, rec, n, what, user):
+        target = config.card_target(rec)
+        if user == target["approver"]:
+            return None
+        only = f"Only {target['approver_name']} can decide approvals."
+        if what in ("remove", "takeback"):
+            return only
+        send = cards.also_on(rec, n)
+        if n != len(rec["versions"]) and send and send["user"] == user and send.get("sent_at"):
+            return self.REFUSED["stale"]
+        if not core.can_answer(rec, user):
+            return only
+        bad = core._check(rec, n)
+        if bad:
+            return self.REFUSED[bad]
+        if rec["status"] not in ("pending", "question"):
+            return self.REFUSED["already"]
+        return None
+
     def handle_click(self, payload):
         """Save the decision and the agent's message before acking; card and notes follow. A button that opens a
         pop-up opens it right after the ack, inside the 3 seconds Slack allows."""
         user = (payload.get("user") or {}).get("id")
         action = (payload.get("actions") or [{}])[0]
         if (payload.get("view") or {}).get("callback_id") == "approvals" and action.get("action_id") == "items":
-            rid = payload["view"]["private_metadata"].split("|", 1)[0]
-            if user != config.card_target(store.load(rid))["approver"]:
-                return None
             return lambda: self.recount_items(payload)
         try:
             rid, n, what = action.get("value", "").split("|", 2)
@@ -154,20 +169,26 @@ class Listener:
         rec = None if rid == "deputy" else store.load(rid)
         target = config.target() if rec is None else config.card_target(rec)
         source_channel = ((rec or {}).get("thread") or {}).get("channel")
-        if channel_id and channel_id not in (target["channel"], source_channel):
+        send = cards.also_on(rec, n) if rec else None
+        if channel_id and channel_id not in (target["channel"], source_channel, (send or {}).get("channel")):
             return None
         if what == "see" or what.startswith(("read:", "pic:")):
             return lambda: self.open_view(rid, n, what, trigger, user, thread_ts, channel_id)
-        if user != target["approver"]:
-            return lambda: slackapi.ephemeral(user, f"Only {target['approver_name']} can decide approvals.", thread_ts, channel_id=channel_id)
         if rid == "deputy":
+            if user != target["approver"]:
+                return lambda: slackapi.ephemeral(user, f"Only {target['approver_name']} can decide approvals.", thread_ts, channel_id=channel_id)
             return self.switch_deputy(what == "live", payload, user)
+        refused = self.answer_refusal(rec, n, what, user)
+        if refused:
+            return lambda: slackapi.ephemeral(user, refused, thread_ts, channel_id=channel_id)
         if what in ("change", "edit", "items") or what.endswith(":change"):
             return lambda: self.open_view(rid, n, what, trigger, user, thread_ts, channel_id)
-        r = store.update(rid, lambda rec: core.press(rec, n, what, by=user))
+        r = store.update(rid, lambda rec: self.answer_refusal(rec, n, what, user) or core.press(rec, n, what, by=user))
         log.info("click %s v%s %s -> %s", rid, n, what, r)
-        if r in self.REFUSED:
-            return lambda: slackapi.ephemeral(user, self.REFUSED[r], thread_ts, channel_id=channel_id)
+        if r != "ok":
+            return lambda: slackapi.ephemeral(user, self.REFUSED.get(r, r), thread_ts, channel_id=channel_id)
+        if what == "notmine":
+            return lambda: self.try_refresh(rid)
         return lambda: (self.try_refresh(rid), self.refresh_list())
 
     def switch_deputy(self, live, payload, user):
@@ -201,6 +222,9 @@ class Listener:
         """Open the pop-up a button asks for, unless the card moved on since it was drawn."""
         rec = store.load(rid)
         if what != "see" and not what.startswith(("read:", "pic:")):
+            refused = self.answer_refusal(rec, n, what, user)
+            if refused:
+                return slackapi.ephemeral(user, refused, thread_ts, channel_id=channel_id)
             bad = core._check(rec, n)
             j = int(what[1:].split(":")[0]) if what.startswith("p") else None
             if not bad and j and cards.part_id(rec["versions"][-1]["card"]["parts"][j - 1], j) in (rec.get("answers") or {}):
@@ -227,8 +251,11 @@ class Listener:
         """A tick in the Pick which pop-up: its button says how many it sends."""
         view = payload["view"]
         rid, n, _ = view["private_metadata"].split("|", 2)
+        rec = store.load(rid)
+        if self.answer_refusal(rec, int(n), "items", payload["user"]["id"]):
+            return
         ticked = self._ticked(view)
-        slackapi.views_update(view["id"], cards.items_view(store.load(rid), int(n), ticked), view.get("hash"))
+        slackapi.views_update(view["id"], cards.items_view(rec, int(n), ticked), view.get("hash"))
 
     @staticmethod
     def _ticked(view):
@@ -248,34 +275,36 @@ class Listener:
         if what == "see" or what.startswith(("read:", "pic:")):
             return None, None
         first = next(iter(values), "words")
-        target = config.card_target(store.load(rid))
-        if user != target["approver"]:
-            return {"response_action": "errors", "errors": {first: f"Only {target['approver_name']} can decide approvals."}}, None
+        rec = store.load(rid)
+        refused = self.answer_refusal(rec, n, what, user)
+        if refused:
+            return {"response_action": "errors", "errors": {first: refused}}, None
         words = ((values.get("words") or {}).get("words") or {}).get("value") or ""
         if what == "items":
             ticked = self._ticked(view)
             if not ticked:
                 return {"response_action": "errors", "errors": {first: "Tick at least one, or press No on the card."}}, None
-            r = store.update(rid, lambda rec: core.decide(rec, n, "approved", by=user, where="pop-up", items=ticked))
+            apply = lambda rec: core.decide(rec, n, "approved", by=user, where="pop-up", items=ticked)
         elif what == "edit":
             if not words.strip():
                 return {"response_action": "errors", "errors": {"words": "The words can't be empty."}}, None
-            r = store.update(rid, lambda rec: core.decide(rec, n, "approved", by=user, where="pop-up", edited=words))
+            apply = lambda rec: core.decide(rec, n, "approved", by=user, where="pop-up", edited=words)
         else:
             j = int(what[1:].split(":")[0]) if what.startswith("p") else None
-            r = store.update(rid, lambda rec: core.ask_change(rec, n, words, by=user, j=j))
+            apply = lambda rec: core.ask_change(rec, n, words, by=user, j=j)
+        r = store.update(rid, lambda rec: self.answer_refusal(rec, n, what, user) or apply(rec))
         log.info("pop-up %s v%s %s -> %s", rid, n, what, r)
-        if r in self.REFUSED:
-            return {"response_action": "errors", "errors": {first: self.REFUSED[r]}}, None
-        return None, lambda: self.after_submission(rid, what, words, view["id"])
+        if r != "ok":
+            return {"response_action": "errors", "errors": {first: self.REFUSED.get(r, r)}}, None
+        name = core.answerer(rec, {"by": user, "version": n})
+        return None, lambda: self.after_submission(rid, what, words, view["id"], name)
 
-    def after_submission(self, rid, what, words, view_id):
-        """His words from a pop-up go in the thread too, so the thread keeps the whole record."""
+    def after_submission(self, rid, what, words, view_id, who):
+        """Words from a pop-up go in the thread too, so the thread keeps the whole record."""
         self.try_refresh(rid)
         rec = store.load(rid)
-        who = config.card_target(rec)["approver_name"]
         if words and (what == "edit" or what.endswith("change")):
-            self.copy_to_source(rec, words, "view:" + view_id, store.now())
+            self.copy_to_source(rec, words, "view:" + view_id, store.now(), who)
         try:
             if what == "edit":
                 slackapi.note(rec["thread_ts"], f"✍️ {who} approved it with these words:\n{cards.quoted(words)}", **config.channel_args(rec))
@@ -285,11 +314,12 @@ class Listener:
         except Exception as e:
             log.warning("thread note for %s failed: %s", rid, e)
 
-    def copy_to_source(self, rec, words, key, at):
+    def copy_to_source(self, rec, words, key, at, name=None):
         source = rec.get("thread") or {}
         if not source.get("small_ts") or key in source.get("copied_keys", []):
             return
-        line = cards.ctx(f"💬 {cards.esc(config.card_target(rec)['approver_name'])}, on the card in <#{config.card_target(rec)['channel']}> · {cards.when(at)}")
+        target = config.card_target(rec)
+        line = cards.ctx(f"💬 {cards.esc(name or target['approver_name'])}, on the card in <#{target['channel']}> · {cards.when(at)}")
         try:
             # One quote when it fits a section's 3,000 characters once escaped, as nearly every reply does; else in pieces.
             chunks = ([cards.md(cards.quoted(words))] if len(cards.quoted(words)) <= 2900
@@ -328,7 +358,12 @@ class Listener:
         return out
 
     def poll_once(self):
-        recs = {(config.card_target(r)["channel"], r["thread_ts"]): r for r in self.watched()}
+        recs = {}
+        for rec in self.watched():
+            recs[config.card_target(rec)["channel"], rec["thread_ts"]] = (rec, None)
+            send = cards.also_on(rec, len(rec["versions"]))
+            if send and send.get("sent_at") and not send.get("handed_back_at") and rec["status"] not in core.FINAL:
+                recs[send["channel"], send["ts"]] = (rec, send)
         if not recs:
             return
         now = time.monotonic()
@@ -345,34 +380,62 @@ class Listener:
             self.next_poll[ts] = now + interval
             with self.poke_lock:
                 self.poke.discard(ts)   # a flag that didn't fit this round keeps its place for the next
+            rec, send = recs[ts]
             try:
-                self.poll_thread(recs[ts])
+                if send:
+                    self.poll_thread(rec, send)
+                else:
+                    self.poll_thread(rec)
             except Exception:
-                log.exception("polling %s failed", recs[ts]["id"])
+                log.exception("polling %s failed", rec["id"])
 
-    def poll_thread(self, rec):
-        last = rec.get("last_seen") or rec["thread_ts"]
-        msgs = [m for m in slackapi.replies(rec["thread_ts"], oldest=last, **config.channel_args(rec)) if float(m["ts"]) > float(last)]
+    def poll_thread(self, rec, send=None):
+        thread = send["ts"] if send else rec["thread_ts"]
+        channel = {"channel_id": send["channel"]} if send else config.channel_args(rec)
+        last = (send or rec).get("last_seen") or thread
+        msgs = [m for m in slackapi.replies(thread, oldest=last, **channel) if float(m["ts"]) > float(last)]
         if not msgs:
             return
-        mine = [(m["ts"], reply_text(m)) for m in msgs if is_approver(m, rec) and reply_text(m).strip()]
         newest = max(m["ts"] for m in msgs)
 
         def apply(r):
-            if float(newest) <= float(r.get("last_seen") or 0):
-                return None
-            r["last_seen"] = newest
-            kind = None
-            for reply in mine:   # each its own message: the approver correcting himself should reach the agent every time
-                if float(reply[0]) > float(last):
-                    kind = core.take_replies(r, [reply])
-            return kind
-        kind = store.update(rec["id"], apply)
-        if kind:
-            log.info("%s: %d repl%s from the approver -> %s", rec["id"], len(mine), "y" if len(mine) == 1 else "ies", kind)
-            for ts, words in mine:
-                self.copy_to_source(store.load(rec["id"]), words, "reply:" + ts,
-                                    datetime.fromtimestamp(float(ts), tz=timezone.utc))
+            if send:
+                seen = cards.also_on(r, len(r["versions"]))
+                if not seen or seen.get("ts") != thread or seen.get("handed_back_at") or r["status"] in core.FINAL:
+                    return []
+            else:
+                seen = r
+            cursor = float(seen.get("last_seen") or last)
+            if float(newest) <= cursor:
+                return []
+            seen["last_seen"] = newest
+            accepted = []
+            for m in msgs:   # each its own message, so a correction reaches the agent too
+                ts, words, user = m["ts"], reply_text(m), m.get("user")
+                if float(ts) <= cursor or not words.strip() or not is_approver(m, r) or (send and user != seen["user"]):
+                    continue
+                n = len(r["versions"])
+                member = cards.teammate(r, {"by": user, "version": n})
+                if member and not send and float(ts) < float(cards.also_on(r, n)["ts"]):
+                    continue
+                kind = core.take_replies(r, [(ts, words)], react_ts=core.card_ts(r) if send else None, by=user)
+                name = member or core.who(r)
+                accepted.append((ts, words, name, kind))
+            return accepted
+
+        accepted = store.update(rec["id"], apply)
+        if accepted:
+            for ts, words, name, kind in accepted:
+                log.info("%s: reply from %s -> %s", rec["id"], name, kind)
+                if send:
+                    try:
+                        slackapi.note(rec["thread_ts"], f"💬 {cards.esc(name)} replied in a direct message:\n{cards.quoted(words)}",
+                                      **config.channel_args(rec))
+                    except Exception as e:
+                        log.warning("direct message reply note for %s failed: %s", rec["id"], e)
+                else:
+                    self.copy_to_source(store.load(rec["id"]), words, "reply:" + ts,
+                                        datetime.fromtimestamp(float(ts), tz=timezone.utc), name)
             if store.load(rec["id"]).get("card_dirty"):
                 self.try_refresh(rec["id"])
 
@@ -395,9 +458,38 @@ class Listener:
                 store.update(rec["id"], lambda r: core.expire(r) if r["status"] in ("pending", "question") else None)
                 log.info("%s expired", rec["id"])
                 rec = store.load(rec["id"])
+            send = cards.also_on(rec, len(rec["versions"]))
+            if (send and not any(send.get(k) for k in ("sent_at", "handed_back_at", "skipped"))
+                    and (not send["send_after"] or store.parse(send["send_after"]) <= store.now())):
+                self.send_also(rec, send)
+                rec = store.load(rec["id"])
             if rec.get("card_dirty"):
                 self.try_refresh(rec["id"])
             self.warn_unacknowledged(rec)
+
+    def send_also(self, rec, send):
+        rid, n = rec["id"], send["version"]
+        try:
+            if not core._not_callable(rec, n):
+                channel = slackapi.open_dm(send["user"])
+                rec = store.load(rid)
+                if n == len(rec["versions"]) and not core._not_callable(rec, n):
+                    sent = {"channel": channel, "sent_at": store.iso()}
+                    sent["ts"] = slackapi.post(cards.also_blocks(rec, dict(send, **sent)), cards.card_text(rec, n),
+                                              channel_id=channel)
+
+                    def save(r):
+                        cards.also_on(r, n).update(sent)
+                        store.event(r, "also_sent", version=n, name=send["name"], send_after=send["send_after"])
+                        r["card_dirty"] = True
+                    store.update(rid, save)
+                    return
+            def skip(r):
+                cards.also_on(r, n)["skipped"] = True
+                r["card_dirty"] = True
+            store.update(rid, skip)
+        except Exception as e:
+            log.warning("direct message for %s failed, will retry: %s", rid, e)
 
     def deliver_due(self):
         """On the hub, every few seconds: what's due for this machine's sessions, and ⏳ kept true on the cards."""
@@ -490,7 +582,9 @@ class Listener:
                     i["ack_warned"] = True
         store.update(rec["id"], mark)
         first = min(datetime.fromisoformat(i["delivered_at"]) for i in late)
-        what = "your answer" if len(late) == 1 else f"your last {len(late)} answers"
+        names = {i.get("answerer") for i in late}
+        whose = "your " if names == {None} else f"{late[0]['answerer']}'s " if len(names) == 1 else "the "
+        what = whose + ("answer" if len(late) == 1 else f"last {len(late)} answers")
         try:
             slackapi.note(rec["thread_ts"], f"⚠️ {rec['agent']} received {what} at {cards.when(first)} (📨) but hasn't acknowledged "
                                             f"in {ACK_MINUTES} minutes, so nothing confirms it was understood or acted on.", **config.channel_args(rec))
@@ -683,15 +777,16 @@ class Listener:
             r, i = marked
             age = int((now - store.parse(i["created"])).total_seconds())
             machine = core.machine_of(r)
+            name = i.get("answerer") or core.who(r)
             try:
-                line = (f"🚨 {core.who(r)}'s answer on {rid} ({core.one_line(r['title'])}) hasn't reached "
+                line = (f"🚨 {name}'s answer on {rid} ({core.one_line(r['title'])}) hasn't reached "
                         f"{core.one_line(r['agent'])} after {age} seconds: {core.one_line(reason)}. "
                         f"{slackapi.message_url(r['thread_ts'], **config.channel_args(r))}")
                 slackapi.post([], line, channel_id=alarm["channel"])
             except Exception:
                 log.exception("alarm post for %s %s failed", rid, ref)
             paragraph = (f"This is an alarm from the approvals service on the hub, not a person. "
-                         f"{core.who(r)}'s answer on {rid} ({core.one_line(r['title'])}) has not reached "
+                         f"{name}'s answer on {rid} ({core.one_line(r['title'])}) has not reached "
                          f"{core.one_line(r['agent'])} on {machine}: {core.one_line(reason)}. "
                          f"The answer is safe on the hub and will be typed in as soon as delivery works, "
                          f"or handed over when the agent runs `approvals inbox`. "

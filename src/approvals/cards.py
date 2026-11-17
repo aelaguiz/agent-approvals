@@ -407,12 +407,14 @@ def version_label(n):
 
 # ---------- what happened after the card went up ----------
 
-def answer_line(a, deadline=None):
+def answer_line(a, deadline=None, member=None):
     """One row's answer, as the row shows it."""
     at = clock(datetime.fromisoformat(a["at"]))
     where = f" · {esc(a['where'])}" if a.get("where") not in (None, "button", "Approve all", "pop-up") else ""
     if a.get("where") == "deputy":   # the deputy's yes on this row, in the approver's words for it
         where = f" · for you by {esc(a.get('by') or 'your deputy')}"
+    if member:
+        where = f" · by {esc(member)}{where}"
     if a["verdict"] == "approved":
         return f"✅ *Approved* {at}{where}"
     if a["verdict"] == "declined":
@@ -420,7 +422,8 @@ def answer_line(a, deadline=None):
     if a["verdict"] == "chose":
         return f"✅ *{esc(a['choice'])}* · chosen {at}{where}"
     if a["verdict"] == "change":
-        return f"✏️ *Change asked* {at}: “{esc(a.get('words') or '')}” · the next version comes back here"
+        by = f" by {esc(member)}" if member else ""
+        return f"✏️ *Change asked{by}* {at}: “{esc(a.get('words') or '')}” · the next version comes back here"
     return f"⌛ No answer by {when(deadline) if deadline else at}, so not approved"
 
 
@@ -463,6 +466,23 @@ def call_on(rec, n):
     return next((c for c in reversed(rec.get("calls") or []) if c["version"] == n), None)
 
 
+def also_on(rec, n):
+    return next((s for s in rec.get("also", []) if s["version"] == n), None)
+
+
+def teammate(rec, answer):
+    """Use the name that went with the answer's version, even after the team or the card changes."""
+    send = also_on(rec, answer.get("version"))
+    if send and send.get("sent_at") and send["user"] == answer.get("by"):
+        return send["name"]
+    return None
+
+
+def last_reply(rec):
+    return next((e for e in reversed(rec.get("events", [])) if e["kind"] in ("feedback", "answer")
+                 or e["kind"] == "part" and e["verdict"] == "change"), {})
+
+
 def auto_approved(rec):
     """Approved for the approver by the deputy, and not taken back."""
     return (rec.get("decision") or {}).get("where") == "deputy" and rec.get("status") in ("approved", "done")
@@ -474,7 +494,19 @@ def call_line(rec, n):
     if not c:
         return None
     if c["call"] == "his":
-        return ctx(f"🤖 {esc(c['by'])} left this for you: {esc(c['why'])}")
+        line = f"🤖 {esc(c['by'])} left this for you: {esc(c['why'])}"
+        send = also_on(rec, n)
+        if send and not send.get("skipped"):
+            name = esc(send["name"])
+            if send.get("handed_back_at"):
+                line += f" · {name} handed it back, {clock(datetime.fromisoformat(send['handed_back_at']))}"
+            elif send.get("sent_at"):
+                line += f" · Also sent to {name}, {clock(datetime.fromisoformat(send['sent_at']))}"
+            elif send.get("send_after"):
+                line += f" · Also goes to {name} at {clock(datetime.fromisoformat(send['send_after']))}"
+            else:
+                line += f" · Also goes to {name}"
+        return ctx(line)
     card = rec["versions"][n - 1]["card"]
     pick = f", taking the card's pick, {esc(card['pick'])}" if card.get("options") and card.get("pick") else ""
     return ctx(f"🤖 Dry run · {esc(c['by'])} would have approved this for you{pick}: {esc(c['why'])}")
@@ -540,10 +572,14 @@ def card_blocks(rec, n, mode="open"):
     if len(blocks) <= BLOCKS_MAX:
         return blocks
     blocks = _card_blocks(rec, n, mode, origin=False)
-    return blocks if len(blocks) <= BLOCKS_MAX else _card_blocks(rec, n, mode, compact=True, origin=False)
+    if len(blocks) > BLOCKS_MAX:
+        blocks = _card_blocks(rec, n, mode, compact=True, origin=False)
+    if len(blocks) > BLOCKS_MAX and mode == "open" and also_on(rec, n):
+        blocks = [b for b in blocks if b["type"] != "divider"]
+    return blocks
 
 
-def _card_blocks(rec, n, mode, compact=False, origin=True):
+def _card_blocks(rec, n, mode, compact=False, origin=True, deputy=True):
     card = rec["versions"][n - 1]["card"]
     blocks = [test_tag()] if rec.get("test") else []
     title = card["title"]
@@ -582,7 +618,7 @@ def _card_blocks(rec, n, mode, compact=False, origin=True):
         row = _buttons(rec, n)
         if row:
             blocks.append({"type": "actions", "block_id": f"ap|{rec['id']}|{n}", "elements": row})
-        line = call_line(rec, n)
+        line = call_line(rec, n) if deputy else None
         if line:
             blocks.append(line)
     if mode == "final" and auto_approved(rec):
@@ -653,7 +689,8 @@ def small_blocks(rec):
             if row:
                 blocks.append({"type": "actions", "block_id": f"ap|{rec['id']}|{n}|small", "elements": row})
     elif status == "revising":
-        blocks += [md(f"*{esc(card['title'])}*"), ctx(f"{esc(rec['agent'])} is changing it")]
+        line = _small_state(rec) if teammate(rec, last_reply(rec)) else f"{esc(rec['agent'])} is changing it"
+        blocks += [md(f"*{esc(card['title'])}*"), ctx(_small_trim(line))]
     else:
         blocks += [md(f"*{esc(card['title'])}*"), ctx(_small_trim(_small_state(rec)))]
         updates = [e for e in rec.get("timeline") or [] if e.get("text")]
@@ -682,7 +719,8 @@ def _small_state(rec):
     if status in ("approved", "declined"):
         mark, verb = ("✅", "Picked" if d.get("choice") else "Approved") if status == "approved" else ("❌", "Declined")
         at = when(datetime.fromisoformat(d["at"])) if d.get("at") else ""
-        line = f"{mark} {verb} by {who}, {at}"
+        member = teammate(rec, d)
+        line = f"{mark} {verb} by {esc(member) if member else who}, {at}"
         items = rec["versions"][-1]["card"].get("items") or []
         if d.get("items") is not None and items:
             held = [item_name(it) for i, it in enumerate(items, 1) if i not in d["items"]]
@@ -695,7 +733,45 @@ def _small_state(rec):
         at = when(datetime.fromisoformat(w["at"])) if w.get("at") else ""
         return (f"🗑️ Removed from your list by {who}, {at}. Nothing still waiting on it was approved." if removed(rec)
                 else f"↩️ Withdrawn by {esc(rec['agent'])}, {at}: {esc(w.get('text') or '')}")
+    if status == "revising":
+        e = last_reply(rec)
+        line = f"{esc(rec['agent'])} is changing it"
+        if e:
+            member = teammate(rec, e)
+            line += f" · {esc(member) if member else who} replied, {when(datetime.fromisoformat(e['at']))}"
+        return line
     return esc(status or "")
+
+
+def also_blocks(rec, send):
+    n = send["version"]
+    approver = esc(config.card_target(rec)["approver_name"])
+    link = ctx(f"<{rec['link']}|Open it in #approvals>")
+    if n != len(rec["versions"]):
+        state = "A newer version replaced this one."
+    elif send.get("handed_back_at"):
+        state = f"↩️ You handed it back to {approver}, {when(datetime.fromisoformat(send['handed_back_at']))}"
+    elif send.get("sent_at") and rec["status"] in ("pending", "question"):
+        first = ctx(f"{esc(rec['agent'])} asks {approver}, and you can answer it too.")
+        end = [md(f"*Why you:* {esc(send['why'])}"),
+               {"type": "actions", "block_id": f"ap|{rec['id']}|{n}|notmine", "elements": [
+                   button("Not mine", f"{rec['id']}|{n}|notmine")]},
+               ctx(f"{approver} has this card too. Whoever answers first has answered. · <{rec['link']}|Open it in #approvals>")]
+        blocks = _card_blocks(rec, n, "open", origin=False, deputy=False)
+        room = BLOCKS_MAX - 1 - len(end)
+        if len(blocks) > room:
+            blocks = _card_blocks(rec, n, "open", compact=True, origin=False, deputy=False)
+        if len(blocks) > room:
+            blocks = [b for b in blocks if b["type"] != "divider"]
+        if len(blocks) > room:
+            footer = blocks.pop()["elements"][0]["text"]
+            end[-1]["elements"][0]["text"] = footer + "\n" + end[-1]["elements"][0]["text"]
+        if len(blocks) > room:
+            end[0]["accessory"] = end.pop(1)["elements"][0]
+        return [first, *blocks, *end]
+    else:
+        state = _small_state(rec)
+    return [header(rec["versions"][n - 1]["card"]["title"]), ctx(_small_trim(state)), link]
 
 
 def _replaced_blocks(rec, n):
@@ -855,7 +931,7 @@ def _rows(rec, n, mode):
         out += [quote_block(q) for q in p.get("quotes") or []]   # the row's own words, right above its buttons
         if any(o.get("title") for o in p.get("options") or []):
             out.append(option_lines(p["options"], p.get("pick")))
-        under = ([answer_line(a, deadline)] if a else []) + status_lines(rec, pid)
+        under = ([answer_line(a, deadline, teammate(rec, a))] if a else []) + status_lines(rec, pid)
         if under:
             out.append(ctx("\n".join(under)))
         if not a and mode == "open":
@@ -945,20 +1021,24 @@ def _verdict(rec):
 def _final_head(rec, card):
     verdict = _verdict(rec)
     d = rec.get("decision") or {}
+    member = teammate(rec, d)
     if verdict in ("approved", None) and rec.get("headline"):
-        return f"✅ {rec['headline']}"
+        return f"✅ {member} approved: {rec['headline']}" if member else f"✅ {rec['headline']}"
     if auto_approved(rec):
         return f"🤖 Auto-approved: {card['title']}"
     if rec.get("taken_back"):
         return f"↩️ You took it back: {card['title']}"
     if verdict == "approved" and d.get("choice"):
-        return f"✅ You picked {d['choice']}"
+        return f"✅ {member or 'You'} picked {d['choice']}"
     if verdict == "approved" and d.get("items") is not None and len(d["items"]) < len(card.get("items") or []):
-        return f"✅ Approved {len(d['items'])} of {len(card['items'])}: {card['title']}"
+        verb = f"{member} approved" if member else "Approved"
+        return f"✅ {verb} {len(d['items'])} of {len(card['items'])}: {card['title']}"
     if removed(rec):
         return f"🗑️ Removed: {card['title']}"
     mark = {"approved": "✅", "declined": "❌", "expired": "⌛", "withdrawn": "↩️"}.get(verdict, "✅")
     prefix = {"approved": "Approved: ", "declined": "Declined: ", "expired": "No answer: ", "withdrawn": "Withdrawn: "}.get(verdict, "")
+    if member and verdict in ("approved", "declined"):
+        prefix = f"{member} {verdict}: "
     return f"{mark} {prefix}{card['title']}"
 
 
@@ -984,13 +1064,16 @@ def _final_blocks(rec, n):
 
 def _timeline_blocks(rec, card):
     d = rec.get("decision") or {}
-    who = config.card_target(rec)["approver_name"]
+    member = teammate(rec, d)
+    who = esc(member or config.card_target(rec)["approver_name"])
     blocks = []
     # His words on it: what he sent with the yes, else his latest reply in the thread since (a change, a condition).
-    after = [e["text"] for e in rec.get("events") or [] if e["kind"] == "comment" and e.get("text") and e["at"] >= (d.get("at") or "")]
-    words = d.get("edited") or d.get("words") or (after[-1] if after else None)
+    after = [e for e in rec.get("events") or [] if e["kind"] == "comment" and e.get("text") and e["at"] >= (d.get("at") or "")]
+    words = d.get("edited") or d.get("words") or (after[-1]["text"] if after else None)
     if words:
-        blocks.append(md(("*Your words:*\n" if d.get("edited") else "") + quoted(words)))
+        word_author = member if d.get("edited") or d.get("words") else teammate(rec, after[-1])
+        label = f"*{esc(word_author)}'s words:*\n" if word_author else "*Your words:*\n" if d.get("edited") else ""
+        blocks.append(md(label + quoted(words)))
     wait = on_you(rec)
     if wait:
         blocks.append(md(f"⏳ *Waiting on you:* {esc(wait['text'])}"))
@@ -1013,7 +1096,7 @@ def _timeline_blocks(rec, card):
             held = [item_name(it) for i, it in enumerate(card["items"], 1) if i not in d["items"]]
             line += f" · {len(d['items'])} of {len(card['items'])}" + (f" · held back: {esc(', '.join(held))}" if held else "")
         if d.get("edited"):
-            line += ", with your edited words"
+            line += f", with {who}'s edited words" if member else ", with your edited words"
         lines.append(line)
     elif verdict == "declined" and not card.get("parts"):
         lines.append(f"❌ Declined by {who}, {at}{where}")

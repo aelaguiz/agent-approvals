@@ -2,6 +2,9 @@
   "channel": "C0XXXXXXXXX",
   "approver": "U0XXXXXXXXX",
   "approver_name": "Sam",
+  "team": {
+    "riley": {"user": "UTEAM1", "name": "Riley", "quiet": ["21:00", "05:00"]}
+  },
   "reader_rules": null,
   "reader_knows": null,
   "bot_token_file": "~/.config/agent-approvals/slack.env",

@@ -3,13 +3,24 @@ import json
 import logging
 import re
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 from . import cards, config, slackapi, store
 
 
 def who(rec):
     return config.card_target(rec)["approver_name"]
+
+def can_answer(rec, user):
+    if user == config.card_target(rec)["approver"]:
+        return True
+    send = cards.also_on(rec, len(rec.get("versions", [])))
+    return bool(send and send["user"] == user and send.get("sent_at") and not send.get("handed_back_at"))
+
+
+def answerer(rec, answer):
+    return cards.teammate(rec, answer) or who(rec)
+
 
 FINAL = {"approved", "declined", "expired", "done", "withdrawn"}
 CLOSED = {"approved", "declined", "done", "withdrawn"}   # a reply now is about a settled request
@@ -19,16 +30,20 @@ def one_line(s):
     return " / ".join(part.strip() for part in str(s).splitlines() if part.strip())
 
 
-def enqueue(rec, kind, text, react_ts=None, to=None):
+def enqueue(rec, kind, text, react_ts=None, to=None, member=None):
     """A message for the agent that asked, or with to="reviewer" for the session reviewing the card's type, or
     to="deputy" for the deputy."""
     ref = secrets.token_hex(3)
+    if member:
+        text += (f" The card also went to {member}, and {member}'s answer counts as {who(rec)}'s, "
+                 "for exactly what the card describes.")
     rec.setdefault("outbox", []).append({
         "ref": ref, "kind": kind, "text": f"{text} (ref {ref})", "created": store.iso(),
         "react_ts": react_ts, "attempts": 0, "next_try": store.iso(), "delivered_at": None,
         "noted_failure": False, "seen_by_agent": False,
         "needs_ack": kind not in ("expired", "review", "deputy"), "acked_at": None, "ack_warned": False,
         **({"to": to} if to else {}),
+        **({"answerer": member} if member else {}),
     })
     return ref
 
@@ -48,7 +63,14 @@ def tell_deputy(rec, news):
 def make_your_call(rec):
     rid = rec["id"]
     return (f'Make your call: `approvals show {rid}` reads it, `approvals pictures {rid}` saves its pictures where you '
-            f'can look at them, then `approvals call {rid} --approve --why "<why>"` or `approvals call {rid} --his --why "<why>"`.')
+            f'can look at them, then `approvals call {rid} --approve --why "<why>"` or `approvals call {rid} --his --why "<why>"`.'
+            + also_instruction(rec.get("target")))
+
+
+def also_instruction(target=None):
+    team = config.settings()["team"]
+    return (" Add `--also <name>` beside `--his` to also send the card to that person "
+            f"({', '.join(sorted(team))}).") if team and target is None else ""
 
 
 def tell_reviewer(rec, news):
@@ -68,8 +90,9 @@ def where_said(where):
     return {"button": "button in Slack", "pop-up": "in Slack", "deputy": "auto-approval by his deputy"}.get(where, where)
 
 
-def quoted_words(words):
-    return f' His words: "{one_line(words)}".' if words else ""
+def quoted_words(words, member=None):
+    whose = f"{member}'s" if member else "His"
+    return f' {whose} words: "{one_line(words)}".' if words else ""
 
 
 def ack_step(rec, what):
@@ -118,12 +141,13 @@ def done_step(rec):
             f'before that on the card with `approvals status {rec["id"]} "<what happened>"`.')
 
 
-def msg_decision(rec, verdict, where, choice=None, items=None, edited=None):
+def msg_decision(rec, verdict, where, choice=None, items=None, edited=None, member=None):
     t = cards.when(store.now())
     c = card(rec)
+    name = member or who(rec)
     if verdict == "approved" and choice is not None:
         o = next(o for o in c["options"] if o["name"] == choice)
-        return (f'{head(rec)} {who(rec)} picked {choice}' + (f' ("{o["title"]}")' if o.get("title") else "") + f' ({where}, {t}). '
+        return (f'{head(rec)} {name} picked {choice}' + (f' ("{o["title"]}")' if o.get("title") else "") + f' ({where}, {t}). '
                 f'{ack_step(rec, "what you are about to do")} Then do exactly what the card describes for {choice}, nothing else, and {done_step(rec)}')
     if verdict == "approved" and items is not None:
         names = [cards.item_name(it) for it in c["items"]]
@@ -131,17 +155,18 @@ def msg_decision(rec, verdict, where, choice=None, items=None, edited=None):
         left = [f"{i} {x}" for i, x in enumerate(names, 1) if i not in items]
         what = f'approved all {len(names)} items' if not left else f'approved {len(items)} of the {len(names)} items'
         where = "Pick which in Slack" if where.startswith("picked") else where
-        return (f'{head(rec)} {who(rec)} {what} ({where}, {t}). Do these: {keep}.' + (f' Leave out: {"; ".join(left)}.' if left else '')
+        return (f'{head(rec)} {name} {what} ({where}, {t}). Do these: {keep}.' + (f' Leave out: {"; ".join(left)}.' if left else '')
                 + f' {ack_step(rec, "what you are about to do")} Then do exactly what the card describes for those items only, and {done_step(rec)}')
     if verdict == "approved" and edited is not None:
-        return (f'{head(rec)} {who(rec)} approved it with his own edited words ({where}, {t}). Use exactly these words, not the card\'s; '
+        edited_words = f"{member}'s edited words" if member else "his own edited words"
+        return (f'{head(rec)} {name} approved it with {edited_words} ({where}, {t}). Use exactly these words, not the card\'s; '
                 f'here they are as a JSON string: {json.dumps(edited, ensure_ascii=False)}. {ack_step(rec, "what you are about to do")} '
                 f'Then do what the card describes with those words, and {done_step(rec)}')
     if verdict == "approved":
-        return (f'{head(rec)} {who(rec)} approved it ({where}, {t}). {ack_step(rec, "what you are about to do")} '
+        return (f'{head(rec)} {name} approved it ({where}, {t}). {ack_step(rec, "what you are about to do")} '
                 f'Then do exactly what the card describes, and {done_step(rec)}')
     if verdict == "declined":
-        return (f'{head(rec)} {who(rec)} declined it ({where}, {t}). {ack_step(rec, "that you are dropping it")} '
+        return (f'{head(rec)} {name} declined it ({where}, {t}). {ack_step(rec, "that you are dropping it")} '
                 f'Then drop this proposal and don\'t send it again. If what it was for still matters, a different proposal is a new card.')
     said = f' The card said that with no answer, {c["if_no_answer"]}: do that.' if c.get("if_no_answer") else ""
     return f'{head(rec)} No answer by the deadline, so it is not approved.{said} Don\'t resubmit or send a reminder; a reply in the thread would reopen it.'
@@ -184,27 +209,28 @@ def msg_part(rec, j, a):
     where = "button in Slack" if a.get("where") == "button" else a.get("where") or "Slack"
     top = f'{head(rec)} part {j} of {n_parts} "{p["title"]}":'
     scope = f'This answer is for part {j} only; {_others(rec, {j})}.'
+    name = answerer(rec, a)
     if a["verdict"] == "approved":
-        return (f'{top} {who(rec)} approved this part ({where}, {t}). {scope} {ack_step(rec, "what you are about to do")} '
+        return (f'{top} {name} approved this part ({where}, {t}). {scope} {ack_step(rec, "what you are about to do")} '
                 f'Then do exactly what part {j} describes, nothing more; post its progress with `approvals status {rid} "<what happened>" --part {j}`, '
                 f'and run `approvals done {rid} "<what you did and how you checked it>"` once every approved part is real.')
     if a["verdict"] == "chose":
-        return (f'{top} {who(rec)} chose "{a["choice"]}" for this part ({where}, {t}). {scope} {ack_step(rec, "what you are about to do")} '
+        return (f'{top} {name} chose "{a["choice"]}" for this part ({where}, {t}). {scope} {ack_step(rec, "what you are about to do")} '
                 f'Then do exactly that, nothing more; post its progress with `approvals status {rid} "<what happened>" --part {j}`.')
     if a["verdict"] == "declined":
-        return (f'{top} {who(rec)} declined this part ({where}, {t}). {scope} {ack_step(rec, "that you are dropping it")} '
+        return (f'{top} {name} declined this part ({where}, {t}). {scope} {ack_step(rec, "that you are dropping it")} '
                 f'Then drop part {j} only, and don\'t send it again.')
-    return (f'{top} {who(rec)} asked for a change to this part ({where}, {t}): "{one_line(a.get("words") or "")}". {scope} '
+    return (f'{top} {name} asked for a change to this part ({where}, {t}): "{one_line(a.get("words") or "")}". {scope} '
             f'{ack_step(rec, "what you will change")} Then post the next version with `approvals revise {rid} <card.json>`, changing part {j} only '
             f'and saying what changed in "changes"; parts you leave exactly as they are keep their answers.')
 
 
-def msg_all(rec, js):
+def msg_all(rec, js, member=None):
     c = card(rec)
     t = cards.when(store.now())
     listed = "; ".join(f'part {j} "{c["parts"][j - 1]["title"]}"' for j in js)
     rest = _others(rec, set(js))
-    return (f'{head(rec)} {who(rec)} approved {len(js)} parts at once (Approve all in Slack, {t}): {listed}. Any other parts: {rest}. '
+    return (f'{head(rec)} {member or who(rec)} approved {len(js)} parts at once (Approve all in Slack, {t}): {listed}. Any other parts: {rest}. '
             f'{ack_step(rec, "what you are about to do")} Then do exactly what each of those parts describes, nothing more; post progress with '
             f'`approvals status {rec["id"]} "<what happened>" --part <n>`, and run `approvals done {rec["id"]} "<what you did>"` once every approved part is real.')
 
@@ -220,22 +246,23 @@ def msg_offer(rec, choice):
             f'{ack_step(rec, "that you will keep asking")} Keep sending a card for each one.')
 
 
-def msg_replies(rec, kind, texts, question=None):
+def msg_replies(rec, kind, texts, question=None, member=None):
     t = cards.when(store.now())
     said = " / ".join(f'"{one_line(x)}"' for x in texts)
     rid = rec["id"]
+    name = member or who(rec)
     one_reply = (f'Your reply is your acknowledgement: post nothing before it, and if it needs more than a few minutes of '
                  f'work, say first in one line what is coming and when, with `approvals ack {rid} "<what and when>"`.')
     if kind == "answer":
-        return (f'{head(rec)} {who(rec)} answered your question ("{one_line(question)}") in Slack at {t}: {said}. '
+        return (f'{head(rec)} {name} answered your question ("{one_line(question)}") in Slack at {t}: {said}. '
                 f'If it asks for a change, carry on with `approvals revise {rid} <card.json>`. '
                 f'If it approves the card as it stands (a yes, or a detail you asked about settled with no change to the card), '
                 f'record it with `approvals record {rid} --approved --words "<their words>" --where "Slack thread"`, do it, then run `approvals done {rid} "<readback>"`. {one_reply}')
     if kind == "comment":
-        return (f'{head(rec)} {who(rec)} replied in Slack at {t}, after the decision: {said}. '
+        return (f'{head(rec)} {name} replied in Slack at {t}, after the decision: {said}. '
                 f'If it asks something, answer it with `approvals answer {rid} "<the answer, verdict first>"`. '
                 f'If it changes what you do, say so in one line with `approvals ack {rid} "<what changes>"`. No new card unless asked for one.')
-    return (f'{head(rec)} {who(rec)} replied in Slack at {t}: {said}. '
+    return (f'{head(rec)} {name} replied in Slack at {t}: {said}. '
             f'If it asks a question, answer it with `approvals answer {rid} "<the answer, verdict first>"`: that hands the card back as it stands, with no new version. '
             f'If it asks for a change, post the next version with `approvals revise {rid} <card.json>` (say what changed in "changes"). '
             f'If you truly cannot go on without one fact, ask it with `approvals ask {rid} "<question>"`. {one_reply} '
@@ -268,15 +295,18 @@ def decide(rec, n, verdict, by, where="button", words=None, choice=None, items=N
     bad = _check(rec, n)
     if bad:
         return bad
+    member = cards.teammate(rec, {"by": by, "version": n})
+    name = member or who(rec)
+    actor = {"by": by} if member else {}
     if card(rec).get("parts"):
         rows = cards.open_rows(rec)
         if not rows:
             if not (again and verdict == "approved" and rec["status"] == "revising" and _rows_decided(rec, n)):
                 return "already"
-            store.event(rec, "decision", verdict=verdict, version=n, where=where, words=words)
-            news = f'{who(rec)} let the card go ahead as its rows were decided ({where_said(where)}).{quoted_words(words)}'
+            store.event(rec, "decision", verdict=verdict, version=n, where=where, words=words, **actor)
+            news = f'{name} let the card go ahead as its rows were decided ({where_said(where)}).{quoted_words(words, member)}'
             tell_reviewer(rec, news)
-            if words:
+            if words or member:
                 tell_deputy(rec, news)
             settle(rec)
             return "ok"
@@ -285,9 +315,9 @@ def decide(rec, n, verdict, by, where="button", words=None, choice=None, items=N
             pick = p.get("pick") if where == "deputy" and verdict == "approved" and p.get("options") else None
             r = answer_part(rec, n, j, "chose" if pick else verdict, by, where=where, words=words, choice=pick,
                             tell=where == "button", review=False)
-        news = f'{who(rec)} {verdict} every part still open ({where_said(where)}).{quoted_words(words)}'
+        news = f'{name} {verdict} every part still open ({where_said(where)}).{quoted_words(words, member)}'
         tell_reviewer(rec, news)
-        if verdict != "approved" or words:
+        if verdict != "approved" or words or member:
             tell_deputy(rec, news)
         return r
     d = rec.get("decision")
@@ -299,18 +329,20 @@ def decide(rec, n, verdict, by, where="button", words=None, choice=None, items=N
     rec["status"] = verdict
     rec["open_question"] = None
     rec["card_dirty"] = True
-    store.event(rec, "decision", verdict=verdict, version=n, where=where, words=words, choice=choice, items=items, edited=edited)
+    store.event(rec, "decision", verdict=verdict, version=n, where=where, words=words, choice=choice, items=items, edited=edited, **actor)
     if where in ("button", "pop-up"):
         how = "button in Slack" if where == "button" else ("picked in a pop-up in Slack" if items is not None else "Edit the words in Slack")
-        enqueue(rec, "decision", msg_decision(rec, verdict, how, choice, items, edited), react_ts=card_ts(rec))
+        enqueue(rec, "decision", msg_decision(rec, verdict, how, choice, items, edited, member),
+                react_ts=card_ts(rec), member=member)
+    edited_words = f"{member}'s edited words" if member else "his own edited words"
     what = (f"picked {choice}" if choice is not None else
             f'approved items {", ".join(map(str, items))} of {len(card(rec)["items"])}' if items is not None else
-            "approved it with his own edited words" if edited is not None else f"{verdict} it")
-    news = f"{who(rec)} {what} ({where_said(where)}, {cards.when(store.now())}).{quoted_words(edited or words)}"
+            f"approved it with {edited_words}" if edited is not None else f"{verdict} it")
+    news = f"{name} {what} ({where_said(where)}, {cards.when(store.now())}).{quoted_words(edited or words, member)}"
     tell_reviewer(rec, news)
     plain = (verdict == "approved" and not words and edited is None and choice is None
              and (items is None or len(items) == len(card(rec).get("items") or [])))
-    if not plain and where != "deputy":   # the deputy isn't told of its own approval
+    if (not plain or member) and where != "deputy":   # the deputy isn't told of its own approval
         tell_deputy(rec, news)
     return "ok"
 
@@ -340,16 +372,18 @@ def answer_part(rec, n, j, verdict, by, where="button", words=None, choice=None,
     a = {"verdict": verdict, "version": n, "by": by, "where": where, "at": store.iso()}
     a.update({k: v for k, v in (("words", words), ("choice", choice)) if v is not None})
     answers[pid] = a
-    store.event(rec, "part", part=j, verdict=verdict, version=n, where=where, words=words, choice=choice)
+    member = cards.teammate(rec, a)
+    store.event(rec, "part", part=j, verdict=verdict, version=n, where=where, words=words, choice=choice,
+                **({"by": by} if member else {}))
     if tell:
         kind = "feedback" if verdict == "change" else "decision"
-        enqueue(rec, kind, msg_part(rec, j, a), react_ts=card_ts(rec))
+        enqueue(rec, kind, msg_part(rec, j, a), react_ts=card_ts(rec), member=member)
     if review:
         what = {"approved": "approved", "declined": "declined", "chose": f'chose "{choice}" for',
                 "change": "asked for a change to"}[verdict]
-        news = f'{who(rec)} {what} part {j} "{parts[j - 1]["title"]}" ({where_said(where)}).{quoted_words(words)}'
+        news = f'{member or who(rec)} {what} part {j} "{parts[j - 1]["title"]}" ({where_said(where)}).{quoted_words(words, member)}'
         tell_reviewer(rec, news)
-        if verdict != "approved" or words:
+        if verdict != "approved" or words or member:
             tell_deputy(rec, news)
     settle(rec)
     return "ok"
@@ -365,8 +399,12 @@ def approve_all(rec, n, by):
         return "already"
     for j, _ in rows:
         answer_part(rec, n, j, "approved", by, where="Approve all", tell=False, review=False)
-    enqueue(rec, "decision", msg_all(rec, [j for j, _ in rows]), react_ts=card_ts(rec))
-    tell_reviewer(rec, f'{who(rec)} approved parts {", ".join(str(j) for j, _ in rows)} (Approve all in Slack).')
+    member = cards.teammate(rec, {"by": by, "version": n})
+    enqueue(rec, "decision", msg_all(rec, [j for j, _ in rows], member), react_ts=card_ts(rec), member=member)
+    news = f'{member or who(rec)} approved parts {", ".join(str(j) for j, _ in rows)} (Approve all in Slack).'
+    tell_reviewer(rec, news)
+    if member:
+        tell_deputy(rec, news)
     return "ok"
 
 
@@ -399,6 +437,8 @@ def settle(rec):
 
 def press(rec, n, what, by):
     """A button press on a card: what it says, applied to the record. Pop-ups are opened elsewhere."""
+    if what == "notmine":
+        return hand_back(rec, n, by)
     c = rec["versions"][n - 1]["card"] if 1 <= n <= len(rec["versions"]) else {}
     if what in ("approve", "decline"):
         return decide(rec, n, "approved" if what == "approve" else "declined", by=by)
@@ -458,7 +498,9 @@ def answer_offer(rec, n, choice, by):
 def _answered_on(rec, n):
     """The approver has answered version n in some way: a reply in the thread since it was posted, or a row."""
     posted = rec["versions"][n - 1].get("posted_at") or rec["created"]
-    return (any(e["kind"] in ("feedback", "answer", "comment") and e["at"] >= posted for e in rec.get("events") or [])
+    return (any(e["kind"] in ("feedback", "answer", "comment") and e.get("version", n) == n and e["at"] >= posted
+                for e in rec.get("events") or [])
+            or (rec.get("decision") or {}).get("version") == n
             or any(a.get("version") == n for a in (rec.get("answers") or {}).values()))
 
 
@@ -478,10 +520,27 @@ def _not_callable(rec, n):
     return None
 
 
-def call(rec, what, why, by, live):
+def send_after(now, quiet):
+    if not quiet:
+        return None
+    start, end = (time.fromisoformat(t) for t in quiet)
+    local = cards.local(now)
+    clock = local.time()
+    if start <= clock < end or (start > end and (clock >= start or clock < end)):
+        day = local.date() + timedelta(days=int(start > end and clock >= start))
+        return store.iso(datetime.combine(day, end, local.tzinfo))
+    return None
+
+
+def call(rec, what, why, by, live, also=None):
     """The deputy's call on the newest version: "approve" (for the approver) or "his" (left for him). Recorded
     either way; an approve approves the card for him only when auto-approval is on (live). Returns 'ok', or why
     nothing was recorded."""
+    if also is not None:
+        team = config.settings()["team"]
+        names = ", ".join(sorted(team)) or "none"
+        if what != "his" or also not in team or rec.get("target") is not None:
+            return f"--also takes a team name with --his on a card for {config.settings()['approver_name']}. Configured names: {names}"
     if rec.get("target") is not None:
         return "this card is for a different approver"
     n = len(rec["versions"])
@@ -491,8 +550,9 @@ def call(rec, what, why, by, live):
     prior = cards.call_on(rec, n)
     # One call a version, except that a dry-run call can be made again once auto-approval is on: a dry run approved
     # nothing, so the card would otherwise wait on the approver for a call that was only ever shown. The new call
-    # stands as the call on that version; the dry-run one stays in the events.
-    if prior and (prior["live"] or not live):
+    # stands as the call on that version; the dry-run one stays in the events. A call that also sends the card
+    # already took effect in either mode, so it stands.
+    if prior and (prior["live"] or not live or prior.get("also") is not None):
         return f"v{n} already has your call"
     c = card(rec)
     open_rows = cards.open_rows(rec)
@@ -504,8 +564,14 @@ def call(rec, what, why, by, live):
         if (c.get("options") and not c.get("pick")) or any(p.get("options") and not p.get("pick") for _, p in open_rows):
             return "it asks for a pick and names none, so there is nothing for an approval to take"
         choice = c.get("pick") if c.get("options") else None
-    rec.setdefault("calls", []).append({"version": n, "call": what, "why": why, "by": by, "at": store.iso(), "live": live})
-    store.event(rec, "call", version=n, call=what, why=why, by=by, live=live)
+    now = store.now()
+    extra = {"also": also} if also is not None else {}
+    rec.setdefault("calls", []).append({"version": n, "call": what, "why": why, "by": by, "at": store.iso(now), "live": live, **extra})
+    store.event(rec, "call", version=n, call=what, why=why, by=by, live=live, **extra)
+    if also is not None:
+        person = team[also]
+        rec.setdefault("also", []).append({"version": n, "name": person["name"], "user": person["user"], "why": why,
+                                           "at": store.iso(now), "send_after": send_after(now, person.get("quiet"))})
     rec["card_dirty"] = True
     if what == "approve" and live:
         r = decide(rec, n, "approved", by=by, where="deputy", choice=choice)
@@ -518,6 +584,25 @@ def call(rec, what, why, by, live):
         if choice is not None:
             rec["decision"]["choice"] = choice
         enqueue(rec, "decision", msg_auto(rec, by, why), react_ts=card_ts(rec))
+    return "ok"
+
+
+def hand_back(rec, n, by):
+    bad = _check(rec, n)
+    if bad:
+        return bad
+    send = cards.also_on(rec, n)
+    if not send or send["user"] != by or not send.get("sent_at") or send.get("handed_back_at"):
+        return "gone"
+    if rec["status"] not in ("pending", "question"):
+        return "already"
+    now = store.now()
+    send["handed_back_at"] = store.iso(now)
+    store.event(rec, "also_handed_back", version=n, name=send["name"])
+    rec["card_dirty"] = True
+    name = send["name"]
+    tell_deputy(rec, f"{name} handed it back as not {name}'s to answer (button in Slack, {cards.when(now)}). "
+                     f"It stays with {who(rec)}; there is nothing to call.")
     return "ok"
 
 
@@ -586,14 +671,15 @@ def plain_yes(rec, n):
     if c.get("parts"):
         rows = [i for i, e in enumerate(events) if e["kind"] == "part" and e.get("version") == n]
         if not rows or any(events[i]["verdict"] != "approved" or events[i].get("where") not in ("button", "Approve all")
-                           or events[i].get("words") for i in rows):
+                           or events[i].get("words") or cards.teammate(rec, events[i]) for i in rows):
             return False
         decided = rows[-1]
     else:
         decided = next((i for i, e in enumerate(events) if e["kind"] == "decision" and e.get("version") == n), None)
         d = events[decided] if decided is not None else {}
         if (d.get("verdict") != "approved" or d.get("where") not in ("button", "pop-up") or d.get("words") or d.get("choice") is not None
-                or d.get("edited") is not None or (d.get("items") is not None and len(d["items"]) < len(c.get("items") or []))):
+                or d.get("edited") is not None or cards.teammate(rec, d)
+                or (d.get("items") is not None and len(d["items"]) < len(c.get("items") or []))):
             return False
     return not any(e["kind"] in ("feedback", "answer", "comment") for e in events[:decided])
 
@@ -608,7 +694,7 @@ def ask_change(rec, n, words, by, j=None):
         return answer_part(rec, n, j, "change", by, where="Change button in Slack", words=words)
     if rec["status"] in CLOSED:
         return "already"
-    take_replies(rec, [(None, words)], react_ts=card_ts(rec))
+    take_replies(rec, [(None, words)], react_ts=card_ts(rec), by=by)
     return "ok"
 
 
@@ -631,8 +717,8 @@ def add_status(rec, text, kind="done", part=None, headline=None, frame=UNSET):
                 **({"frame": frame} if frame is not UNSET else {}))
 
 
-def take_replies(rec, replies, react_ts=None):
-    """replies: [(ts, text)] from the approver, oldest first."""
+def take_replies(rec, replies, react_ts=None, by=None):
+    """replies: [(ts, text)] from one person who can answer, oldest first."""
     texts = [t for _, t in replies]
     last_ts = react_ts or replies[-1][0]
     if rec["status"] in CLOSED:
@@ -642,18 +728,24 @@ def take_replies(rec, replies, react_ts=None):
     else:
         kind = "feedback"
     q = (rec.get("open_question") or {}).get("text")
+    n = len(rec["versions"])
+    member = cards.teammate(rec, {"by": by, "version": n})
+    name = member or who(rec)
     for ts, t in replies:
-        store.event(rec, kind, text=t, ts=ts)
+        store.event(rec, kind, text=t, ts=ts, **({"by": by, "version": n} if member else {}))
     if kind != "comment":
         if rec["status"] == "expired":
             rec["decision"] = None
             rec["card_dirty"] = True
         rec["status"] = "revising"
         rec["open_question"] = None
-    enqueue(rec, kind, msg_replies(rec, kind, texts, q), react_ts=last_ts)
+    if cards.also_on(rec, n):
+        rec["card_dirty"] = True
+    enqueue(rec, kind, msg_replies(rec, kind, texts, q, member), react_ts=last_ts, member=member)
     said = " / ".join(f'"{one_line(x)}"' for x in texts)
-    tell_reviewer(rec, f"{who(rec)} replied in the thread: {said}.")
-    tell_deputy(rec, f"{who(rec)} replied in the thread" + (" after his decision" if kind == "comment" else "") + f": {said}.")
+    tell_reviewer(rec, f"{name} replied in the thread: {said}.")
+    tell_deputy(rec, f"{name} replied in the thread" + (" after the decision" if member and kind == "comment"
+                else " after his decision" if kind == "comment" else "") + f": {said}.")
     return kind
 
 
@@ -700,6 +792,13 @@ def refresh_cards(rec):
             continue
         m = mode if v["n"] == latest else "replaced"
         slackapi.update(v["copy_ts"], cards.card_blocks(rec, v["n"], m), cards.card_text(rec, v["n"]), **config.channel_args(rec))
+    for send in rec.get("also", []):
+        if send.get("sent_at"):
+            try:
+                slackapi.update(send["ts"], cards.also_blocks(rec, send), cards.card_text(rec, send["version"]),
+                                channel_id=send["channel"])
+            except Exception:
+                logging.getLogger(__name__).exception("direct message refresh for %s failed", rec["id"])
 
 
 def refresh_and_clear(rid):
@@ -707,7 +806,8 @@ def refresh_and_clear(rid):
     refresh_cards(rec)
 
     def clear(r):
-        r["card_dirty"] = False
+        # A newer answer may have redrawn the DM while this refresh was still writing to Slack.
+        r["card_dirty"] = bool(r.get("also") and r != rec)
     store.update(rid, clear)
 
 

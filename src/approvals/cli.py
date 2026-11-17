@@ -257,6 +257,8 @@ def cmd_ask(a):
         reach.refresh(rec, reach.capture())
         rec["open_question"] = {"text": a.question, "at": store.iso()}
         rec["status"] = "question"
+        if (cards.also_on(rec, len(rec["versions"])) or {}).get("sent_at"):
+            rec["card_dirty"] = True
         core.mark_acked(rec)
         store.event(rec, "question", text=a.question)
         return rec
@@ -382,8 +384,12 @@ def cmd_record(a):
         _die("Say what they answered: --approved, --declined, or --choice <option>.")
     verdict = "approved" if a.approved or a.choice else "declined"
     def fn(rec):
-        by = config.card_target(rec)["approver_name"]
         n = len(rec["versions"])
+        by = core.who(rec)
+        if a.where == "Slack thread":
+            reply = next((e for e in reversed(rec.get("events", [])) if e["kind"] in ("feedback", "answer", "comment")), {})
+            if reply.get("version") == n and cards.teammate(rec, reply):
+                by = reply["by"]
         if a.part:
             j = _row(rec, a.part)
             if not j:
@@ -586,7 +592,8 @@ def cmd_deputy(a):
                       "live_since": d.get("live_since") if live else None})
     print(f"This session is now the deputy, as {who['agent']}, and {_mode({'live': live})}: every new card, each new "
           f"version and everything {config.settings()['approver_name']} says on a card other than a plain yes reaches "
-          f"you here as an [Approvals] message. Make your call on each with `approvals call <id> --approve|--his --why \"<why>\"`.")
+          f"you here as an [Approvals] message. Make your call on each with `approvals call <id> --approve|--his --why \"<why>\"`."
+          + core.also_instruction())
 
 
 WHY_MAX = 300
@@ -608,11 +615,23 @@ def cmd_call(a):
         _die(f"The why is {len(why)} characters; keep it under {WHY_MAX}, one or two sentences.")
     name, live = d["reach"]["agent"], bool(d.get("live"))
     what = "approve" if a.approve else "his"
-    r = store.update(a.id, lambda rec: core.call(rec, what, why, name, live))
+    r = store.update(a.id, lambda rec: core.call(rec, what, why, name, live, a.also))
     if r != "ok":
         _die(f"Not recorded: {r}.")
     core.refresh_and_clear(a.id)
     who = config.settings()["approver_name"]
+    if a.also is not None:
+        rec = store.load(a.id)
+        send = rec["also"][-1]
+        name = send["name"]
+        if send.get("sent_at"):
+            delivery = f"also sent to {name}"
+        elif send["send_after"]:
+            delivery = f"goes to {name} at {cards.clock(store.parse(send['send_after']))}, after {name}'s quiet hours"
+        else:
+            delivery = f"goes to {name} as a direct message within a minute"
+        print(f"{a.id}: left for {who} and {delivery}.")
+        return
     print(f"{a.id}: left for {who}; the card shows your why." if what == "his" else
           f"{a.id}: approved for {who}; its agent has his yes, and the card shows your why." if live else
           f"{a.id}: a dry run, so nothing was approved and its agent heard nothing; the card shows you would have approved it.")
@@ -639,19 +658,30 @@ def _happened(rec):
         said = f': "{core.one_line(e["text"])}"' if e.get("text") else ""
         if k == "call":
             mode = "" if e.get("call") == "his" else " (auto-approval)" if e.get("live") else " (dry run)"
+            send = cards.also_on(rec, e["version"]) if e.get("also") is not None else None
+            also = f", also to {send['name']}" if send else ""
             out.append(f"{at}  {e['by']} on v{e['version']}: " + ("approve" if e["call"] == "approve" else "left it for him")
-                       + f"{mode}. Why: \"{core.one_line(e['why'])}\"")
+                       + f"{mode}{also}. Why: \"{core.one_line(e['why'])}\"")
+        elif k == "also_sent":
+            held = f", held until {_stamp(e['send_after'])} for quiet hours" if e.get("send_after") else ""
+            out.append(f"{at}  sent v{e['version']} to {e['name']} in a direct message{held}")
+        elif k == "also_handed_back":
+            out.append(f"{at}  {e['name']} handed v{e['version']} back to {who}")
         elif k in ("feedback", "answer", "comment"):
-            out.append(f"{at}  {who} replied{said}")
+            out.append(f"{at}  {core.answerer(rec, e)} replied{said}")
         elif k == "decision":
-            by = "his deputy" if e.get("where") == "deputy" else who
+            member = cards.teammate(rec, e)
+            by = "his deputy" if e.get("where") == "deputy" else member or who
+            whose = f"{member}'s" if member else "his own"
             extra = (f", picked {e['choice']}" if e.get("choice") else f", items {e['items']}" if e.get("items") is not None
-                     else ", with his own edited words" if e.get("edited") else "")
+                     else f", with {whose} edited words" if e.get("edited") else "")
             out.append(f"{at}  {by} {e['verdict']} v{e['version']} ({core.where_said(e.get('where'))}{extra}), "
                        f"{_took(posted.get(e['version'], rec['created']), e['at'])} after posting"
                        + (f': "{core.one_line(e["words"])}"' if e.get("words") else ""))
         elif k == "part":
-            out.append(f"{at}  part {e['part']} {e['verdict']} on v{e['version']} ({core.where_said(e.get('where'))}), "
+            member = cards.teammate(rec, e)
+            by = f" by {member}" if member else ""
+            out.append(f"{at}  part {e['part']} {e['verdict']}{by} on v{e['version']} ({core.where_said(e.get('where'))}), "
                        f"{_took(posted.get(e['version'], rec['created']), e['at'])} after posting"
                        + (f': "{core.one_line(e["words"])}"' if e.get("words") else ""))
         elif k == "taken_back":
@@ -787,6 +817,12 @@ def cmd_purge_tests(a):
         if not rec.get("test") or (a.only and rec["id"] not in a.only):
             continue
         source = rec.get("thread") or {}
+        for send in rec.get("also", []):
+            if send.get("sent_at"):
+                try:
+                    slackapi.delete(send["ts"], channel_id=send["channel"])
+                except Exception:
+                    pass
         for ts in ([source.get("small_ts")] + source.get("copied_ts", [])):
             if ts:
                 try:
@@ -956,6 +992,7 @@ def main(argv=None):
     g = s.add_mutually_exclusive_group(required=True)
     g.add_argument("--approve", action="store_true", help="approve it for him (only recorded and shown in a dry run)")
     g.add_argument("--his", action="store_true", help="leave it for him")
+    s.add_argument("--also", help="with --his, also send the card to one name from the approver's team")
     s.add_argument("--why", required=True, help="one or two sentences for the approver, under 300 characters")
     s.set_defaults(fn=cmd_call)
 

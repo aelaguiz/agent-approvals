@@ -35,6 +35,7 @@ agent ──approvals submit──▶ card in #approvals ──▶ you: ✅ / �
   - Interactivity on, which Socket Mode carries;
   - the bot event `message.channels` (`message.groups` for a private channel), so a reply in a thread is read within seconds rather than on the next pass through every card's thread;
   - bot scopes `chat:write`, `chat:write.customize`, `channels:history` (`groups:history` for a private channel), `channels:read`, `reactions:write`, `files:write`, `files:read` and `users:read`;
+  - for cards sent to the approver's team, bot scopes `im:write` to open direct messages and `im:history` to read their threads;
   - the bot invited to every approver's channel.
 - To deliver into agent sessions: [Herdr](https://herdr.dev), with agents running in Herdr panes. Without it, answers wait in each agent's `approvals inbox`.
 - For Basecamp steps: the Basecamp command-line tool, `basecamp`, and in each agent's folder (or one above it) a `.basecamp/config.json` whose `default_profile` is that agent's own login. Without one, a card's Basecamp step is skipped.
@@ -61,6 +62,7 @@ make install MACHINE=laptop
 | `approver` | The default approver's Slack user id, whose button presses and replies count on their cards. |
 | `approver_name` | What cards and agent messages call the default approver. |
 | `approvers` | Optional. Named approvers, each with their own `approver`, `approver_name` and `channel`. See [More than one approver](#more-than-one-approver). |
+| `team` | Optional. People who can answer a card the deputy leaves for the default approver. Each short name gives a Slack `user` id, display `name` and optional `quiet` hours. |
 | `list_as` | Optional. `{"name": "Approval desk", "icon_url": "https://example.com/desk.png"}` gives the morning list, lists asked for, and the deputy's summary their own name and picture. Unset: the app's usual name and picture. |
 | `bot_token_file`, `bot_token_key` | The env-style file holding the bot token, and the variable name in it. |
 | `app_token_file`, `app_token_key` | The same for the Socket Mode app token. |
@@ -85,7 +87,13 @@ One Slack workspace can send cards to several approvers through the same app and
 
 `approvals submit card.json --to lead` sends the card to that approver; for a set, the same `--to` applies to every card. An unknown name is refused with the workspace's available names. The agent's own repository says which decisions go to whom. Without `--to`, the default approver gets the card, as before.
 
-Each card keeps its approver's short name as `target`; old cards without it still use the default. Its posts, updates and thread use that approver's channel, and only that approver's button presses, pop-up submissions and replies count. Each approver gets a separate morning list; posting in their channel asks for their list. The deputy serves only the default approver. Removing a named approver from config while their cards still exist makes commands on those cards fail with an error rather than send them to the default.
+Each card keeps its approver's short name as `target`; old cards without it still use the default. Its posts, updates and thread use that approver's channel. On a card with a named target, only that approver's buttons, pop-ups and replies count. Each approver gets a separate morning list; posting in their channel asks for their list. The deputy serves only the default approver. Removing a named approver from config while their cards still exist makes commands on those cards fail with an error rather than send them to the default.
+
+### A card the deputy also sends to the team
+
+With `team` set in [the workspace config](config.example.json), the deputy can leave a card for the default approver with `approvals call AP-0001 --his --also riley --why "<why>"`. Both people read the same why. The approver keeps the card in the channel and can answer immediately. The app sends Riley a direct message on the next sweep or after Riley's `quiet` hours. The two clock times use the workspace's `timezone` and can span midnight.
+
+Riley can use the card's buttons and reply in either thread. The first answer stands, and an answer from Riley names Riley and counts as the approver's for the card as written. **Not mine** hands the card back and tells the deputy. A new version needs a new call. The morning summary shows the cards sent to the team when auto-approval is on, and `approvals history` shows the call, delivery, and who answered or handed it back.
 
 ### More than one machine
 

@@ -94,12 +94,18 @@ def _outcome(rec, day):
     s, d = rec["status"], rec.get("decision") or {}
     if cards.auto_approved(rec):
         return f"🤖 Auto-approved by {cards.esc(d['by'])}, {_at(datetime.fromisoformat(d['at']), day)}"
+    member = cards.teammate(rec, d)
+    who = cards.esc(member) if member else "You"
     if s in ("approved", "done"):
-        return f"✅ You approved it, {_at(datetime.fromisoformat(d['at']), day)}" if d.get("at") else "✅ Approved"
+        return f"✅ {who} approved it, {_at(datetime.fromisoformat(d['at']), day)}" if d.get("at") else "✅ Approved"
     if s == "declined":
-        return f"❌ You declined it, {_at(datetime.fromisoformat(d['at']), day)}"
+        return f"❌ {who} declined it, {_at(datetime.fromisoformat(d['at']), day)}"
     if s == "revising":
-        return f"💬 You replied {_at(_last(rec, 'feedback', 'answer'), day)}; the agent is working on it"
+        reply = cards.last_reply(rec)
+        member = cards.teammate(rec, reply)
+        who = cards.esc(member) if member else "You"
+        at = store.parse(reply["at"]) if member else _last(rec, "feedback", "answer")
+        return f"💬 {who} replied {_at(at, day)}; the agent is working on it"
     if s == "expired":
         return f"⌛ No answer by {_at(datetime.fromisoformat(rec['deadline']), day)}, so not approved"
     if s == "withdrawn" and cards.removed(rec):
@@ -321,6 +327,49 @@ def _what_he_did(rec, n):
     return "⏳ still open", "C"
 
 
+def _team_outcome(rec, send):
+    if send.get("handed_back_at"):
+        return "↩️ handed it back"
+    n = send["version"]
+    answers = []
+    for e in rec.get("events", []):
+        if e["kind"] == "revised" and e["version"] > n:
+            break
+        if e["at"] < send["sent_at"] or e.get("version", n) != n:
+            continue
+        if e["kind"] in ("feedback", "answer") or (e["kind"] in ("decision", "part") and e["verdict"] != "expired"):
+            answers.append(e)
+    if answers:
+        if answers[0].get("by") != send["user"]:
+            return "you answered first"
+        verdict = next((e["verdict"] for e in answers if e.get("by") == send["user"] and "verdict" in e), None)
+        return {"approved": "✅ approved it", "chose": "✅ approved it", "declined": "❌ declined it"}.get(verdict, "💬 replied")
+    if n != len(rec["versions"]):
+        return "A newer version replaced this one."
+    if cards.removed(rec):
+        return "you answered first"
+    if rec["status"] == "withdrawn":
+        return "withdrawn by its agent"
+    if rec["status"] == "expired":
+        return "⌛ no answer by its deadline"
+    return "⏳ still open"
+
+
+def _summary_sections(chunks, room):
+    body, lines, shown = [], [], 0
+    for text in chunks:
+        if lines and len("\n".join(lines + [text])) > SECTION_MAX:
+            body.append(cards.md("\n".join(lines)))
+            lines = []
+            if len(body) == room:
+                break
+        lines.append(text)
+        shown += 1
+    if lines:
+        body.append(cards.md("\n".join(lines)))
+    return body, len(chunks) - shown
+
+
 def summary(d, since, records):
     """The deputy's calls since yesterday morning, posted right after the morning list as a snapshot, not kept
     current: (blocks, text), or None when there's no deputy or it made no call. With auto-approval on, every card it
@@ -329,13 +378,18 @@ def summary(d, since, records):
     if not d:
         return None
     latest = {}
+    team = {}
+    name, live = cards.esc(d["reach"]["agent"]), bool(d.get("live"))
     for r in records:
         calls = [c for c in r.get("calls") or [] if datetime.fromisoformat(c["at"]) >= since]
         if calls:
             latest[r["id"]] = (r, calls[-1])
-    if not latest:
+        if live:
+            sends = [s for s in r.get("also", []) if s.get("sent_at") and store.parse(s["sent_at"]) >= since]
+            if sends:
+                team[r["id"]] = (r, sends[-1])
+    if not latest and not team:
         return None
-    name, live = cards.esc(d["reach"]["agent"]), bool(d.get("live"))
     yeses = [(r, c) for r, c in latest.values() if c["call"] == "approve" and bool(c["live"]) == live]
     groups, counts = {}, {"A": 0, "B": 0, "C": 0}
     for r, c in sorted(yeses, key=lambda x: x[0]["id"]):
@@ -368,17 +422,18 @@ def summary(d, since, records):
     # Each agent's name rides with its first line, so it never shows alone.
     chunks = [(f"*{cards.esc(agent)}*\n" if i == 0 else "") + line for agent in sorted(groups) for i, line in enumerate(groups[agent])]
     room = cards.BLOCKS_MAX - len(top) - 3   # less "…and N more", the switch's line and its button
-    body, lines, shown = [], [], 0
-    for text in chunks:
-        if lines and len("\n".join(lines + [text])) > SECTION_MAX:
-            body.append(cards.md("\n".join(lines)))
-            lines = []
-            if len(body) == room:
-                break
-        lines.append(text)
-        shown += 1
-    if lines:
-        body.append(cards.md("\n".join(lines)))
-    if shown < len(chunks):
-        body.append(cards.ctx(f"…and {len(chunks) - shown} more"))
+    body, more = _summary_sections(chunks, room - bool(team))
+    if team:
+        count = len(team)
+        team_lines = []
+        for rid, (r, send) in sorted(team.items()):
+            link = f"<{slackapi.message_url(r['thread_ts'])}|{rid}>"
+            title = cards.esc(" ".join(r["versions"][send["version"] - 1]["card"]["title"].split())[:140])
+            team_lines.append(f"• {link} {title} · {cards.esc(send['name'])} · {_team_outcome(r, send)}")
+        team_lines[0] = f"👥 *{count} card{'s' if count != 1 else ''} also went to your team since yesterday morning*\n" + team_lines[0]
+        part, left = _summary_sections(team_lines, room - len(body))
+        body += part
+        more += left
+    if more:
+        body.append(cards.ctx(f"…and {more} more"))
     return top + body + [_switch(live)], headline.replace("*", "")
