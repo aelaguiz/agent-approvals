@@ -93,6 +93,35 @@ def settings(home=None):
     return s
 
 
+def target(name=None):
+    """Resolve a card's target. Old records without a target use the workspace default."""
+    s = settings()
+    if name is None:
+        return {k: s[k] for k in ("channel", "approver", "approver_name")}
+    targets = s.get("approvers") or {}
+    if name not in targets:
+        names = ", ".join(sorted(targets)) or "none"
+        raise ConfigError(f"Unknown approver {name!r}; configured names: {names}")
+    value = targets[name]
+    if not isinstance(value, dict) or any(not isinstance(value.get(k), str) or not value[k].strip()
+                                          for k in ("channel", "approver", "approver_name")):
+        raise ConfigError(f"Approver {name!r} needs channel, approver and approver_name")
+    return value
+
+
+def card_target(rec):
+    return target(rec.get("target"))
+
+
+def channel_args(rec):
+    channel = card_target(rec)["channel"]
+    return {"channel_id": channel} if rec.get("target") is not None else {}
+
+
+def targets():
+    return {None: target(), **{name: target(name) for name in (settings().get("approvers") or {})}}
+
+
 def homes():
     """The main workspace's folder, then each workspace folder inside it."""
     return [ROOT] + sorted(p.parent for p in ROOT.glob("*/config.json"))

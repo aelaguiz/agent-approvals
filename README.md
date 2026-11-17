@@ -19,11 +19,11 @@ agent ──approvals submit──▶ card in #approvals ──▶ you: ✅ / �
   - Approvals pressed in a row reach an agent one at a time: each goes once the agent has acknowledged the one before, or 2 minutes after it if no acknowledgement comes. A card whose answer is waiting its turn shows ⏳. Replies in a thread never wait.
   - Every answer is checked in the session's transcript and marked 📨 in Slack. 📨 means it was typed into the session, or the agent took it from its inbox, nothing more.
   - The agent then replies in the thread: after a decision, one line on what it understood and what it's doing now; after a reply or a question, its answer (`approvals answer`, verdict first) or its next version, with nothing before it. If nothing comes within 10 minutes, the thread gets a warning, so a delivery never looks like a handled answer.
-- **A morning list of what's waiting on you.** At 8 am each day the service posts one message in the channel that mentions you and lists every card waiting on your answer, grouped by when it closes (today, tomorrow, later), each linked to its card. It also lists cards that closed with no answer since the last list, since a reply reopens them. All day it keeps that message current: each line is struck through, with what happened, once the card stops waiting on you.
+- **A morning list of what's waiting on you.** At 8 am each day the service posts one message in each approver's channel that mentions them and lists only their cards waiting on an answer, grouped by when it closes (today, tomorrow, later), each linked to its card. It also lists cards that closed with no answer since the last list, since a reply reopens them. All day it keeps that message current: each line is struck through, with what happened, once the card stops waiting on them.
 - **Answer from the list in one tap.** Under each card waiting on you are its buttons: **Approve** (a yes to all of it: every plain row of a set, every item of a batch; a choice shows its options instead, unless they're pictures you need to see; a row that needs its own yes, like each store on a release card, gets its own Approve named for it), **Deny**, and **Remove**, which takes a card that shouldn't be waiting on you off the list: it closes with nothing approved, and the agent is told it's no verdict on the idea. Each tap is the same press as the card's own buttons, and its line crosses off within a second or two.
 - **The same list whenever you ask.** Post anything in the channel itself, not in a card's thread ("what's waiting?"), and within seconds the service posts a fresh list at the bottom, without mentioning you. Only the newest list is kept current; the one it replaces shrinks to a link to it.
 - **A second reader for money.** One agent session, the CFO, can review every budget, purchase and money card. It hears each one as it's posted, each new version and each of your answers, and puts its read in the card's thread with `approvals note`, so it sits beside the ask when you decide. Nothing waits on it, the asker's side doesn't change, and with no reviewer set up nothing changes at all.
-- **A deputy for the routine cards.** One agent session, the deputy, can hear every card as it's posted and make its own call on each: approve it for you, or leave it for you, with one or two sentences of why. Until you turn auto-approval on it's a dry run: each call is recorded and shown on the card in one gray line, and nothing is approved. Once it's on, the deputy's approve reaches the asking agent as your yes for the whole card (every row, the ones marked as needing their own yes included; on a card that asks for a pick it takes the pick the card names, and says so), the card says "🤖 Auto-approved" with its why, and a **Take it back** button turns it into your no at any time, even after the agent is done. Right after the 8 am list, one message sums up its calls since yesterday morning, with a button to turn auto-approval on or pause it. Which cards to approve is the deputy agent's own judgment; the tool only carries the call. The agents that post cards change nothing they do.
+- **A deputy for the routine cards.** One agent session, the deputy, can hear every card for the workspace's default approver as it's posted and make its own call on each: approve it for you, or leave it for you, with one or two sentences of why. Cards for another approver wait for that person and never go to the deputy. Until you turn auto-approval on it's a dry run: each call is recorded and shown on the card in one gray line, and nothing is approved. Once it's on, the deputy's approve reaches the asking agent as your yes for the whole card (every row, the ones marked as needing their own yes included; on a card that asks for a pick it takes the pick the card names, and says so), the card says "🤖 Auto-approved" with its why, and a **Take it back** button turns it into your no at any time, even after the agent is done. Right after the 8 am list, one message sums up its calls since yesterday morning, with a button to turn auto-approval on or pause it. Which cards to approve is the deputy agent's own judgment; the tool only carries the call. The agents that post cards change nothing they do.
 - **Agents learn it from a skill.** The `approvals` skill teaches when to ask (only when a yes is required, and once), how to write a card someone can decide from at a glance, and what to do with each kind of answer.
 
 ## Requirements
@@ -35,7 +35,7 @@ agent ──approvals submit──▶ card in #approvals ──▶ you: ✅ / �
   - Interactivity on, which Socket Mode carries;
   - the bot event `message.channels` (`message.groups` for a private channel), so a reply in a thread is read within seconds rather than on the next pass through every card's thread;
   - bot scopes `chat:write`, `chat:write.customize`, `channels:history` (`groups:history` for a private channel), `channels:read`, `reactions:write`, `files:write`, `files:read` and `users:read`;
-  - the bot invited to the approvals channel.
+  - the bot invited to every approver's channel.
 - To deliver into agent sessions: [Herdr](https://herdr.dev), with agents running in Herdr panes. Without it, answers wait in each agent's `approvals inbox`.
 - For Basecamp steps: the Basecamp command-line tool, `basecamp`, and in each agent's folder (or one above it) a `.basecamp/config.json` whose `default_profile` is that agent's own login. Without one, a card's Basecamp step is skipped.
 
@@ -57,9 +57,10 @@ make install MACHINE=laptop
 
 | Setting | What it is |
 | --- | --- |
-| `channel` | The approvals channel's id. |
-| `approver` | The Slack user id whose button presses and replies count. |
-| `approver_name` | What cards and agent messages call them. |
+| `channel` | The default approver's channel id. |
+| `approver` | The default approver's Slack user id, whose button presses and replies count on their cards. |
+| `approver_name` | What cards and agent messages call the default approver. |
+| `approvers` | Optional. Named approvers, each with their own `approver`, `approver_name` and `channel`. See [More than one approver](#more-than-one-approver). |
 | `list_as` | Optional. `{"name": "Approval desk", "icon_url": "https://example.com/desk.png"}` gives the morning list, lists asked for, and the deputy's summary their own name and picture. Unset: the app's usual name and picture. |
 | `bot_token_file`, `bot_token_key` | The env-style file holding the bot token, and the variable name in it. |
 | `app_token_file`, `app_token_key` | The same for the Socket Mode app token. |
@@ -74,6 +75,18 @@ make install MACHINE=laptop
 
 Tokens stay in their own files; the config only points at them.
 
+### More than one approver
+
+One Slack workspace can send cards to several approvers through the same app and listener. The top-level `approver`, `approver_name` and `channel` remain the default. Add other approvers under short names in `approvers`, using their Slack user and channel ids:
+
+```json
+{"approvers": {"lead": {"approver": "UOTHER", "approver_name": "Team lead", "channel": "COTHER"}}}
+```
+
+`approvals submit card.json --to lead` sends the card to that approver; for a set, the same `--to` applies to every card. An unknown name is refused with the workspace's available names. The agent's own repository says which decisions go to whom. Without `--to`, the default approver gets the card, as before.
+
+Each card keeps its approver's short name as `target`; old cards without it still use the default. Its posts, updates and thread use that approver's channel, and only that approver's button presses, pop-up submissions and replies count. Each approver gets a separate morning list; posting in their channel asks for their list. The deputy serves only the default approver. Removing a named approver from config while their cards still exist makes commands on those cards fail with an error rather than send them to the default.
+
 ### More than one machine
 
 Agents on several machines can share one approvals channel, each getting its answers in its own session.
@@ -86,7 +99,7 @@ Agents on several machines can share one approvals channel, each getting its ans
 
 ### More than one Slack workspace
 
-One install can serve several Slack workspaces, each with its own approvals channel, bot and approver. Agents use the same skill and the same command in all of them, and never choose a workspace themselves.
+One install can serve several Slack workspaces, each with its own bot, default approver and optional named approvers. Agents use the same skill and the same command in all of them, and never choose a workspace themselves.
 
 - **Add a workspace** by giving it a folder inside `~/.approvals`, such as `~/.approvals/acme/`, with its own `config.json`: its channel, approver and token files, an `id_prefix` of its own (`AC`), and the `folders` its agents work in. Its bot needs its own Slack app, set up as in [Requirements](#requirements); a bot that another program also connects to with Socket Mode would receive some of the button presses meant for this one. Then run `make install`.
 - **Each workspace runs its own service**, `com.agent-approvals.listener.<folder name>`, with its own records and log in its folder. The main workspace keeps `~/.approvals` and `com.agent-approvals.listener`.
@@ -99,6 +112,7 @@ Agents use the skill. To try it by hand:
 ```bash
 approvals read card.json                       # have a fresh reader check the card without posting it
 approvals submit card.json --agent "Pricing"   # posts the card, prints AP-0001 and a link
+approvals submit card.json --to lead           # sends it to the workspace's named approver
 approvals submit a.json b.json c.json --agent "Revenue"   # a set: three cards together, each its own decision, marked "1 of 3"
 approvals submit card.json --basecamp https://app.basecamp.com/<account>/buckets/<project>/card_tables/cards/<card>   # the Basecamp card it serves; repeatable
 approvals submit card.json --thread 'https://example.slack.com/archives/CEXAMPLE/p1800000000000001'   # the message this card answers
@@ -163,7 +177,7 @@ A card is JSON. [skills/approvals/references/cards.md](skills/approvals/referenc
 
 - **Records:** one JSON file per request in `~/.approvals/requests/`, on the hub.
 - **Log:** `~/.approvals/logs/listener.log`, on each machine.
-- **The list:** the newest list's message and what it lists, in `~/.approvals/digest.json`, on the hub.
+- **The lists:** the default approver's newest list and what it lists in `~/.approvals/digest.json`, and a separate state file for each named approver, on the hub.
 - **The reviewer:** which session reviews which card types, in `~/.approvals/reviewer.json`, on the hub.
 - **The deputy:** which session it is and whether auto-approval is on, in `~/.approvals/deputy.json`, on the hub.
 - **Fork families:** each registered session and its first fork session id, in `~/.approvals/forks.json`, on the hub.

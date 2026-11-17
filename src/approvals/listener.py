@@ -61,7 +61,7 @@ HELLO = 30               # reconnect when a new connection hasn't heard Slack's 
 
 def is_approver(msg, rec):
     """The approver's own replies count. In tests, a stand-in's "[test reply]" posts count on TEST cards only."""
-    s = config.settings()
+    s = config.card_target(rec)
     if msg.get("user") == s["approver"] and not msg.get("bot_id"):
         return True
     tester = config.test_approver()
@@ -69,11 +69,11 @@ def is_approver(msg, rec):
             and (msg.get("text") or "").startswith("[test reply]"))
 
 
-def is_ask(msg):
+def is_ask(msg, target=None):
     """The approver posting in the channel itself, not in a card's thread, asks for a fresh list. The channel is
     only cards, so any such post means it; in a test run, the stand-in's "[test reply]" posts count."""
     return (msg.get("thread_ts") in (None, msg.get("ts")) and not msg.get("subtype")
-            and is_approver(msg, {"test": config.is_test_run()}))
+            and is_approver(msg, {"test": config.is_test_run(), "target": target}))
 
 
 def reply_text(msg):
@@ -118,10 +118,10 @@ class Listener:
             ev = (req.payload or {}).get("event") or {}
             # Only the approver's own posts: the agents' acknowledgements and our notes would take his turn.
             who = ev.get("user")
-            if (ev.get("type") == "message" and ev.get("channel") == self.s["channel"] and ev.get("thread_ts")
-                    and who and who in (self.s["approver"], config.test_approver())):
+            if (ev.get("type") == "message" and ev.get("channel") in {t["channel"] for t in config.targets().values()} and ev.get("thread_ts")
+                    and who and who in {t["approver"] for t in config.targets().values()} | {config.test_approver()}):
                 with self.poke_lock:
-                    self.poke.add(ev["thread_ts"])
+                    self.poke.add((ev["channel"], ev["thread_ts"]))
 
     REFUSED = {
         "stale": "That version was replaced; use the newest card's buttons.",
@@ -138,6 +138,9 @@ class Listener:
         user = (payload.get("user") or {}).get("id")
         action = (payload.get("actions") or [{}])[0]
         if (payload.get("view") or {}).get("callback_id") == "approvals" and action.get("action_id") == "items":
+            rid = payload["view"]["private_metadata"].split("|", 1)[0]
+            if user != config.card_target(store.load(rid))["approver"]:
+                return None
             return lambda: self.recount_items(payload)
         try:
             rid, n, what = action.get("value", "").split("|", 2)
@@ -148,10 +151,15 @@ class Listener:
                      or (payload.get("message") or {}).get("thread_ts"))
         channel_id = (payload.get("channel") or {}).get("id") or (payload.get("container") or {}).get("channel_id")
         trigger = payload.get("trigger_id")
+        rec = None if rid == "deputy" else store.load(rid)
+        target = config.target() if rec is None else config.card_target(rec)
+        source_channel = ((rec or {}).get("thread") or {}).get("channel")
+        if channel_id and channel_id not in (target["channel"], source_channel):
+            return None
         if what == "see" or what.startswith(("read:", "pic:")):
             return lambda: self.open_view(rid, n, what, trigger, user, thread_ts, channel_id)
-        if user != self.s["approver"]:
-            return lambda: slackapi.ephemeral(user, f"Only {self.s['approver_name']} can decide approvals.", thread_ts, channel_id=channel_id)
+        if user != target["approver"]:
+            return lambda: slackapi.ephemeral(user, f"Only {target['approver_name']} can decide approvals.", thread_ts, channel_id=channel_id)
         if rid == "deputy":
             return self.switch_deputy(what == "live", payload, user)
         if what in ("change", "edit", "items") or what.endswith(":change"):
@@ -184,7 +192,8 @@ class Listener:
         """A press, on the card or on the list, crosses its line off the list now rather than at the next sweep, so
         the approver going down the list sees each answer land."""
         try:
-            digest.tick()
+            for name in config.targets():
+                digest.tick(**({"target": name} if name is not None else {}))
         except Exception as e:
             log.warning("the list's refresh after a press failed, the sweep will retry: %s", e)
 
@@ -239,8 +248,9 @@ class Listener:
         if what == "see" or what.startswith(("read:", "pic:")):
             return None, None
         first = next(iter(values), "words")
-        if user != self.s["approver"]:
-            return {"response_action": "errors", "errors": {first: f"Only {self.s['approver_name']} can decide approvals."}}, None
+        target = config.card_target(store.load(rid))
+        if user != target["approver"]:
+            return {"response_action": "errors", "errors": {first: f"Only {target['approver_name']} can decide approvals."}}, None
         words = ((values.get("words") or {}).get("words") or {}).get("value") or ""
         if what == "items":
             ticked = self._ticked(view)
@@ -263,15 +273,15 @@ class Listener:
         """His words from a pop-up go in the thread too, so the thread keeps the whole record."""
         self.try_refresh(rid)
         rec = store.load(rid)
-        who = self.s["approver_name"]
+        who = config.card_target(rec)["approver_name"]
         if words and (what == "edit" or what.endswith("change")):
             self.copy_to_source(rec, words, "view:" + view_id, store.now())
         try:
             if what == "edit":
-                slackapi.note(rec["thread_ts"], f"✍️ {who} approved it with these words:\n{cards.quoted(words)}")
+                slackapi.note(rec["thread_ts"], f"✍️ {who} approved it with these words:\n{cards.quoted(words)}", **config.channel_args(rec))
             elif what.endswith("change"):
                 row = f" to part {what[1:].split(':')[0]}" if what.startswith("p") else ""
-                slackapi.note(rec["thread_ts"], f"✏️ {who} asked for a change{row}:\n{cards.quoted(words)}")
+                slackapi.note(rec["thread_ts"], f"✏️ {who} asked for a change{row}:\n{cards.quoted(words)}", **config.channel_args(rec))
         except Exception as e:
             log.warning("thread note for %s failed: %s", rid, e)
 
@@ -279,7 +289,7 @@ class Listener:
         source = rec.get("thread") or {}
         if not source.get("small_ts") or key in source.get("copied_keys", []):
             return
-        line = cards.ctx(f"💬 {cards.esc(self.s['approver_name'])}, on the card in <#{self.s['channel']}> · {cards.when(at)}")
+        line = cards.ctx(f"💬 {cards.esc(config.card_target(rec)['approver_name'])}, on the card in <#{config.card_target(rec)['channel']}> · {cards.when(at)}")
         try:
             # One quote when it fits a section's 3,000 characters once escaped, as nearly every reply does; else in pieces.
             chunks = ([cards.md(cards.quoted(words))] if len(cards.quoted(words)) <= 2900
@@ -318,7 +328,7 @@ class Listener:
         return out
 
     def poll_once(self):
-        recs = {r["thread_ts"]: r for r in self.watched()}
+        recs = {(config.card_target(r)["channel"], r["thread_ts"]): r for r in self.watched()}
         if not recs:
             return
         now = time.monotonic()
@@ -342,7 +352,7 @@ class Listener:
 
     def poll_thread(self, rec):
         last = rec.get("last_seen") or rec["thread_ts"]
-        msgs = [m for m in slackapi.replies(rec["thread_ts"], oldest=last) if float(m["ts"]) > float(last)]
+        msgs = [m for m in slackapi.replies(rec["thread_ts"], oldest=last, **config.channel_args(rec)) if float(m["ts"]) > float(last)]
         if not msgs:
             return
         mine = [(m["ts"], reply_text(m)) for m in msgs if is_approver(m, rec) and reply_text(m).strip()]
@@ -369,9 +379,11 @@ class Listener:
     # ----- the list of what waits on the approver -----
 
     def lists(self):
-        st = digest.load_state()
-        asked = bool(st) and any(is_ask(m) for m in slackapi.history(st["ts"]))
-        digest.tick(asked=asked)
+        for name, target in config.targets().items():
+            kw = {"target": name} if name is not None else {}
+            st = digest.load_state(**kw)
+            asked = bool(st) and any(is_ask(m, name) for m in slackapi.history(st["ts"], **({"channel_id": target["channel"]} if name is not None else {})))
+            digest.tick(asked=asked, **kw)
 
     # ----- deadlines, card refreshes, deliveries -----
 
@@ -405,9 +417,9 @@ class Listener:
                 continue
             try:
                 for ts in set(on) - set(was):
-                    slackapi.react(ts, WAITING)
+                    slackapi.react(ts, WAITING, **config.channel_args(rec))
                 for ts in set(was) - set(on):
-                    slackapi.unreact(ts, WAITING)
+                    slackapi.unreact(ts, WAITING, **config.channel_args(rec))
             except Exception as e:
                 log.warning("the waiting mark on %s failed, will retry: %s", rec["id"], e)
                 continue
@@ -481,7 +493,7 @@ class Listener:
         what = "your answer" if len(late) == 1 else f"your last {len(late)} answers"
         try:
             slackapi.note(rec["thread_ts"], f"⚠️ {rec['agent']} received {what} at {cards.when(first)} (📨) but hasn't acknowledged "
-                                            f"in {ACK_MINUTES} minutes, so nothing confirms it was understood or acted on.")
+                                            f"in {ACK_MINUTES} minutes, so nothing confirms it was understood or acted on.", **config.channel_args(rec))
         except Exception as e:
             log.warning("ack warning for %s failed: %s", rec["id"], e)
         log.info("%s: no acknowledgement for %s", rec["id"], ", ".join(sorted(refs)))
@@ -574,12 +586,12 @@ class Listener:
         item = next(i for i in rec["outbox"] if i["ref"] == ref)
         if res.status == "delivered" and item.get("react_ts"):
             try:
-                slackapi.react(item["react_ts"], "incoming_envelope")
+                slackapi.react(item["react_ts"], "incoming_envelope", **config.channel_args(rec))
             except Exception as e:
                 log.warning("reaction failed: %s", e)
         if note and not item.get("to"):   # the approver's thread isn't told about the reviewer's or deputy's deliveries
             try:
-                slackapi.note(rec["thread_ts"], note)
+                slackapi.note(rec["thread_ts"], note, **config.channel_args(rec))
             except Exception as e:
                 log.warning("failure note failed: %s", e)
 
@@ -672,14 +684,14 @@ class Listener:
             age = int((now - store.parse(i["created"])).total_seconds())
             machine = core.machine_of(r)
             try:
-                line = (f"🚨 {core.who()}'s answer on {rid} ({core.one_line(r['title'])}) hasn't reached "
+                line = (f"🚨 {core.who(r)}'s answer on {rid} ({core.one_line(r['title'])}) hasn't reached "
                         f"{core.one_line(r['agent'])} after {age} seconds: {core.one_line(reason)}. "
-                        f"{slackapi.message_url(r['thread_ts'])}")
+                        f"{slackapi.message_url(r['thread_ts'], **config.channel_args(r))}")
                 slackapi.post([], line, channel_id=alarm["channel"])
             except Exception:
                 log.exception("alarm post for %s %s failed", rid, ref)
             paragraph = (f"This is an alarm from the approvals service on the hub, not a person. "
-                         f"{core.who()}'s answer on {rid} ({core.one_line(r['title'])}) has not reached "
+                         f"{core.who(r)}'s answer on {rid} ({core.one_line(r['title'])}) has not reached "
                          f"{core.one_line(r['agent'])} on {machine}: {core.one_line(reason)}. "
                          f"The answer is safe on the hub and will be typed in as soon as delivery works, "
                          f"or handed over when the agent runs `approvals inbox`. "
@@ -731,7 +743,7 @@ class Listener:
         sm.on_message_listeners.append(
             lambda raw: '"type":"hello"' in raw[:40] and setattr(self, "_hello", sm.current_session))
         sm.connect()
-        log.info("connected to Slack; watching %s", self.s["channel"])
+        log.info("connected to Slack; watching %s", ", ".join(sorted({t["channel"] for t in config.targets().values()})))
         threads = [
             threading.Thread(target=self.loop, args=(5, self.poll_once), daemon=True),
             threading.Thread(target=self.loop, args=(self.s["sweep_seconds"], self.sweep), daemon=True),

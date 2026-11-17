@@ -77,7 +77,7 @@ def last_reply_at(rec):
 
 def wanted(rec):
     """(text, checked) the step should show now."""
-    who = config.settings()["approver_name"]
+    who = config.card_target(rec)["approver_name"]
     status = rec["status"]
     d = rec.get("decision") or {}
     verdict = "withdrawn" if status == "withdrawn" else d.get("verdict") if status in ("approved", "declined", "expired", "done") else None

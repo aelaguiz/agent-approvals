@@ -63,17 +63,17 @@ def note(thread_ts, text, channel_id=None, sender=None):
     return client().chat_postMessage(channel=channel_id or channel(), thread_ts=thread_ts, text=text, unfurl_links=False, **_sender(sender or POST_AS))["ts"]
 
 
-def react(ts, name):
+def react(ts, name, channel_id=None):
     try:
-        client().reactions_add(channel=channel(), timestamp=ts, name=name)
+        client().reactions_add(channel=channel_id or channel(), timestamp=ts, name=name)
     except Exception as e:  # already_reacted is fine
         if "already_reacted" not in str(e):
             raise
 
 
-def unreact(ts, name):
+def unreact(ts, name, channel_id=None):
     try:
-        client().reactions_remove(channel=channel(), timestamp=ts, name=name)
+        client().reactions_remove(channel=channel_id or channel(), timestamp=ts, name=name)
     except Exception as e:  # no_reaction is fine
         if "no_reaction" not in str(e):
             raise
@@ -86,19 +86,19 @@ def ephemeral(user, text, thread_ts=None, channel_id=None):
     client().chat_postEphemeral(**kw)
 
 
-def history(oldest):
-    return client().conversations_history(channel=channel(), oldest=oldest, limit=200)["messages"]
+def history(oldest, channel_id=None):
+    return client().conversations_history(channel=channel_id or channel(), oldest=oldest, limit=200)["messages"]
 
 
-def replies(ts, oldest=None):
-    kw = dict(channel=channel(), ts=ts, limit=200)
+def replies(ts, oldest=None, channel_id=None):
+    kw = dict(channel=channel_id or channel(), ts=ts, limit=200)
     if oldest:
         kw["oldest"] = oldest
     return client().conversations_replies(**kw)["messages"]
 
 
-def permalink(ts):
-    return client().chat_getPermalink(channel=channel(), message_ts=ts)["permalink"]
+def permalink(ts, channel_id=None):
+    return client().chat_getPermalink(channel=channel_id or channel(), message_ts=ts)["permalink"]
 
 
 @functools.lru_cache(maxsize=1)
@@ -106,9 +106,9 @@ def _team_url():
     return client().auth_test()["url"]
 
 
-def message_url(ts):
+def message_url(ts, channel_id=None):
     """A link to a message in the approvals channel, without an API call per message."""
-    return f"{_team_url()}archives/{channel()}/p{ts.replace('.', '')}"
+    return f"{_team_url()}archives/{channel_id or channel()}/p{ts.replace('.', '')}"
 
 
 def thread_link(link):
@@ -168,6 +168,7 @@ def read_thread(thread):
     text = re.sub(r"<(https?://[^>]+)>", r"\1", text)
     text = html.unescape(text)
     thread["text"] = text[:299].rstrip() + "…" if len(text) > 300 else text
+    thread["user"] = msg.get("user")
     thread["approver"] = msg.get("user") == config.settings().get("approver")
     thread["readable"] = True
     return thread
@@ -191,12 +192,12 @@ def upload_private_image(path, title):
     return r["file"]["id"]
 
 
-def upload_pictures_to_thread(items, thread_ts, comment):
+def upload_pictures_to_thread(items, thread_ts, comment, channel_id=None):
     """Post pictures in a thread, in one message: items are (path, title). Slack shows a picture inside a carousel
     card only once it's shared where the card is, so a card's pictures go in its thread, full size, which is also
     where the approver can open them. Returns [{"id", "url"}] in order, once Slack has processed them."""
     r = client().files_upload_v2(file_uploads=[{"file": str(p), "title": t[:200]} for p, t in items],
-                                 channel=channel(), thread_ts=thread_ts, initial_comment=comment)
+                                 channel=channel_id or channel(), thread_ts=thread_ts, initial_comment=comment)
     files = r.get("files") or [r["file"]]
     out = [{"id": f["id"], "url": f.get("permalink")} for f in files]
     deadline = time.monotonic() + 30
@@ -210,9 +211,9 @@ def upload_pictures_to_thread(items, thread_ts, comment):
     return out
 
 
-def upload_to_thread(path, thread_ts, title, comment=None):
+def upload_to_thread(path, thread_ts, title, comment=None, channel_id=None):
     """Returns the uploaded file's permalink."""
-    r = client().files_upload_v2(file=str(path), title=title[:200], channel=channel(), thread_ts=thread_ts, initial_comment=comment)
+    r = client().files_upload_v2(file=str(path), title=title[:200], channel=channel_id or channel(), thread_ts=thread_ts, initial_comment=comment)
     f = r.get("file") or (r.get("files") or [{}])[0]
     return f.get("permalink")
 

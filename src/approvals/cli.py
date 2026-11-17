@@ -107,7 +107,7 @@ def _share_pictures(rid, n):
     if not todo:
         return
     what = "The pictures on this card" if n == 1 else f"The pictures on {cards.version_label(n)}"
-    refs = slackapi.upload_pictures_to_thread([(path, card["title"]) for _, path in todo], rec["thread_ts"], f"🖼 {what}, full size.")
+    refs = slackapi.upload_pictures_to_thread([(path, card["title"]) for _, path in todo], rec["thread_ts"], f"🖼 {what}, full size.", **config.channel_args(rec))
     files = {key: ref for (key, _), ref in zip(todo, refs)}
     store.update(rid, lambda r: r["versions"][n - 1].__setitem__("files", files))
 
@@ -121,7 +121,7 @@ def _video_in_thread(rid, n):
     todo += [(k, path) for k, path in cards.gallery_videos(card) if not (v.get("videos") or {}).get(k)]
     if not todo:
         return
-    links = {k: slackapi.upload_to_thread(path, rec["thread_ts"], card["title"], "The video, to play here.") for k, path in todo}
+    links = {k: slackapi.upload_to_thread(path, rec["thread_ts"], card["title"], "The video, to play here.", **config.channel_args(rec)) for k, path in todo}
 
     def put(r):
         ver = r["versions"][n - 1]
@@ -152,13 +152,17 @@ def _post_evidence(rec, evidence):
     for item in cards.evidence_items(evidence):
         path, label = _evidence_file(item)
         if path:
-            slackapi.upload_to_thread(path, rec["thread_ts"], label or path.name, label)
+            slackapi.upload_to_thread(path, rec["thread_ts"], label or path.name, label, **config.channel_args(rec))
         else:
-            slackapi.note(rec["thread_ts"], item)
+            slackapi.note(rec["thread_ts"], item, **config.channel_args(rec))
 
 
 def cmd_submit(a):
     """One card, or several as a set: each its own decision, posted one after another, each showing "1 of 3"."""
+    try:
+        config.target(getattr(a, "to", None))
+    except config.ConfigError as e:
+        _die(str(e))
     if len(a.card) > 1 and "-" in a.card:
         _die("A set is read from files, one per card.")
     if len(a.card) > cards.SET_MAX:
@@ -206,6 +210,10 @@ def _submit_one(card, a, set_pos, thread=None):
         "last_seen": None, "open_question": None, "decision": None, "done": None,
         "events": [], "outbox": [], "reach": None, "moves": [], "card_dirty": False,
     }
+    if getattr(a, "to", None) is not None:
+        rec["target"] = a.to
+    if thread and thread.get("readable") and "user" in thread:
+        thread["approver"] = thread.pop("user") == config.card_target(rec)["approver"]
     if slackapi.POST_AS:
         rec["as"] = slackapi.POST_AS
     if thread:
@@ -217,16 +225,16 @@ def _submit_one(card, a, set_pos, thread=None):
         rec["basecamp"] = bc
     rec = store.create(rec)
     reach.refresh(rec, who)
-    ts = slackapi.post(cards.card_blocks(rec, 1, "open"), cards.card_text(rec, 1))
+    ts = slackapi.post(cards.card_blocks(rec, 1, "open"), cards.card_text(rec, 1), **config.channel_args(rec))
     rec["thread_ts"] = ts
     rec["last_seen"] = ts
-    link = slackapi.permalink(ts)
+    link = slackapi.permalink(ts, **config.channel_args(rec))
     rec["link"] = link
     version["ts"] = ts
     store.event(rec, "submitted")
-    core.tell_reviewer(rec, f"{rec['agent']} posted it for {core.who()}'s answer. Your read goes in its thread with "
+    core.tell_reviewer(rec, f"{rec['agent']} posted it for {core.who(rec)}'s answer. Your read goes in its thread with "
                             f"`approvals note {rec['id']} --file <note.md>`; he may answer first, and nothing waits on it.")
-    core.tell_deputy(rec, f"a {rec['type']} card from {rec['agent']}, posted for {core.who()}'s answer. {core.make_your_call(rec)}")
+    core.tell_deputy(rec, f"a {rec['type']} card from {rec['agent']}, posted for {core.who(rec)}'s answer. {core.make_your_call(rec)}")
     store.save(rec)
     if thread and thread.get("readable"):
         try:
@@ -253,7 +261,7 @@ def cmd_ask(a):
         store.event(rec, "question", text=a.question)
         return rec
     rec = store.update(a.id, fn)
-    ts = slackapi.post(cards.question_blocks(rec, a.question), f"{rec['agent']} asks: {a.question}", thread_ts=rec["thread_ts"], broadcast=True)
+    ts = slackapi.post(cards.question_blocks(rec, a.question), f"{rec['agent']} asks: {a.question}", thread_ts=rec["thread_ts"], broadcast=True, **config.channel_args(rec))
     store.update(a.id, lambda r: r["open_question"].__setitem__("ts", ts))
     print(f"Asked in the thread of {a.id}. The answer will arrive as an [Approvals] message.")
 
@@ -303,15 +311,15 @@ def cmd_revise(a):
     # The new version goes at the bottom of the thread, where he reads; an earlier copy there shrinks to a line.
     _share_pictures(a.id, n)
     rec = store.load(a.id)
-    ts_new = slackapi.post(cards.card_blocks(rec, n, "open"), cards.card_text(rec, n), thread_ts=rec["thread_ts"])
+    ts_new = slackapi.post(cards.card_blocks(rec, n, "open"), cards.card_text(rec, n), thread_ts=rec["thread_ts"], **config.channel_args(rec))
     store.update(a.id, lambda r: r["versions"][n - 1].__setitem__("copy_ts", ts_new))
     core.refresh_and_clear(a.id)
     _video_in_thread(a.id, n)
-    ts_line = slackapi.post(cards.new_version_blocks(rec, n), f"{rec['agent']} posted v{n}: {card['title']}", thread_ts=rec["thread_ts"], broadcast=True)
+    ts_line = slackapi.post(cards.new_version_blocks(rec, n), f"{rec['agent']} posted v{n}: {card['title']}", thread_ts=rec["thread_ts"], broadcast=True, **config.channel_args(rec))
     store.update(a.id, lambda r: r["versions"][n - 1].__setitem__("line_ts", ts_line))
     if prev.get("line_ts"):   # only the newest version is announced, in the channel and the thread
         try:
-            slackapi.delete(prev["line_ts"])
+            slackapi.delete(prev["line_ts"], **config.channel_args(rec))
         except Exception as e:
             print(f"(couldn't take down v{prev['n']}'s line in the channel: {e})", file=sys.stderr)
     print(f"{a.id} v{n} posted in the thread, with a line in the channel; the first post now shows v{n}.")
@@ -323,7 +331,7 @@ def cmd_ack(a):
     name = rec["agent"]
     ts = slackapi.post([cards.md(f"🤖 *{cards.esc(name)}:* {cards.esc(a.text)}"),
                         cards.ctx(f"Acknowledged by the agent · {rec['id']} · {cards.when(store.now())}")],
-                       f"{name}: {a.text}", thread_ts=rec["thread_ts"])
+                       f"{name}: {a.text}", thread_ts=rec["thread_ts"], **config.channel_args(rec))
 
     def fn(r):
         reach.refresh(r, me)
@@ -373,9 +381,8 @@ def cmd_record(a):
     if not (a.approved or a.declined or a.choice):
         _die("Say what they answered: --approved, --declined, or --choice <option>.")
     verdict = "approved" if a.approved or a.choice else "declined"
-    by = config.settings()["approver_name"]
-
     def fn(rec):
+        by = config.card_target(rec)["approver_name"]
         n = len(rec["versions"])
         if a.part:
             j = _row(rec, a.part)
@@ -421,7 +428,7 @@ def cmd_status(a):
     rec = store.load(a.id)
     if kind == "on_you":
         # It waits on the approver: the thread says so, as a question would.
-        slackapi.note(rec["thread_ts"], f"⏳ {rec['agent']} is waiting on you: {a.text}")
+        slackapi.note(rec["thread_ts"], f"⏳ {rec['agent']} is waiting on you: {a.text}", **config.channel_args(rec))
     print(f"{a.id}: the card shows it" + (" and the morning list counts it as waiting on the approver." if kind == "on_you" else
                                           " and keeps it off the approver's morning list until a later line." if kind == "waiting" else "."))
 
@@ -439,7 +446,7 @@ def cmd_answer(a):
     hands a card that was back with the agent to him again as it stands, with no new version."""
     rec = store.load(a.id)
     me = reach.capture(a.agent)
-    ts = slackapi.post(cards.answer_blocks(rec, a.text, store.now()), f"{rec['agent']}: {a.text}", thread_ts=rec["thread_ts"])
+    ts = slackapi.post(cards.answer_blocks(rec, a.text, store.now()), f"{rec['agent']}: {a.text}", thread_ts=rec["thread_ts"], **config.channel_args(rec))
 
     def fn(r):
         reach.refresh(r, me)
@@ -518,7 +525,7 @@ def cmd_review(a):
         _die("This shell isn't a Claude or Codex session, so nothing could reach you. Run `approvals review` in your own session.")
     store.set_reviewer({"types": types, "reach": who, "test": config.is_test_run(), "since": store.iso()})
     print(f"This session now reviews every {', '.join(types)} card, as {who['agent']}: each new one, each new version and "
-          f"each of {config.settings()['approver_name']}'s answers reaches you here as an [Approvals] message. "
+          f"each approver's answers reach you here as an [Approvals] message. "
           f"Post your read with `approvals note <id> --file <note.md>`.")
 
 
@@ -538,7 +545,7 @@ def cmd_note(a):
         _die(f"The note is {len(text)} characters; one Slack post shows about 2,900, so cut it.")
     rec = store.load(a.id)
     name = rv["reach"]["agent"]
-    ts = slackapi.post(cards.note_blocks(rec, name, text, store.now()), f"{name}: {text}", thread_ts=rec["thread_ts"])
+    ts = slackapi.post(cards.note_blocks(rec, name, text, store.now()), f"{name}: {text}", thread_ts=rec["thread_ts"], **config.channel_args(rec))
     store.update(a.id, lambda r: store.event(r, "review_note", by=name, text=text, ts=ts))
     print(f"Your read is in the thread of {a.id}.")
 
@@ -624,7 +631,7 @@ def _took(start, end):
 
 def _happened(rec):
     """What happened on a card, in order, one line each: facts from its record."""
-    who = config.settings()["approver_name"]
+    who = config.card_target(rec)["approver_name"]
     posted = {v["n"]: v.get("posted_at") or rec["created"] for v in rec["versions"]}
     out = []
     for e in rec.get("events") or []:
@@ -664,12 +671,24 @@ def _happened(rec):
     return out
 
 
+def _deputy_session():
+    deputy = store.deputy()
+    if not deputy:
+        return None
+    session = reach.capture().get("session_id")
+    return session if session and session == deputy["reach"].get("session_id") else None
+
+
+def _deputy_can_read(rec, session):
+    return not session or rec.get("target") is None
+
+
 def cmd_history(a):
     """Cards newest first, each with what happened on it in order: for the deputy to see how an asker's recent cards
     of a kind went, and how its own calls compare with what the approver did. Facts only, no ranking."""
     since = store.iso(store.now() - timedelta(days=a.days)) if a.days else None
     shown = 0
-    for rec in store.history_records(a.agent, a.type, since, a.limit, a.calls):
+    for rec in store.history_records(a.agent, a.type, since, a.limit, a.calls, bool(_deputy_session())):
         print(f"{rec['id']}  {_stamp(rec['created'])}  {rec['type']}  {rec['agent']}: {rec['title']}")
         for line in _happened(rec):
             print(f"    {line}")
@@ -728,6 +747,8 @@ def cmd_inbox(a):
         for item in rec.get("outbox", []):
             if item.get("delivered_at") or item.get("seen_by_agent"):
                 continue
+            if item.get("to") == "deputy" and rec.get("target") is not None:
+                continue
             if item.get("to") and not roles[item["to"]]:
                 continue
             if not item.get("to") and (not theirs or not own and not (item.get("inbox_only") or item.get("noted_failure"))):
@@ -739,6 +760,8 @@ def cmd_inbox(a):
             item["claimed_by"] = me.get("session_id")
         return taken
     for rec in store.waiting_records():
+        if roles["deputy"] and not _deputy_can_read(rec, me.get("session_id")):
+            continue
         r = rec.get("reach") or {}
         same_family = store.same_family(r.get("session_id"), me.get("session_id"))
         own = bool(me.get("session_id")) and same_family and me["session_id"] in [r.get("session_id"), *r.get("earlier_ids", [])]
@@ -755,7 +778,7 @@ def cmd_inbox(a):
                 shown += 1
                 if react_ts:   # 📨, as when the service types an answer in: the agent has it
                     try:
-                        slackapi.react(react_ts, "incoming_envelope")
+                        slackapi.react(react_ts, "incoming_envelope", **config.channel_args(rec))
                     except Exception as e:
                         print(f"(couldn't mark {rec['id']} as received in Slack: {e})", file=sys.stderr)
     if not shown:
@@ -763,11 +786,15 @@ def cmd_inbox(a):
 
 
 def cmd_show(a):
-    print(json.dumps(store.load(a.id), indent=1, ensure_ascii=False))
+    rec = store.load(a.id)
+    print(json.dumps(rec, indent=1, ensure_ascii=False))
 
 
 def cmd_list(a):
+    deputy = _deputy_session()
     for rec in store.all_records():
+        if not _deputy_can_read(rec, deputy):
+            continue
         if a.open and rec["status"] in ("done", "declined", "withdrawn"):
             continue
         print(f'{rec["id"]}  {rec["status"]:9}  v{len(rec["versions"])}  {rec["agent"]}: {rec["title"]}')
@@ -787,10 +814,10 @@ def cmd_purge_tests(a):
                     pass
         if rec.get("thread_ts"):
             try:
-                for m in slackapi.replies(rec["thread_ts"]):
+                for m in slackapi.replies(rec["thread_ts"], **config.channel_args(rec)):
                     if m.get("user") == slackapi.bot_user() or (m.get("bot_id") and m.get("bot_id") == slackapi.bot_id()) or m["ts"] == rec["thread_ts"]:
                         try:
-                            slackapi.delete(m["ts"])
+                            slackapi.delete(m["ts"], **config.channel_args(rec))
                         except Exception:
                             pass
             except Exception:
@@ -839,6 +866,7 @@ def main(argv=None):
 
     s = sub.add_parser("submit", help="post a new request, or several as a set; prints each number")
     s.add_argument("card", nargs="+", help="card JSON file, or - for stdin; several files post a set, each its own decision, showing '1 of 3'")
+    s.add_argument("--to", help="named approver from the workspace config")
     s.add_argument("--thread", help="Slack message link to the conversation this request follows")
     s.add_argument("--agent", help="your agent name, as the approver knows it (e.g. Monetization)")
     s.add_argument("--test", action="store_true", help=argparse.SUPPRESS)
@@ -1003,8 +1031,13 @@ def main(argv=None):
         except config.ConfigError as e:
             _die(f"This machine can't post the cards of the Slack workspace set up in {config.HOME}: {e}")
     try:
+        if a.cmd in {"ask", "revise", "answer", "ack", "done", "withdraw", "record", "status", "note", "show", "pictures"}:
+            rec = store.load(a.id)
+            config.card_target(rec)
+            if not _deputy_can_read(rec, _deputy_session()):
+                _die("This card is for a different approver.")
         a.fn(a)
-    except store.StoreError as e:
+    except (store.StoreError, config.ConfigError) as e:
         _die(str(e))
     if a.cmd in CHANGES:
         basecamp.sync(a.id)

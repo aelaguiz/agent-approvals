@@ -61,8 +61,8 @@ class Client:
     def records(self, waiting=False):
         return self.call("GET", "/records" + ("?waiting=1" if waiting else ""))[1]["records"]
 
-    def history(self, agent, type, since, limit, calls):
-        q = {k: v for k, v in (("agent", agent), ("type", type), ("since", since), ("limit", limit), ("calls", 1 if calls else None)) if v}
+    def history(self, agent, type, since, limit, calls, default_only=False):
+        q = {k: v for k, v in (("agent", agent), ("type", type), ("since", since), ("limit", limit), ("calls", 1 if calls else None), ("default_only", 1 if default_only else None)) if v}
         code, body = self.call("GET", "/history?" + urlencode(q))
         if code != 200:
             raise store.StoreError(f"the approvals hub on {config.hub()} runs a version without history; update it first")
@@ -133,7 +133,7 @@ class Handler(BaseHTTPRequestHandler):
             if method == "GET" and parts == ["history"]:
                 one = lambda k: q.get(k, [None])[0]
                 return self._send(200, {"records": store.local_history(one("agent"), one("type"), one("since"),
-                                                                        int(one("limit") or 20), bool(one("calls")))})
+                                                                        int(one("limit") or 20), bool(one("calls")), bool(one("default_only")))})
             if parts == ["reviewer"]:
                 if method == "GET":
                     return self._send(200, {"reviewer": store.local_reviewer()})

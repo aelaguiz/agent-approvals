@@ -669,7 +669,7 @@ def small_blocks(rec):
 
 def _small_state(rec):
     d = rec.get("decision") or {}
-    who = esc(config.settings()["approver_name"])
+    who = esc(config.card_target(rec)["approver_name"])
     status = rec.get("status")
     if status == "done" and rec.get("done"):
         return f"✅ Done by {esc(rec['agent'])}, {when(datetime.fromisoformat(rec['done']['at']))}"
@@ -984,7 +984,7 @@ def _final_blocks(rec, n):
 
 def _timeline_blocks(rec, card):
     d = rec.get("decision") or {}
-    who = config.settings()["approver_name"]
+    who = config.card_target(rec)["approver_name"]
     blocks = []
     # His words on it: what he sent with the yes, else his latest reply in the thread since (a change, a condition).
     after = [e["text"] for e in rec.get("events") or [] if e["kind"] == "comment" and e.get("text") and e["at"] >= (d.get("at") or "")]
@@ -1188,7 +1188,7 @@ def note_blocks(rec, name, text, at):
     nothing and changes nothing on the card. Markdown's **bold** is Slack's *bold*."""
     blocks = [test_tag()] if rec.get("test") else []
     return blocks + [md(f"💬 *{esc(name)}:*\n{bullets(esc(text.strip().replace('**', '*')))}"),
-                     ctx(f"{esc(name)} · a read for {esc(config.settings()['approver_name'])} before the answer; it changes nothing on the card · {rec['id']} · {when(at)}")]
+                     ctx(f"{esc(name)} · a read for {esc(config.card_target(rec)['approver_name'])} before the answer; it changes nothing on the card · {rec['id']} · {when(at)}")]
 
 
 def question_blocks(rec, question):

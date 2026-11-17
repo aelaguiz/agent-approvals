@@ -28,22 +28,24 @@ ACTIONS_MAX = 25                # Slack's limit on buttons in one actions block
 _lock = threading.Lock()        # the sweep and a button press's follow-up both edit the list
 
 
-def _path():
-    return config.HOME / "digest.json"
+def _path(target=None):
+    if target is None:
+        return config.HOME / "digest.json"
+    return config.HOME / ("digest-" + hashlib.sha256(target.encode()).hexdigest() + ".json")
 
 
-def load_state():
+def load_state(target=None):
     try:
-        return json.loads(_path().read_text())
+        return json.loads(_path(target).read_text())
     except FileNotFoundError:
         return None
 
 
-def _save_state(st):
+def _save_state(st, target=None):
     fd, tmp = tempfile.mkstemp(dir=config.HOME, prefix=".tmp-digest-", suffix=".json")
     with os.fdopen(fd, "w") as f:
         json.dump(st, f, indent=1)
-    os.replace(tmp, _path())
+    os.replace(tmp, _path(target))
 
 
 def waiting(rec):
@@ -147,7 +149,7 @@ def _line(rec, day, detail=None):
     """The card, linked, then one gray line; a card waiting on the approver's answer gets its buttons under them. A
     card no longer waiting is struck through."""
     emoji = cards.TYPES[rec["versions"][-1]["card"]["type"]]["emoji"]
-    link = f"<{slackapi.message_url(rec['thread_ts'])}|{rec['id']}>"
+    link = f"<{slackapi.message_url(rec['thread_ts'], **config.channel_args(rec))}|{rec['id']}>"
     if detail is None and not waiting(rec):
         return [cards.md(f"{emoji} ~{link}  {_title(rec)}~"), cards.ctx(_outcome(rec, day))]
     if detail is None and rec["status"] not in WAITING:
@@ -178,7 +180,7 @@ def render(st, records):
     else:
         headline = "Nothing is waiting on you"
     # A list the approver just asked for needs no ping.
-    mention = f"<@{config.settings()['approver']}> " if (listed or closed) and not st.get("asked") else ""
+    mention = f"<@{config.target(st.get("target"))['approver']}> " if (listed or closed) and not st.get("asked") else ""
     icon = "📋" if st.get("asked") else "☀️"
 
     # Each line in order, a heading riding with the first line under it so it never shows alone.
@@ -211,25 +213,27 @@ def render(st, records):
     return top + [cards.ctx(sub)] + body, f"{mention}{icon} {headline}", content
 
 
-def tick(now=None, asked=False):
+def tick(now=None, asked=False, target=None):
     """Post the morning list once it's due, or a fresh list when the approver asked for one; otherwise keep the
     newest list current. Called every few seconds, and right after a button press so its line crosses off at once.
     State changes only after Slack accepts the post or edit, so a failure is retried next time."""
     with _lock:
-        _tick(now, asked)
+        _tick(now, asked, target)
 
 
-def _tick(now, asked):
+def _tick(now, asked, target=None):
     now = now or store.now()
     local = cards.local(now)
-    st = load_state()
-    records = [r for r in store.all_records() if _ours(r)]
+    selected = config.target(target)
+    kw = {"channel_id": selected["channel"]} if target is not None else {}
+    st = load_state(target) if target is not None else load_state()
+    records = [r for r in store.all_records() if _ours(r) and r.get("target") == target]
     eight = local.replace(hour=HOUR, minute=0, second=0, microsecond=0)
     morning = local >= eight and (not st or datetime.fromisoformat(st["posted_at"]) < eight)
     if morning or asked:
         since = datetime.fromisoformat(st["posted_at"]) if st else now - timedelta(days=1)
         new = {
-            "date": local.date().isoformat(), "asked": not morning,
+            "date": local.date().isoformat(), "asked": not morning, "target": target,
             "listed": [r["id"] for r in records if waiting(r)],
             "closed": [r["id"] for r in records if r["status"] == "expired" and (_last(r, "expired") or now) >= since],
             "posted_at": store.iso(now), "updated_at": None,
@@ -237,14 +241,14 @@ def _tick(now, asked):
         blocks, text, content = render(new, records)
         sender = config.settings().get("list_as")
         sender = config.sender(sender, "list_as") if sender is not None else None
-        new["ts"] = slackapi.post(blocks, text, sender=sender) if sender else slackapi.post(blocks, text)
+        new["ts"] = slackapi.post(blocks, text, sender=sender, **kw) if sender else slackapi.post(blocks, text, **kw)
         new["content"] = content
-        _save_state(new)
+        _save_state(new, target) if target is not None else _save_state(new)
         log.info("%s posted: %d waiting, %d closed with no answer", "morning list" if morning else "list asked for",
                  len(new["listed"]), len(new["closed"]))
         if st:
-            _retire(st, new)
-        if morning:
+            _retire(st, new, **kw)
+        if morning and target is None:
             try:
                 rendered = summary(store.deputy(), eight - timedelta(days=1), records)
                 if rendered:
@@ -260,18 +264,18 @@ def _tick(now, asked):
         return
     st["updated_at"] = store.iso(now)
     blocks, text, content = render(st, records)
-    slackapi.update(st["ts"], blocks, text)
+    slackapi.update(st["ts"], blocks, text, **kw)
     st["content"] = content
-    _save_state(st)
+    _save_state(st, target) if target is not None else _save_state(st)
     log.info("list of %s updated", st["posted_at"])
 
 
-def _retire(old, new):
+def _retire(old, new, **kw):
     """Shrink the replaced list to a link to the new one, so the channel never shows two lists that disagree."""
     when = _at(datetime.fromisoformat(new["posted_at"]), datetime.fromisoformat(old["date"]).date())
-    text = f"Replaced by <{slackapi.message_url(new['ts'])}|a newer list> posted {when}."
+    text = f"Replaced by <{slackapi.message_url(new['ts'], **kw)}|a newer list> posted {when}."
     try:
-        slackapi.update(old["ts"], [cards.ctx(text)], text)
+        slackapi.update(old["ts"], [cards.ctx(text)], text, **kw)
     except Exception as e:
         log.warning("couldn't shrink the replaced list %s: %s", old["ts"], e)
 
