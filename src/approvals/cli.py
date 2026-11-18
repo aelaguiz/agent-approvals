@@ -254,6 +254,7 @@ def _submit_one(card, a, set_pos, thread=None):
 
 def cmd_ask(a):
     def fn(rec):
+        send = core.conversation_send(rec)
         reach.refresh(rec, reach.capture())
         rec["open_question"] = {"text": a.question, "at": store.iso()}
         rec["status"] = "question"
@@ -261,10 +262,13 @@ def cmd_ask(a):
             rec["card_dirty"] = True
         core.mark_acked(rec)
         store.event(rec, "question", text=a.question)
-        return rec
-    rec = store.update(a.id, fn)
-    ts = slackapi.post(cards.question_blocks(rec, a.question), f"{rec['agent']} asks: {a.question}", thread_ts=rec["thread_ts"], broadcast=True, **config.channel_args(rec))
+        return rec, send
+    rec, send = store.update(a.id, fn)
+    blocks = cards.question_blocks(rec, a.question)
+    text = f"{rec['agent']} asks: {a.question}"
+    ts = slackapi.post(blocks, text, thread_ts=rec["thread_ts"], broadcast=True, **config.channel_args(rec))
     store.update(a.id, lambda r: r["open_question"].__setitem__("ts", ts))
+    core.post_to_teammate(a.id, send, text, blocks)
     print(f"Asked in the thread of {a.id}. The answer will arrive as an [Approvals] message.")
 
 
@@ -335,14 +339,16 @@ def cmd_ack(a):
     rec = store.load(a.id)
     me = reach.capture(a.agent)
     name = rec["agent"]
-    ts = slackapi.post([cards.md(f"🤖 *{cards.esc(name)}:* {cards.esc(a.text)}"),
-                        cards.ctx(f"Acknowledged by the agent · {rec['id']} · {cards.when(store.now())}")],
-                       f"{name}: {a.text}", thread_ts=rec["thread_ts"], **config.channel_args(rec))
+    blocks = [cards.md(f"🤖 *{cards.esc(name)}:* {cards.esc(a.text)}"),
+              cards.ctx(f"Acknowledged by the agent · {rec['id']} · {cards.when(store.now())}")]
+    text = f"{name}: {a.text}"
+    ts = slackapi.post(blocks, text, thread_ts=rec["thread_ts"], **config.channel_args(rec))
 
     def fn(r):
         reach.refresh(r, me)
-        return core.acknowledge(r, a.text, ts)
-    kinds = store.update(a.id, fn)
+        return core.acknowledge(r, a.text, ts), core.conversation_send(r)
+    kinds, send = store.update(a.id, fn)
+    core.post_to_teammate(a.id, send, text, blocks)
     print(f"Acknowledged in the thread of {a.id}" + (f" ({', '.join(kinds)})." if kinds else "."))
 
 
@@ -456,9 +462,12 @@ def cmd_answer(a):
     that was waiting on its agent, with no new version."""
     rec = store.load(a.id)
     me = reach.capture(a.agent)
-    ts = slackapi.post(cards.answer_blocks(rec, a.text, store.now()), f"{rec['agent']}: {a.text}", thread_ts=rec["thread_ts"], **config.channel_args(rec))
+    blocks = cards.answer_blocks(rec, a.text, store.now())
+    text = f"{rec['agent']}: {a.text}"
+    ts = slackapi.post(blocks, text, thread_ts=rec["thread_ts"], **config.channel_args(rec))
 
     def fn(r):
+        send = core.conversation_send(r)
         reach.refresh(r, me)
         kinds = core.acknowledge(r, a.text, ts)
         back = r["status"] == "revising"
@@ -466,8 +475,9 @@ def cmd_answer(a):
             r["status"] = "pending"
             r["card_dirty"] = True
         store.event(r, "answered", text=a.text, ts=ts, back=back)
-        return back, back and cards.handed(r)
-    back, handed = store.update(a.id, fn)
+        return back, back and cards.handed(r), send
+    back, handed, send = store.update(a.id, fn)
+    core.post_to_teammate(a.id, send, text, blocks)
     message = f"Answered in the thread of {a.id}"
     if back:
         core.refresh_and_clear(a.id)

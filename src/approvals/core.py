@@ -876,6 +876,22 @@ def expire(rec):
 
 # ---------- Slack side ----------
 
+def conversation_send(rec):
+    """The current direct message that should also show the card's conversation."""
+    send = cards.also_on(rec, len(rec["versions"]))
+    if (send and send.get("sent_at") and not send.get("handed_back_at") and rec["status"] not in FINAL
+            and (send.get("handed") or cards.responded(rec, send))):
+        return send
+
+
+def post_to_teammate(rid, send, text, blocks=None):
+    if send:
+        try:
+            slackapi.post(blocks, text, thread_ts=send["ts"], channel_id=send["channel"])
+        except Exception:
+            logging.getLogger(__name__).exception("direct message reply for %s failed", rid)
+
+
 def mode_for(rec):
     if cards.handed(rec):
         return "handed"

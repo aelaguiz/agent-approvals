@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from approvals import cards, cli, config, core, digest, listener, slackapi, store
+from approvals.slackapi import post as slack_post
 from kinds import KINDS
 from samples import SAMPLES
 from test_deputy import ASKER, as_session, be_deputy, call, to
@@ -33,10 +34,11 @@ def team(monkeypatch):
 
 @pytest.fixture
 def slack(monkeypatch):
-    wire = SimpleNamespace(opens=[], posts=[], updates=[], notes=[], notices=[], threads={}, reads=[], views=[], deletes=[])
+    wire = SimpleNamespace(opens=[], posts=[], texts={}, updates=[], notes=[], notices=[], threads={}, reads=[], views=[], deletes=[])
     def post(blocks, text, **kw):
         ts = f"{store.now().timestamp() + len(wire.posts) / 10:.6f}"
         wire.posts.append((ts, blocks, kw))
+        wire.texts[ts] = text
         return ts
 
     monkeypatch.setattr(slackapi, "open_dm", lambda user: wire.opens.append(user) or DM)
@@ -418,6 +420,156 @@ def test_channel_and_dm_replies_reach_the_asker_once_with_the_name(team, slack, 
         assert "Riley" in txt(slack.posts[-1][1]) and rec["thread"]["copied_ts"]
     cli.main(["record", RID, "--approved", "--words", m["text"], "--where", "Slack thread"])
     assert store.load(RID)["decision"]["by"] == USER
+
+
+def test_the_agents_thread_posts_reach_the_teammates_dm_with_the_same_sender(team, slack, monkeypatch, tmp_path):
+    card()
+    leave()
+    L = listener.Listener()
+    L.sweep()
+    rec, send = latest()
+    slack.threads[send["ts"]] = [reply(send["ts"], "Does the cap include tax?")]
+    L.poll_once()
+
+    sender = {"name": "Test agent", "icon_url": "https://example.test/icon.png"}
+    (tmp_path / ".approvals.json").write_text(json.dumps({"post_as": sender}))
+    calls = []
+
+    class Client:
+        def chat_postMessage(self, **kw):
+            calls.append(kw)
+            return {"ts": str(100 + len(calls))}
+
+    monkeypatch.setattr(slackapi, "post", slack_post)
+    monkeypatch.setattr(slackapi, "client", Client)
+    for cmd, words in (("answer", "Yes, the cap includes tax."), ("ack", "I checked the total."),
+                       ("ask", "Does that total include shipping?")):
+        cli.main([cmd, RID, words])
+        channel, dm = calls
+        assert (channel["channel"], channel["thread_ts"]) == (team["channel"], rec["thread_ts"])
+        assert (dm["channel"], dm["thread_ts"]) == (DM, send["ts"])
+        assert bool(channel.get("reply_broadcast")) == (cmd == "ask") and "reply_broadcast" not in dm
+        assert channel["blocks"] == dm["blocks"] and channel["text"] == dm["text"] and words in dm["text"]
+        assert channel["username"] == dm["username"] == sender["name"]
+        assert channel["icon_url"] == dm["icon_url"] == sender["icon_url"]
+        calls.clear()
+
+
+def test_a_deputys_send_joins_the_conversation_after_the_teammate_replies(team, slack):
+    rec = card()
+    leave()
+    L = listener.Listener()
+    L.sweep()
+    _, send = latest()
+    first = reply(send["ts"], "Does it include tax?", user=team["approver"])
+    slack.threads[rec["thread_ts"]] = [first]
+    L.poll_thread(rec)
+    cli.main(["answer", RID, "Yes, it includes tax."])
+    assert [kw for _, _, kw in slack.posts if kw.get("thread_ts")] == [{"thread_ts": rec["thread_ts"]}]
+
+    slack.threads[send["ts"]] = [reply(send["ts"], "What about shipping?")]
+    L.poll_thread(*latest())
+    cli.main(["answer", RID, "Shipping is included too."])
+    second = reply(first["ts"], "Thanks.\nPlease check it again.", user=team["approver"])
+    third = reply(second["ts"], "The cap stays the same.", user=team["approver"])
+    slack.threads[rec["thread_ts"]] += [second, third, reply(third["ts"], "I'll check it.")]
+    L.poll_thread(store.load(RID))
+    L.poll_thread(store.load(RID))
+    assert [slack.texts[ts] for ts, _, kw in slack.posts if kw.get("thread_ts") == send["ts"]] == [
+        f"{rec['agent']}: Shipping is included too.",
+        f"💬 {team['approver_name']} replied on the card:\n" + cards.quoted(second["text"]),
+        f"💬 {team['approver_name']} replied on the card:\n" + cards.quoted(third["text"]),
+    ]
+
+
+@pytest.mark.parametrize("end", ["not mine", "closed send", "new version", "final"])
+def test_the_old_direct_message_stops_getting_the_conversation(team, slack, tmp_path, end):
+    rec = card()
+    leave()
+    L = listener.Listener()
+    L.sweep()
+    _, old = latest()
+    slack.threads[old["ts"]] = [reply(old["ts"], "Does it include tax?")]
+    L.poll_once()
+    cli.main(["answer", RID, "Yes, it includes tax."])
+    before = len(slack.posts)
+
+    approver, channel = team["approver"], team["channel"]
+    if end == "not mine":
+        click("notmine")
+    elif end == "closed send":
+        click("hand:morgan", user=approver, channel=channel)
+        L.sweep()
+    elif end == "new version":
+        revise(tmp_path)
+    else:
+        click("approve", user=approver, channel=channel)
+    slack.threads[rec["thread_ts"]] = [reply(old["ts"], "What is the total?", user=approver)]
+    L.poll_thread(store.load(RID))
+    for cmd in ("answer", "ack", "ask"):
+        cli.main([cmd, RID, "Shipping is included too."])
+    assert all(kw.get("thread_ts") != old["ts"] for _, _, kw in slack.posts[before:])
+
+
+def test_a_failed_dm_reply_keeps_the_channel_answer_and_reopens_the_card(team, slack, monkeypatch, caplog):
+    rec = card()
+    leave()
+    L = listener.Listener()
+    L.sweep()
+    _, send = latest()
+    slack.threads[send["ts"]] = [reply(send["ts"], "Does it include tax?")]
+    L.poll_once()
+    assert store.load(RID)["status"] == "revising"
+    post = slackapi.post
+
+    def fail_dm(blocks, text, **kw):
+        if kw.get("channel_id") == DM:
+            raise ValueError("Slack failed")
+        return post(blocks, text, **kw)
+
+    monkeypatch.setattr(slackapi, "post", fail_dm)
+    cli.main(["answer", RID, "Yes, it includes tax."])
+    ts, _, kw = slack.posts[-1]
+    assert kw["thread_ts"] == rec["thread_ts"] and "Yes, it includes tax." in slack.texts[ts]
+    rec, after = latest()
+    assert rec["status"] == "pending" and after["ts"] == send["ts"]
+    assert rec["events"][-1]["kind"] == "answered" and rec["events"][-1]["ts"] == ts
+    assert caplog.text.count(f"direct message reply for {RID} failed") == 1
+
+
+def test_open_direct_messages_are_read_every_15_seconds_ahead_of_the_rotation(team, slack, monkeypatch):
+    card()
+    leave()
+    L = listener.Listener()
+    L.sweep()
+    rec, send = latest()
+    for n in range(2, 201):
+        store.save(dict(rec, id=f"AP-{n:04d}", thread_ts=f"{n}.1", also=[]))
+    now = 100.0
+    monkeypatch.setattr(listener.time, "monotonic", lambda: now)
+    dm_read = (send["ts"], {"oldest": send["ts"], "channel_id": DM})
+    L.poll_once()
+    assert slack.reads[0] == dm_read and len(slack.reads) == 3
+
+    slack.reads.clear()
+    now += 14
+    L.poll_once()
+    assert dm_read not in slack.reads and len(slack.reads) == 3
+
+    slack.reads.clear()
+    now += 1
+    L.poll_once()
+    assert slack.reads[0] == dm_read and len(slack.reads) == 3
+    assert slack.reads[1][0] != rec["thread_ts"]
+
+
+def test_socket_flags_a_teammates_channel_reply_and_ignores_a_strangers(team, slack):
+    L = listener.Listener()
+    client = SimpleNamespace(send_socket_mode_response=lambda r: None)
+    for thread, who in (("1.1", USER), ("2.1", "USTRANGER")):
+        event = {"type": "message", "channel": team["channel"], "thread_ts": thread, "user": who}
+        L.on_socket(client, SimpleNamespace(type="events_api", envelope_id="e", payload={"event": event}))
+    assert L.poke == {(team["channel"], "1.1")}
 
 
 def test_not_mine_leaves_the_card_waiting_and_ends_the_teammates_access(team, slack):

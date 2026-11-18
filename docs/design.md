@@ -196,6 +196,8 @@ The channel card shows who has it, with **Back to me** and **See the card**. The
 
 A revision carries an unreturned hand-off to the same person with fresh delivery and return times. A deputy call with `--his` leaves the hand-off in place, and `--also` is refused if the version already has a send. The summary shows the return time for hand-offs awaiting a first answer and records replies, answers and automatic returns. The history shows hand-offs, automatic returns and **Back to me**.
 
+Once the current send is delivered on an open card, a hand-off or a teammate's response makes the DM thread part of the conversation. The listener quotes the approver's typed replies and pop-up words in that thread, and `answer`, `ack` and `ask` use the same text, blocks and sender in both threads.
+
 ## Acknowledgements
 
 📨 means one thing: the service saw its message in the agent's transcript. That proves delivery, not understanding.
@@ -212,7 +214,7 @@ A revision carries an unreturned hand-off to the same person with fresh delivery
 
 ## Polling and deadlines
 
-- **Replies:** when the approver posts in a card's thread, Slack's message event has that thread read in the next round, within 5 seconds, ahead of everything else. Other posts (agents' acknowledgements, the service's own notes) don't. The hub hands the reply to its own sessions within 5 seconds, and the other machines ask for theirs every 5 seconds.
+- **Replies:** Slack message events from approvers and workspace teammates flag threads in approvals channels for the next polling round. Open DM threads are due every 15 seconds and go ahead of the rotation within the same read budget. The hub hands a reply to its own sessions within 5 seconds, and the other machines ask for theirs every 5 seconds.
 - **The safety net:** the listener also reads every watched thread in turn (any card with activity in the last 14 days), 3 every 5 seconds. With hundreds of cards a full pass takes about 15 minutes, so this only catches replies Slack didn't flag, such as while the connection is down.
 - **Deadlines:** at its deadline a request is marked "No answer: not approved" and the agent is told. A reply after that reopens it.
 

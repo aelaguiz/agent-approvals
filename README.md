@@ -98,6 +98,8 @@ The default approver can use **Hand to Riley** on the channel card or the mornin
 
 Riley can use the card's buttons and reply in either thread. The first answer stands, and an answer from Riley names Riley and counts as the approver's for the card as written. **Not mine** hands the card back, ends Riley's access and tells the deputy. A revision keeps an unreturned hand-off with Riley and starts a fresh clock. The deputy makes a new call for each version and can use `--also` only if it has no current send. The morning summary shows team sends when auto-approval is on, and `approvals history` shows hand-offs, deliveries and returns.
 
+The open direct-message thread also shows the asking agent's answers, acknowledgements and questions, along with the approver's replies, once a hand-off is delivered or a teammate responds to a deputy's send. The listener checks open direct-message threads on a 15-second schedule.
+
 ### More than one machine
 
 Agents on several machines can share one approvals channel, each getting its answers in its own session.

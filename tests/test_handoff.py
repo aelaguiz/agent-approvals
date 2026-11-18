@@ -6,8 +6,8 @@ import pytest
 
 from approvals import cards, cli, config, core, digest, listener, slackapi, store
 from test_deputy import to
-from test_kinds import press_payload, run, txt, values
-from test_team import DM, NOW, RID, USER, card, click, latest, leave, revise, slack, team
+from test_kinds import press_payload, run, submit_payload, txt, values
+from test_team import DM, NOW, RID, USER, card, click, latest, leave, reply, revise, slack, team
 
 
 APPROVER = "UAPPROVER"
@@ -290,6 +290,50 @@ def test_answering_a_teammates_reply_reopens_the_card_with_the_teammate(team, sl
     monkeypatch.setattr(L, "return_hand", lambda rec: pytest.fail("the sweep tried to return a card with a response"))
     L.sweep()
     assert latest() == (rec, send) and not broadcasts(slack)
+
+
+def test_a_handed_card_carries_the_conversation_before_the_teammate_replies(team, slack):
+    rec = card()
+    hand()
+    L = listener.Listener()
+    L.sweep()
+    rec, send = latest()
+    assert not cards.responded(rec, send)
+    cli.main(["ack", RID, "I'll check the total."])
+    cli.main(["ask", RID, "Should I include shipping?"])
+    m = reply(send["ts"], "Yes, include shipping.", user=APPROVER)
+    slack.threads[rec["thread_ts"]] = [m]
+    L.poll_once()
+    cli.main(["answer", RID, "I've included shipping."])
+
+    assert [slack.texts[ts] for ts, _, kw in slack.posts if kw.get("thread_ts") == send["ts"]] == [
+        f"{rec['agent']}: I'll check the total.",
+        f"{rec['agent']} asks: Should I include shipping?",
+        f"💬 {team['approver_name']} replied on the card:\n" + cards.quoted(m["text"]),
+        f"{rec['agent']}: I've included shipping.",
+    ]
+
+
+@pytest.mark.parametrize("kind,what,user", [
+    ("message", "change", APPROVER), ("set", "p1:change", APPROVER), ("as_you", "edit", APPROVER),
+    ("message", "change", USER),
+])
+def test_only_the_approvers_words_from_a_popup_are_quoted_in_the_dm(team, slack, kind, what, user):
+    card(kind=kind)
+    hand()
+    L = listener.Listener()
+    L.sweep()
+    rec, send = latest()
+    words = "Please use these words.\nInclude the total."
+    payload = submit_payload(f"{RID}|1|{what}", {"words": {"words": {"value": words}}}, user=user)
+    response, follow = L.handle_submission(payload)
+    assert response is None
+    run(follow)
+    assert slack.notes[-1][0] == rec["thread_ts"] and slack.notes[-1][1].endswith(cards.quoted(words))
+    dm = [slack.texts[ts] for ts, _, kw in slack.posts if kw.get("thread_ts") == send["ts"]]
+    assert dm == ([f"💬 {team['approver_name']} replied on the card:\n" + cards.quoted(words)] if user == APPROVER else [])
+    if what == "edit":
+        assert store.load(RID)["status"] == "approved"
 
 
 def test_the_channel_card_has_the_test_tag_frame_and_two_buttons(team, slack):

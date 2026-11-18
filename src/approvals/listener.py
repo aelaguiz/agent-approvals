@@ -50,6 +50,7 @@ class SlackConnection(SocketModeClient):
 
 WATCH_DAYS = 14          # threads stay watched this long after their last activity
 POLL_BUDGET_PER_MIN = 40
+DM_POLL_SECONDS = 15
 FAILURE_NOTE_AFTER = 3
 ACK_MINUTES = 10         # a delivered answer the agent hasn't acknowledged by then gets a warning in the thread
 FETCH_SECONDS = 5        # how often a machine other than the hub asks it for answers to deliver
@@ -115,10 +116,15 @@ class Listener:
         client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
         if req.type == "events_api":
             ev = (req.payload or {}).get("event") or {}
-            # Only the approver's own posts: the agents' acknowledgements and our notes would take his turn.
             who = ev.get("user")
-            if (ev.get("type") == "message" and ev.get("channel") in {t["channel"] for t in config.targets().values()} and ev.get("thread_ts")
-                    and who and who in {t["approver"] for t in config.targets().values()} | {config.test_approver()}):
+            if ev.get("type") != "message" or not ev.get("thread_ts") or not who:
+                return
+            targets = config.targets().values()
+            if ev.get("channel") not in {t["channel"] for t in targets}:
+                return
+            people = {t["approver"] for t in targets} | {config.test_approver()}
+            people.update(p["user"] for p in config.settings()["team"].values())
+            if who in people:
                 with self.poke_lock:
                     self.poke.add((ev["channel"], ev["thread_ts"]))
 
@@ -300,14 +306,20 @@ class Listener:
         else:
             j = int(what[1:].split(":")[0]) if what.startswith("p") else None
             apply = lambda rec: core.ask_change(rec, n, words, by=user, j=j)
-        r = store.update(rid, lambda rec: self.answer_refusal(rec, n, what, user) or apply(rec))
+        def save(rec):
+            # Edited words can close the card. Check who was in the conversation when they were submitted.
+            send = (core.conversation_send(rec) if user == config.card_target(rec)["approver"]
+                    and (what == "edit" or what.endswith("change")) else None)
+            return self.answer_refusal(rec, n, what, user) or apply(rec), send
+
+        r, send = store.update(rid, save)
         log.info("pop-up %s v%s %s -> %s", rid, n, what, r)
         if r != "ok":
             return {"response_action": "errors", "errors": {first: self.REFUSED.get(r, r)}}, None
         name = core.answerer(rec, {"by": user, "version": n})
-        return None, lambda: self.after_submission(rid, what, words, view["id"], name)
+        return None, lambda: self.after_submission(rid, what, words, view["id"], name, send)
 
-    def after_submission(self, rid, what, words, view_id, who):
+    def after_submission(self, rid, what, words, view_id, who, send):
         """Words from a pop-up go in the thread too, so the thread keeps the whole record."""
         self.try_refresh(rid)
         rec = store.load(rid)
@@ -321,6 +333,8 @@ class Listener:
                 slackapi.note(rec["thread_ts"], f"✏️ {who} asked for a change{row}:\n{cards.quoted(words)}", **config.channel_args(rec))
         except Exception as e:
             log.warning("thread note for %s failed: %s", rid, e)
+        if send and words:
+            core.post_to_teammate(rid, send, f"💬 {cards.esc(who)} replied on the card:\n{cards.quoted(words)}")
 
     def copy_to_source(self, rec, words, key, at, name=None):
         source = rec.get("thread") or {}
@@ -380,15 +394,14 @@ class Listener:
             poked = set(self.poke)
         interval = max(15.0, len(recs) * 60.0 / POLL_BUDGET_PER_MIN)
         due = [ts for ts in recs if ts in poked or self.next_poll.get(ts, 0) <= now]
-        # A thread Slack says the approver just posted in goes first. With hundreds of cards watched, the scheduled
-        # reads are always behind, so a flagged thread sorted by its schedule would never get a turn.
-        due.sort(key=lambda ts: (ts not in poked, self.next_poll.get(ts, 0)))
+        # Message events and due direct messages go ahead of the overdue rotation.
+        due.sort(key=lambda ts: (ts not in poked, recs[ts][1] is None, self.next_poll.get(ts, 0)))
         per_cycle = max(1, POLL_BUDGET_PER_MIN * 5 // 60)   # this loop runs every 5 seconds
         for ts in due[:per_cycle]:
-            self.next_poll[ts] = now + interval
+            rec, send = recs[ts]
+            self.next_poll[ts] = now + (DM_POLL_SECONDS if send else interval)
             with self.poke_lock:
                 self.poke.discard(ts)   # a flag that didn't fit this round keeps its place for the next
-            rec, send = recs[ts]
             try:
                 if send:
                     self.poll_thread(rec, send)
@@ -429,14 +442,15 @@ class Listener:
                     since = store.parse(current["handed"]["at"]).timestamp() if current.get("handed") else float(current["ts"])
                     if float(ts) < since:
                         continue
+                dm = core.conversation_send(r) if not send and user == config.card_target(r)["approver"] else None
                 kind = core.take_replies(r, [(ts, words)], react_ts=core.card_ts(r) if send else None, by=user)
                 name = member or core.who(r)
-                accepted.append((ts, words, name, kind))
+                accepted.append((ts, words, name, kind, dm))
             return accepted
 
         accepted = store.update(rec["id"], apply)
         if accepted:
-            for ts, words, name, kind in accepted:
+            for ts, words, name, kind, dm in accepted:
                 log.info("%s: reply from %s -> %s", rec["id"], name, kind)
                 if send:
                     try:
@@ -447,6 +461,7 @@ class Listener:
                 else:
                     self.copy_to_source(store.load(rec["id"]), words, "reply:" + ts,
                                         datetime.fromtimestamp(float(ts), tz=timezone.utc), name)
+                    core.post_to_teammate(rec["id"], dm, f"💬 {cards.esc(name)} replied on the card:\n{cards.quoted(words)}")
             if store.load(rec["id"]).get("card_dirty"):
                 self.try_refresh(rec["id"])
 
