@@ -508,16 +508,18 @@ def answer_offer(rec, n, choice, by):
 
 # ---------- the deputy ----------
 
-def _answered_on(rec, n):
-    """The approver has answered version n in some way: a reply in the thread since it was posted, or a row."""
-    posted = rec["versions"][n - 1].get("posted_at") or rec["created"]
+def _answered_on(rec, n, since=None):
+    """The approver has answered version n in some way: a reply in the thread since it was posted, or a row.
+    since: count only what came from then on, for a card sent to a teammate after an earlier reply on it."""
+    posted = since or rec["versions"][n - 1].get("posted_at") or rec["created"]
     return (any(e["kind"] in ("feedback", "answer", "comment") and e.get("version", n) == n and e["at"] >= posted
                 for e in rec.get("events") or [])
             or (rec.get("decision") or {}).get("version") == n
-            or any(a.get("version") == n for a in (rec.get("answers") or {}).values()))
+            or any(a.get("version") == n and (not since or a["at"] >= since)
+                   for a in (rec.get("answers") or {}).values()))
 
 
-def _not_callable(rec, n):
+def _not_callable(rec, n, since=None):
     """Why the deputy can't call version n: it's no longer waiting on the approver's first answer. None when it is."""
     s = rec["status"]
     if s == "withdrawn":
@@ -528,7 +530,7 @@ def _not_callable(rec, n):
         return "it closed with no answer by its deadline"
     if s == "revising":
         return f"it is back with its agent after {who(rec)}'s reply"
-    if _answered_on(rec, n):
+    if _answered_on(rec, n, since):
         return f"{who(rec)} has already answered on v{n}"
     return None
 

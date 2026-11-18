@@ -395,6 +395,31 @@ def test_the_sweep_returns_an_unanswered_card_once_at_its_return_time(team, slac
     assert BACK in txt(cards.also_blocks(rec, send)[-1])
 
 
+def test_a_reply_before_the_hand_off_stops_neither_its_message_nor_its_return(team, slack, monkeypatch, capsys):
+    now = NOW
+    monkeypatch.setattr(store, "now", lambda: now)
+    card()
+    leave()
+    L = listener.Listener()
+    L.sweep()
+    now += timedelta(hours=1)
+    store.update(RID, lambda r: core.take_replies(r, [("2.0", "Does the cap include tax?")], by=USER))
+    cli.main(["answer", RID, "Yes, the cap includes tax."])
+    team["team"]["riley"]["quiet"] = ["12:30", "14:00"]
+    config.CONFIG.write_text(json.dumps(team))
+    now += timedelta(minutes=10)
+    hand()
+    L.sweep()
+    assert slack.opens == [USER]
+    now = NOW + timedelta(hours=2)
+    L.sweep()
+    rec, send = latest()
+    assert slack.opens == [USER, USER] and send["sent_at"] == store.iso(now) and cards.handed(rec)
+    now = store.parse(send["return_at"])
+    L.sweep()
+    assert latest()[1]["returned_at"] == store.iso(now) and len(broadcasts(slack)) == 1
+
+
 @pytest.mark.parametrize("answer", ["approve", "reply"])
 def test_the_sweep_leaves_answered_and_revising_cards_alone(team, slack, monkeypatch, answer):
     card()

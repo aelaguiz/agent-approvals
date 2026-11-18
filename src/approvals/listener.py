@@ -481,7 +481,7 @@ class Listener:
                 rec = store.load(rec["id"])
                 send = cards.also_on(rec, len(rec["versions"]))
             if (cards.handed(rec) and send.get("sent_at") and store.parse(send["return_at"]) <= store.now()
-                    and not core._not_callable(rec, send["version"])):
+                    and not core._not_callable(rec, send["version"], send["at"])):
                 self.return_hand(rec)
                 rec = store.load(rec["id"])
             if rec.get("card_dirty"):
@@ -492,11 +492,11 @@ class Listener:
         rid, n = rec["id"], send["version"]
         index = rec["also"].index(send)
         try:
-            if not core._not_callable(rec, n):
+            if not core._not_callable(rec, n, send["at"]):
                 channel = slackapi.open_dm(send["user"])
                 rec = store.load(rid)
                 if (n == len(rec["versions"]) and rec["also"][index] is cards.also_on(rec, n)
-                        and not core._not_callable(rec, n)):
+                        and not core._not_callable(rec, n, send["at"])):
                     sent = {"channel": channel, "sent_at": store.iso()}
                     sent["ts"] = slackapi.post(cards.also_blocks(rec, dict(send, **sent)), cards.card_text(rec, n),
                                               channel_id=channel)
@@ -521,7 +521,8 @@ class Listener:
             n = len(r["versions"])
             send = cards.also_on(r, n)
             now = store.now()
-            if not send.get("sent_at") or store.parse(send["return_at"]) > now or core._not_callable(r, n):
+            if (not send.get("sent_at") or store.parse(send["return_at"]) > now
+                    or core._not_callable(r, n, send["at"])):
                 return
             send["returned_at"] = store.iso(now)
             name = send["name"]
