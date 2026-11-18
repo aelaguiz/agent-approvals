@@ -203,7 +203,7 @@ def test_a_call_that_sent_to_someone_stands_when_auto_approval_is_turned_on(team
     be_deputy(live=True)
     with pytest.raises(SystemExit):
         leave(name="morgan")
-    assert "v1 already has your call" in capsys.readouterr().err
+    assert "Sam handed this card to Riley; call it without --also." in capsys.readouterr().err
     assert slack.opens == [USER] and len(latest()[0]["also"]) == 1
 
 

@@ -22,7 +22,6 @@ log = logging.getLogger("approvals")
 HOUR = 8                        # posted at 8:00 am in the workspace's timezone
 WAITING = {"pending", "question"}
 GROUPS = ["🔴 *Expires today*", "🟡 *Expires tomorrow*", "⚪ *Later*"]
-ACTIONS_MAX = 25                # Slack's limit on buttons in one actions block
 
 
 _lock = threading.Lock()        # the sweep and a button press's follow-up both edit the list
@@ -50,7 +49,7 @@ def _save_state(st, target=None):
 
 def waiting(rec):
     """Waiting on the approver: a card or question he hasn't answered, or a yes with a condition only he can clear."""
-    return (rec["status"] in WAITING and not cards.waiting_on(rec)) or bool(cards.on_you(rec))
+    return not cards.handed(rec) and ((rec["status"] in WAITING and not cards.waiting_on(rec)) or bool(cards.on_you(rec)))
 
 
 def _ours(rec):
@@ -91,6 +90,9 @@ def _title(rec):
 
 def _outcome(rec, day):
     """What happened to a card that no longer waits on the approver."""
+    if cards.handed(rec):
+        send = cards.also_on(rec, len(rec["versions"]))
+        return f"⏳ You handed it to {cards.esc(send['name'])}, {_at(store.parse(send['at']), day)}"
     s, d = rec["status"], rec.get("decision") or {}
     if cards.auto_approved(rec):
         return f"🤖 Auto-approved by {cards.esc(d['by'])}, {_at(datetime.fromisoformat(d['at']), day)}"
@@ -120,7 +122,9 @@ def _buttons(rec):
     plain row of a set, every item of a batch; a choice gets its options instead), Deny says no, and Remove takes it
     off the list without a verdict on the idea. A choice shown in pictures has no pick here: it's decided by looking."""
     c = rec["versions"][-1]["card"]
-    base = f"{rec['id']}|{len(rec['versions'])}"
+    n = len(rec["versions"])
+    base = f"{rec['id']}|{n}"
+    menu = cards.hand_menu(rec, n)
     if c.get("parts"):
         # Approve all covers two or more plain rows; every other open row (one that needs its own yes, a pick, or the
         # one plain row left) gets its own button, as on the card, named for its row when the line has several. Without
@@ -131,7 +135,7 @@ def _buttons(rec):
         for j, p in left:
             if len(rows) < 2 or (j, p) not in rows:
                 yes += _row_buttons(base, j, p, named=len(left) > 1)
-        yes = yes[:ACTIONS_MAX - 2]   # Slack refuses the whole list past 25 buttons in a row; the card has the rest
+        yes = yes[:cards.ACTIONS_MAX - 2 - bool(menu)]   # the card has the rest
     elif c.get("options"):
         yes = [] if any(o.get("image") for o in c["options"]) else [
             cards.button(cards.option_button(o), f"{base}|pick:{i}",
@@ -139,7 +143,8 @@ def _buttons(rec):
     else:
         yes = [cards.button(f"Approve all {len(c['items'])}" if c.get("items") else "Approve", f"{base}|approve", "primary")]
     return {"type": "actions", "block_id": f"list|{base}",
-            "elements": yes + [cards.button("Deny", f"{base}|decline", "danger"), cards.button("Remove", f"{base}|remove")]}
+            "elements": yes + [cards.button("Deny", f"{base}|decline", "danger"), cards.button("Remove", f"{base}|remove")]
+            + ([menu] if menu else [])}
 
 
 def _row_buttons(base, j, p, named):
@@ -151,13 +156,23 @@ def _row_buttons(base, j, p, named):
     return [cards.button(f"Approve {title}" if named else "Approve", f"{base}|p{j}:approve", "primary")]
 
 
-def _line(rec, day, detail=None):
+def _line(rec, day, detail=None, team=False):
     """The card, linked, then one gray line; a card waiting on the approver's answer gets its buttons under them. A
     card no longer waiting is struck through."""
     emoji = cards.TYPES[rec["versions"][-1]["card"]["type"]]["emoji"]
     link = f"<{slackapi.message_url(rec['thread_ts'], **config.channel_args(rec))}|{rec['id']}>"
-    if detail is None and not waiting(rec):
-        return [cards.md(f"{emoji} ~{link}  {_title(rec)}~"), cards.ctx(_outcome(rec, day))]
+    if team and cards.handed(rec):
+        send = cards.also_on(rec, len(rec["versions"]))
+        name = cards.esc(send["name"])
+        detail = f"{cards.esc(rec['agent'])} · with {name} since {_at(store.parse(send['at']), day)}"
+        if response := cards.responded(rec, send):
+            detail += f" · {name} responded {_at(store.parse(response['at']), day)}"
+        else:
+            detail += f" · back to you {_at(store.parse(send['return_at']), day)}"
+        return [cards.md(f"{emoji} {link}  *{_title(rec)}*"), cards.ctx(detail), _buttons(rec)]
+    if team or (detail is None and not waiting(rec)):
+        outcome = "↩️ Back with you" if team and waiting(rec) else _outcome(rec, day)
+        return [cards.md(f"{emoji} ~{link}  {_title(rec)}~"), cards.ctx(outcome)]
     if detail is None and rec["status"] not in WAITING:
         detail = f"{cards.esc(rec['agent'])} · ⏳ waiting on you: {cards.esc(cards.on_you(rec)['text'])}"
     buttons = []
@@ -174,19 +189,24 @@ def render(st, records):
     day = datetime.fromisoformat(st["date"]).date()
     by_id = {r["id"]: r for r in records}
     listed = [by_id[i] for i in st["listed"] if i in by_id]
+    team = [by_id[i] for i in st.get("team", []) if i in by_id]
+    listed += [r for r in team if waiting(r)]
     closed = [by_id[i] for i in st["closed"] if i in by_id]
     still = sum(1 for r in listed if waiting(r))
+    with_team = sum(1 for r in records if cards.handed(r))
     n = len(listed)
     if n and still == n:
         headline = f"{n} cards are waiting on you" if n > 1 else "1 card is waiting on you"
     elif still:
         headline = f"{still} of {n} still waiting on you"
+    elif with_team:
+        headline = f"Nothing is waiting on you · {with_team} with your team"
     elif n:
         headline = f"Nothing left waiting on you: all {n} are answered or closed"
     else:
         headline = "Nothing is waiting on you"
     # A list the approver just asked for needs no ping.
-    mention = f"<@{config.target(st.get("target"))['approver']}> " if (listed or closed) and not st.get("asked") else ""
+    mention = f"<@{config.target(st.get("target"))['approver']}> " if (listed or team or closed) and not st.get("asked") else ""
     icon = "📋" if st.get("asked") else "☀️"
 
     # Each line in order, a heading riding with the first line under it so it never shows alone.
@@ -194,6 +214,8 @@ def render(st, records):
     for g, label in enumerate(GROUPS):
         rows = sorted((r for r in listed if _group(r, day) == g), key=lambda r: r["deadline"])
         chunks += [([cards.md(label)] if i == 0 else []) + _line(r, day) for i, r in enumerate(rows)]
+    for i, r in enumerate(sorted(team, key=lambda r: r["deadline"])):
+        chunks.append(([cards.md("⏳ *With your team*")] if i == 0 else []) + _line(r, day, team=True))
     for i, r in enumerate(sorted(closed, key=lambda r: r["deadline"])):
         head = [{"type": "divider"}, cards.md("⏰ *Closed with no answer since the last list*"),
                 cards.ctx("The agent dropped these. A reply in the card's thread reopens it.")] if i == 0 else []
@@ -209,7 +231,7 @@ def render(st, records):
             body.append(cards.ctx(f"…and {len(chunks) - k} more. Answer some, then post in the channel for a fresh list."))
             break
         body += chunk
-    if listed or closed:
+    if listed or team or closed:
         body.append(cards.ctx("Approve, Deny or Remove answers a card right here; tap its number to read it first. "
                               "Each line crosses off when you answer it."))
     sub = day.strftime("%A, %b ") + str(day.day) + (" · soonest deadline first" if listed else "")
@@ -241,6 +263,7 @@ def _tick(now, asked, target=None):
         new = {
             "date": local.date().isoformat(), "asked": not morning, "target": target,
             "listed": [r["id"] for r in records if waiting(r)],
+            "team": [r["id"] for r in records if cards.handed(r)],
             "closed": [r["id"] for r in records if r["status"] == "expired" and (_last(r, "expired") or now) >= since],
             "posted_at": store.iso(now), "updated_at": None,
         }
@@ -330,12 +353,15 @@ def _what_he_did(rec, n):
 def _team_outcome(rec, send):
     if send.get("handed_back_at"):
         return "↩️ handed it back"
+    if send.get("returned_at") and not send.get("returned_by"):
+        return "↩️ came back to you unanswered"
     n = send["version"]
+    since = send["at"] if send.get("handed") else send["sent_at"]
     answers = []
     for e in rec.get("events", []):
         if e["kind"] == "revised" and e["version"] > n:
             break
-        if e["at"] < send["sent_at"] or e.get("version", n) != n:
+        if e["at"] < since or e.get("version", n) != n:
             continue
         if e["kind"] in ("feedback", "answer") or (e["kind"] in ("decision", "part") and e["verdict"] != "expired"):
             answers.append(e)
@@ -352,6 +378,8 @@ def _team_outcome(rec, send):
         return "withdrawn by its agent"
     if rec["status"] == "expired":
         return "⌛ no answer by its deadline"
+    if cards.handed(rec) and cards.also_on(rec, n) is send and not cards.responded(rec, send):
+        return f"⏳ with {cards.esc(send['name'])}, back to you {cards.when(store.parse(send['return_at']))}"
     return "⏳ still open"
 
 
@@ -385,7 +413,8 @@ def summary(d, since, records):
         if calls:
             latest[r["id"]] = (r, calls[-1])
         if live:
-            sends = [s for s in r.get("also", []) if s.get("sent_at") and store.parse(s["sent_at"]) >= since]
+            sends = [s for s in r.get("also", []) if (at := s["at"] if s.get("handed") else s.get("sent_at"))
+                     and store.parse(at) >= since]
             if sends:
                 team[r["id"]] = (r, sends[-1])
     if not latest and not team:
@@ -429,7 +458,8 @@ def summary(d, since, records):
         for rid, (r, send) in sorted(team.items()):
             link = f"<{slackapi.message_url(r['thread_ts'])}|{rid}>"
             title = cards.esc(" ".join(r["versions"][send["version"] - 1]["card"]["title"].split())[:140])
-            team_lines.append(f"• {link} {title} · {cards.esc(send['name'])} · {_team_outcome(r, send)}")
+            handed = " · handed by you" if send.get("handed") else ""
+            team_lines.append(f"• {link} {title} · {cards.esc(send['name'])}{handed} · {_team_outcome(r, send)}")
         team_lines[0] = f"👥 *{count} card{'s' if count != 1 else ''} also went to your team since yesterday morning*\n" + team_lines[0]
         part, left = _summary_sections(team_lines, room - len(body))
         body += part

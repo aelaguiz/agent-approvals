@@ -304,6 +304,10 @@ def cmd_revise(a):
         r["deadline"] = store.iso(store.now() + timedelta(hours=hours))
         r["title"] = card["title"]
         store.event(r, "revised", version=n)
+        send = cards.also_on(r, n - 1)
+        if send and send.get("handed") and not (send.get("returned_at") or send.get("handed_back_at")):
+            person = next(p for p in config.settings()["team"].values() if p["user"] == send["user"])
+            core.add_hand(r, n, send["handed"]["by"], person)
         core.tell_reviewer(r, f"{r['agent']} posted v{n}" + (f' ("{core.one_line(card["changes"])}")' if card.get("changes") else "")
                               + f". If it changes your read, post it with `approvals note {r['id']} --file <note.md>`.")
         core.tell_deputy(r, f"{r['agent']} posted v{n}" + (f' ("{core.one_line(card["changes"])}")' if card.get("changes") else "")
@@ -313,7 +317,7 @@ def cmd_revise(a):
     # The new version goes at the bottom of the thread, where he reads; an earlier copy there shrinks to a line.
     _share_pictures(a.id, n)
     rec = store.load(a.id)
-    ts_new = slackapi.post(cards.card_blocks(rec, n, "open"), cards.card_text(rec, n), thread_ts=rec["thread_ts"], **config.channel_args(rec))
+    ts_new = slackapi.post(cards.card_blocks(rec, n, core.mode_for(rec)), cards.card_text(rec, n), thread_ts=rec["thread_ts"], **config.channel_args(rec))
     store.update(a.id, lambda r: r["versions"][n - 1].__setitem__("copy_ts", ts_new))
     core.refresh_and_clear(a.id)
     _video_in_thread(a.id, n)
@@ -448,8 +452,8 @@ def _row(rec, part):
 
 
 def cmd_answer(a):
-    """An answer to the approver's question, in the thread: the verdict first. It counts as the acknowledgement and
-    hands a card that was back with the agent to him again as it stands, with no new version."""
+    """An answer in the thread, with the verdict first. It counts as the acknowledgement and reopens a card
+    that was waiting on its agent, with no new version."""
     rec = store.load(a.id)
     me = reach.capture(a.agent)
     ts = slackapi.post(cards.answer_blocks(rec, a.text, store.now()), f"{rec['agent']}: {a.text}", thread_ts=rec["thread_ts"], **config.channel_args(rec))
@@ -462,11 +466,13 @@ def cmd_answer(a):
             r["status"] = "pending"
             r["card_dirty"] = True
         store.event(r, "answered", text=a.text, ts=ts, back=back)
-        return back
-    back = store.update(a.id, fn)
+        return back, back and cards.handed(r)
+    back, handed = store.update(a.id, fn)
+    message = f"Answered in the thread of {a.id}"
     if back:
         core.refresh_and_clear(a.id)
-    print(f"Answered in the thread of {a.id}" + ("; the card is back with the approver as it stands." if back else "."))
+        message += (". The card stays with the teammate" if handed else "; the card is back with the approver as it stands")
+    print(message + ".")
 
 
 def cmd_repoint(a):
@@ -658,7 +664,9 @@ def _happened(rec):
         said = f': "{core.one_line(e["text"])}"' if e.get("text") else ""
         if k == "call":
             mode = "" if e.get("call") == "his" else " (auto-approval)" if e.get("live") else " (dry run)"
-            send = cards.also_on(rec, e["version"]) if e.get("also") is not None else None
+            send = None
+            if e.get("also") is not None:
+                send = next((s for s in rec.get("also", []) if s["version"] == e["version"] and not s.get("handed")), None)
             also = f", also to {send['name']}" if send else ""
             out.append(f"{at}  {e['by']} on v{e['version']}: " + ("approve" if e["call"] == "approve" else "left it for him")
                        + f"{mode}{also}. Why: \"{core.one_line(e['why'])}\"")
@@ -667,6 +675,12 @@ def _happened(rec):
             out.append(f"{at}  sent v{e['version']} to {e['name']} in a direct message{held}")
         elif k == "also_handed_back":
             out.append(f"{at}  {e['name']} handed v{e['version']} back to {who}")
+        elif k == "handed":
+            out.append(f"{at}  {who} handed v{e['version']} to {e['name']}, back to him {_stamp(e['return_at'])} if unanswered")
+        elif k == "returned":
+            out.append(f"{at}  back with {who}: {e['name']} hadn't answered")
+        elif k == "mine":
+            out.append(f"{at}  {who} took v{e['version']} back from {e['name']}")
         elif k in ("feedback", "answer", "comment"):
             out.append(f"{at}  {core.answerer(rec, e)} replied{said}")
         elif k == "decision":

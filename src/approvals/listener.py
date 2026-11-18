@@ -136,10 +136,10 @@ class Listener:
         if user == target["approver"]:
             return None
         only = f"Only {target['approver_name']} can decide approvals."
-        if what in ("remove", "takeback"):
+        if what in ("remove", "takeback", "mine") or what.startswith("hand:"):
             return only
         send = cards.also_on(rec, n)
-        if n != len(rec["versions"]) and send and send["user"] == user and send.get("sent_at"):
+        if n != len(rec["versions"]) and send and send["user"] == user and (send.get("sent_at") or send.get("handed")):
             return self.REFUSED["stale"]
         if not core.can_answer(rec, user):
             return only
@@ -158,7 +158,8 @@ class Listener:
         if (payload.get("view") or {}).get("callback_id") == "approvals" and action.get("action_id") == "items":
             return lambda: self.recount_items(payload)
         try:
-            rid, n, what = action.get("value", "").split("|", 2)
+            value = action["selected_option"]["value"] if action.get("type") == "overflow" else action.get("value", "")
+            rid, n, what = value.split("|", 2)
             n = int(n)
         except ValueError:
             return None   # a link button: Slack opens it
@@ -183,11 +184,18 @@ class Listener:
             return lambda: slackapi.ephemeral(user, refused, thread_ts, channel_id=channel_id)
         if what in ("change", "edit", "items") or what.endswith(":change"):
             return lambda: self.open_view(rid, n, what, trigger, user, thread_ts, channel_id)
-        r = store.update(rid, lambda rec: self.answer_refusal(rec, n, what, user) or core.press(rec, n, what, by=user))
+        def apply(rec):
+            result = self.answer_refusal(rec, n, what, user) or core.press(rec, n, what, by=user)
+            send = cards.also_on(rec, n) if result == "ok" and what == "notmine" else None
+            return result, send
+        r, handed_back = store.update(rid, apply)
         log.info("click %s v%s %s -> %s", rid, n, what, r)
         if r != "ok":
             return lambda: slackapi.ephemeral(user, self.REFUSED.get(r, r), thread_ts, channel_id=channel_id)
-        if what == "notmine":
+        if handed_back:
+            if handed_back.get("handed"):
+                text = f"{cards.esc(handed_back['name'])} handed this back, so it's back with you."
+                return lambda: (self.broadcast_return(rec, text), self.try_refresh(rid), self.refresh_list())
             return lambda: self.try_refresh(rid)
         return lambda: (self.try_refresh(rid), self.refresh_list())
 
@@ -416,8 +424,11 @@ class Listener:
                     continue
                 n = len(r["versions"])
                 member = cards.teammate(r, {"by": user, "version": n})
-                if member and not send and float(ts) < float(cards.also_on(r, n)["ts"]):
-                    continue
+                if member and not send:
+                    current = cards.also_on(r, n)
+                    since = store.parse(current["handed"]["at"]).timestamp() if current.get("handed") else float(current["ts"])
+                    if float(ts) < since:
+                        continue
                 kind = core.take_replies(r, [(ts, words)], react_ts=core.card_ts(r) if send else None, by=user)
                 name = member or core.who(r)
                 accepted.append((ts, words, name, kind))
@@ -451,17 +462,27 @@ class Listener:
     # ----- deadlines, card refreshes, deliveries -----
 
     def sweep(self):
+        def expire_due(rec):
+            if rec["status"] in ("pending", "question") and store.parse(rec["deadline"]) <= store.now():
+                core.expire(rec)
+                return True
+
         for rec in store.all_records():
             if not rec.get("thread_ts"):
                 continue
-            if rec["status"] in ("pending", "question") and datetime.fromisoformat(rec["deadline"]) <= store.now():
-                store.update(rec["id"], lambda r: core.expire(r) if r["status"] in ("pending", "question") else None)
-                log.info("%s expired", rec["id"])
+            if rec["status"] in ("pending", "question") and store.parse(rec["deadline"]) <= store.now():
+                if store.update(rec["id"], expire_due):
+                    log.info("%s expired", rec["id"])
                 rec = store.load(rec["id"])
             send = cards.also_on(rec, len(rec["versions"]))
             if (send and not any(send.get(k) for k in ("sent_at", "handed_back_at", "skipped"))
                     and (not send["send_after"] or store.parse(send["send_after"]) <= store.now())):
                 self.send_also(rec, send)
+                rec = store.load(rec["id"])
+                send = cards.also_on(rec, len(rec["versions"]))
+            if (cards.handed(rec) and send.get("sent_at") and store.parse(send["return_at"]) <= store.now()
+                    and not core._not_callable(rec, send["version"])):
+                self.return_hand(rec)
                 rec = store.load(rec["id"])
             if rec.get("card_dirty"):
                 self.try_refresh(rec["id"])
@@ -469,27 +490,58 @@ class Listener:
 
     def send_also(self, rec, send):
         rid, n = rec["id"], send["version"]
+        index = rec["also"].index(send)
         try:
             if not core._not_callable(rec, n):
                 channel = slackapi.open_dm(send["user"])
                 rec = store.load(rid)
-                if n == len(rec["versions"]) and not core._not_callable(rec, n):
+                if (n == len(rec["versions"]) and rec["also"][index] is cards.also_on(rec, n)
+                        and not core._not_callable(rec, n)):
                     sent = {"channel": channel, "sent_at": store.iso()}
                     sent["ts"] = slackapi.post(cards.also_blocks(rec, dict(send, **sent)), cards.card_text(rec, n),
                                               channel_id=channel)
 
                     def save(r):
-                        cards.also_on(r, n).update(sent)
+                        r["also"][index].update(sent)
                         store.event(r, "also_sent", version=n, name=send["name"], send_after=send["send_after"])
                         r["card_dirty"] = True
                     store.update(rid, save)
                     return
             def skip(r):
-                cards.also_on(r, n)["skipped"] = True
+                r["also"][index]["skipped"] = True
                 r["card_dirty"] = True
             store.update(rid, skip)
         except Exception as e:
             log.warning("direct message for %s failed, will retry: %s", rid, e)
+
+    def return_hand(self, rec):
+        def apply(r):
+            if not cards.handed(r):
+                return
+            n = len(r["versions"])
+            send = cards.also_on(r, n)
+            now = store.now()
+            if not send.get("sent_at") or store.parse(send["return_at"]) > now or core._not_callable(r, n):
+                return
+            send["returned_at"] = store.iso(now)
+            name = send["name"]
+            due = cards.when(store.parse(send["return_at"]))
+            store.event(r, "returned", version=n, name=name)
+            r["card_dirty"] = True
+            core.tell_deputy(r, f"{name} hadn't answered by {due}, so it is back with {core.who(r)}.")
+            return name
+        name = store.update(rec["id"], apply)
+        if name:
+            hours = config.settings()["handoff_hours"]
+            self.broadcast_return(rec, f"{cards.esc(name)} hasn't answered this in {hours} working hours, so it's back with you.")
+
+    def broadcast_return(self, rec, words):
+        approver = config.card_target(rec)["approver"]
+        text = f"↩️ <@{approver}> {words}"
+        try:
+            slackapi.post([cards.md(text)], text, thread_ts=rec["thread_ts"], broadcast=True, **config.channel_args(rec))
+        except Exception:
+            log.exception("hand-off return for %s failed", rec["id"])
 
     def deliver_due(self):
         """On the hub, every few seconds: what's due for this machine's sessions, and ⏳ kept true on the cards."""

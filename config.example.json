@@ -3,8 +3,9 @@
   "approver": "U0XXXXXXXXX",
   "approver_name": "Sam",
   "team": {
-    "riley": {"user": "UTEAM1", "name": "Riley", "quiet": ["21:00", "05:00"]}
+    "riley": {"user": "UTEAM1", "name": "Riley", "quiet": ["21:00", "05:00"], "work": ["09:00", "18:00"]}
   },
+  "handoff_hours": 3,
   "reader_rules": null,
   "reader_knows": null,
   "bot_token_file": "~/.config/agent-approvals/slack.env",

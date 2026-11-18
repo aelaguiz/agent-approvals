@@ -38,6 +38,7 @@ NEED_TEXT = {
 # A set is several cards posted together, each its own decision.
 GALLERY_MAX, PARTS_MAX, OPTIONS_MAX, ITEMS_MAX, LINKS_MAX, SET_MAX = 10, 10, 10, 100, 5, 10
 LABEL_MAX, NOTE_MAX, BUTTON_MAX, EDIT_MAX, BLOCKS_MAX, WHY_MAX = 150, 200, 75, 3000, 50, 400
+ACTIONS_MAX = 25
 SHAPES = ("parts", "options", "items")
 
 
@@ -467,14 +468,36 @@ def call_on(rec, n):
 
 
 def also_on(rec, n):
-    return next((s for s in rec.get("also", []) if s["version"] == n), None)
+    return next((s for s in reversed(rec.get("also", [])) if s["version"] == n and not s.get("closed_at")), None)
+
+
+def handed(rec):
+    send = also_on(rec, len(rec["versions"]))
+    return bool(send and send.get("handed") and not (send.get("returned_at") or send.get("handed_back_at"))
+                and rec["status"] in ("pending", "question"))
+
+
+def responded(rec, send):
+    """The teammate's latest response on this version since the hand-off."""
+    at = datetime.fromisoformat(send["at"])
+    return next((e for e in reversed(rec.get("events", []))
+                 if e["kind"] in ("decision", "part", "feedback", "answer", "comment")
+                 and e.get("version") == send["version"] and e.get("by") == send["user"]
+                 and datetime.fromisoformat(e["at"]) >= at), None)
 
 
 def teammate(rec, answer):
     """Use the name that went with the answer's version, even after the team or the card changes."""
-    send = also_on(rec, answer.get("version"))
-    if send and send.get("sent_at") and send["user"] == answer.get("by"):
-        return send["name"]
+    n, by, at = answer.get("version"), answer.get("by"), answer.get("at")
+    at = datetime.fromisoformat(at) if at else None
+    for send in reversed(rec.get("also", [])):
+        if send["version"] != n or send["user"] != by:
+            continue
+        start = send["at"] if send.get("handed") else send.get("sent_at")
+        closed = send.get("closed_at")
+        if start and (not at or at >= datetime.fromisoformat(start)) and (
+                not closed or at and at <= datetime.fromisoformat(closed)):
+            return send["name"]
     return None
 
 
@@ -496,7 +519,7 @@ def call_line(rec, n):
     if c["call"] == "his":
         line = f"🤖 {esc(c['by'])} left this for you: {esc(c['why'])}"
         send = also_on(rec, n)
-        if send and not send.get("skipped"):
+        if send and not send.get("handed") and not send.get("skipped"):
             name = esc(send["name"])
             if send.get("handed_back_at"):
                 line += f" · {name} handed it back, {clock(datetime.fromisoformat(send['handed_back_at']))}"
@@ -551,11 +574,19 @@ def their_answer(rec):
 
 # ---------- the card ----------
 
+def hand_menu(rec, n):
+    team = config.settings()["team"]
+    if team and rec.get("target") is None:
+        base = f"{rec['id']}|{n}|hand"
+        return {"type": "overflow", "action_id": base, "options": [
+            {"text": plain(f"Hand to {person['name']}", 75), "value": f"{base}:{key}"} for key, person in team.items()]}
+
+
 def card_blocks(rec, n, mode="open"):
     """Blocks for version n of a request.
 
     mode: "open" (buttons), "final" (answered or closed: the timeline), "replaced" (a later version exists: one line), or
-    "view" (the whole card in a pop-up, without buttons).
+    "handed" (with a teammate), or "view" (the whole card in a pop-up, without buttons).
     """
     v = rec["versions"][n - 1]
     card = v["card"]
@@ -583,13 +614,33 @@ def _card_blocks(rec, n, mode, compact=False, origin=True, deputy=True):
     card = rec["versions"][n - 1]["card"]
     blocks = [test_tag()] if rec.get("test") else []
     title = card["title"]
-    if mode == "final":   # a set of rows: the rows are the card, so it stays whole
+    if mode == "handed":
+        send = also_on(rec, n)
+        blocks.append(header(f"⏳ With {send['name']}: {title}"))
+    elif mode == "final":   # a set of rows: the rows are the card, so it stays whole
         blocks.append(header(_final_head(rec, card)))
     else:
         blocks.append(header(title))
     frame = frame_line(rec, card)
     if frame:
         blocks.append(frame)
+    if mode == "handed":
+        name = esc(send["name"])
+        at = when(datetime.fromisoformat(send["at"]))
+        line = f"You handed this to {name}, {at}."
+        if response := responded(rec, send):
+            at_response = when(datetime.fromisoformat(response["at"]))
+            line += f" {name} responded {at_response}, so it stays with {name}."
+        else:
+            due = when(datetime.fromisoformat(send["return_at"]))
+            if send["send_after"] and not send.get("sent_at"):
+                at_delivery = clock(datetime.fromisoformat(send["send_after"]))
+                line += f" It reaches {name} at {at_delivery} and comes back to you {due} if {name} hasn't answered."
+            else:
+                line += f" It comes back to you {due} if {name} hasn't answered."
+        base = f"{rec['id']}|{n}"
+        return blocks + [ctx(line), {"type": "actions", "block_id": f"ap|{base}", "elements": [
+            button("Back to me", f"{base}|mine"), button("See the card", f"{base}|see")]}, _footer(rec, n, "open")]
     if origin:
         blocks += origin_blocks(rec, include_quote=mode != "final" and origin != "link")
     if card.get("why"):
@@ -616,11 +667,22 @@ def _card_blocks(rec, n, mode, compact=False, origin=True, deputy=True):
                 button(label, url=url, action_id=f"link{i}") for i, (label, url) in enumerate(card["links"])]})
     if open_:
         row = _buttons(rec, n)
+        if deputy and len(row) < ACTIONS_MAX and (menu := hand_menu(rec, n)):
+            row.append(menu)
         if row:
             blocks.append({"type": "actions", "block_id": f"ap|{rec['id']}|{n}", "elements": row})
         line = call_line(rec, n) if deputy else None
         if line:
             blocks.append(line)
+        send = also_on(rec, n) if deputy else None
+        if send and send.get("handed"):
+            name = esc(send["name"])
+            if send.get("handed_back_at"):
+                at = clock(datetime.fromisoformat(send["handed_back_at"]))
+                blocks.append(ctx(f"↩️ {name} handed it back, {at}."))
+            elif send.get("returned_at") and not send.get("returned_by"):
+                due = when(datetime.fromisoformat(send["return_at"]))
+                blocks.append(ctx(f"↩️ {name} hadn't answered by {due}, so it's back with you."))
     if mode == "final" and auto_approved(rec):
         blocks.append(take_back_row(rec, n))
     blocks.append(_footer(rec, n, mode))
@@ -747,16 +809,28 @@ def also_blocks(rec, send):
     n = send["version"]
     approver = esc(config.card_target(rec)["approver_name"])
     link = ctx(f"<{rec['link']}|Open it in #approvals>")
-    if n != len(rec["versions"]):
+    if send.get("closed_at"):
+        name = esc(send["closed_for"])
+        state = (f"{approver} handed this card to you: it comes as a new message." if send["closed_for"] == send["name"]
+                 else f"{approver} handed this card to {name}.")
+    elif n != len(rec["versions"]):
         state = "A newer version replaced this one."
     elif send.get("handed_back_at"):
         state = f"↩️ You handed it back to {approver}, {when(datetime.fromisoformat(send['handed_back_at']))}"
-    elif send.get("sent_at") and rec["status"] in ("pending", "question"):
-        first = ctx(f"{esc(rec['agent'])} asks {approver}, and you can answer it too.")
-        end = [md(f"*Why you:* {esc(send['why'])}"),
-               {"type": "actions", "block_id": f"ap|{rec['id']}|{n}|notmine", "elements": [
-                   button("Not mine", f"{rec['id']}|{n}|notmine")]},
-               ctx(f"{approver} has this card too. Whoever answers first has answered. · <{rec['link']}|Open it in #approvals>")]
+    elif (send.get("handed") or send.get("sent_at")) and rec["status"] in ("pending", "question"):
+        last = f"{approver} has this card too. Whoever answers first has answered."
+        if send.get("handed"):
+            first = ctx(f"{approver} handed you this card from {esc(rec['agent'])}. It's yours to answer.")
+            end = []
+            if not send.get("returned_at") and not responded(rec, send):
+                due = when(datetime.fromisoformat(send["return_at"]))
+                last = f"If it's still waiting at {due}, it goes back to {approver}."
+        else:
+            first = ctx(f"{esc(rec['agent'])} asks {approver}, and you can answer it too.")
+            end = [md(f"*Why you:* {esc(send['why'])}")]
+        end += [{"type": "actions", "block_id": f"ap|{rec['id']}|{n}|notmine", "elements": [
+                    button("Not mine", f"{rec['id']}|{n}|notmine")]},
+                ctx(f"{last} · <{rec['link']}|Open it in #approvals>")]
         blocks = _card_blocks(rec, n, "open", origin=False, deputy=False)
         room = BLOCKS_MAX - 1 - len(end)
         if len(blocks) > room:
@@ -766,7 +840,7 @@ def also_blocks(rec, send):
         if len(blocks) > room:
             footer = blocks.pop()["elements"][0]["text"]
             end[-1]["elements"][0]["text"] = footer + "\n" + end[-1]["elements"][0]["text"]
-        if len(blocks) > room:
+        if len(blocks) > room and not send.get("handed"):
             end[0]["accessory"] = end.pop(1)["elements"][0]
         return [first, *blocks, *end]
     else:
@@ -1246,7 +1320,8 @@ def new_version_blocks(rec, n):
     blocks = [test_tag()] if rec.get("test") else []
     blocks.append(md(f"🔄 *{esc(rec['agent'])}* posted {version_label(n)}: {esc(card['title'])}"
                      + (f"\n{esc(card['changes'])}" if card.get("changes") else "")))
-    blocks.append(ctx(f"Waiting for you in this thread, with its buttons · {rec['id']}"))
+    where = (f"With {esc(also_on(rec, n)['name'])}" if handed(rec) else "Waiting for you in this thread, with its buttons")
+    blocks.append(ctx(f"{where} · {rec['id']}"))
     return blocks
 
 

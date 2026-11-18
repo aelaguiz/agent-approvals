@@ -62,11 +62,12 @@ make install MACHINE=laptop
 | `approver` | The default approver's Slack user id, whose button presses and replies count on their cards. |
 | `approver_name` | What cards and agent messages call the default approver. |
 | `approvers` | Optional. Named approvers, each with their own `approver`, `approver_name` and `channel`. See [More than one approver](#more-than-one-approver). |
-| `team` | Optional. People who can answer a card the deputy leaves for the default approver. Each short name gives a Slack `user` id, display `name` and optional `quiet` hours. |
+| `team` | Optional. Up to five people who can answer cards for the default approver. Each short name gives a Slack `user` id, display `name`, optional `quiet` hours and optional weekday `work` hours. The default work window is `["09:00", "18:00"]`. |
+| `handoff_hours` | Working hours after scheduled delivery before an unanswered card goes back to the approver. Defaults to 3. |
 | `list_as` | Optional. `{"name": "Approval desk", "icon_url": "https://example.com/desk.png"}` gives the morning list, lists asked for, and the deputy's summary their own name and picture. Unset: the app's usual name and picture. |
 | `bot_token_file`, `bot_token_key` | The env-style file holding the bot token, and the variable name in it. |
 | `app_token_file`, `app_token_key` | The same for the Socket Mode app token. |
-| `timezone` | For deadlines shown on cards, and the morning list's 8 am. |
+| `timezone` | For deadlines shown on cards, team quiet and work hours, and the morning list's 8 am. |
 | `default_herdr_session` | Where the listener opens panes when an agent's own Herdr session is gone. |
 | `video_share_command` | Optional. A command that publishes a video and prints `URL: <link>`. Without it, videos go into the card's thread, where Slack plays them. |
 | `test_approver` | For test runs only. A user whose `[test reply]` posts count, and only on TEST cards. |
@@ -89,11 +90,13 @@ One Slack workspace can send cards to several approvers through the same app and
 
 Each card keeps its approver's short name as `target`; old cards without it still use the default. Its posts, updates and thread use that approver's channel. On a card with a named target, only that approver's buttons, pop-ups and replies count. Each approver gets a separate morning list; posting in their channel asks for their list. The deputy serves only the default approver. Removing a named approver from config while their cards still exist makes commands on those cards fail with an error rather than send them to the default.
 
-### A card the deputy also sends to the team
+### A card sent to the approver's team
 
 With `team` set in [the workspace config](config.example.json), the deputy can leave a card for the default approver with `approvals call AP-0001 --his --also riley --why "<why>"`. Both people read the same why. The approver keeps the card in the channel and can answer immediately. The app sends Riley a direct message on the next sweep or after Riley's `quiet` hours. The two clock times use the workspace's `timezone` and can span midnight.
 
-Riley can use the card's buttons and reply in either thread. The first answer stands, and an answer from Riley names Riley and counts as the approver's for the card as written. **Not mine** hands the card back and tells the deputy. A new version needs a new call. The morning summary shows the cards sent to the team when auto-approval is on, and `approvals history` shows the call, delivery, and who answered or handed it back.
+The default approver can use **Hand to Riley** on the channel card or the morning list. The card moves to **With your team** and leaves the count of cards waiting on the approver. Riley can answer as soon as it is handed over. The return clock starts at scheduled delivery and counts only time inside Riley's weekday work window. The card's deadline extends if needed to give the approver its usual window after the return. An unanswered card returns with a mention in its Slack thread. If Riley answers one row or replies and the agent answers without posting a new version, the open card stays with Riley past the return time. **Back to me** restores the card to the approver's list and Riley can still answer.
+
+Riley can use the card's buttons and reply in either thread. The first answer stands, and an answer from Riley names Riley and counts as the approver's for the card as written. **Not mine** hands the card back, ends Riley's access and tells the deputy. A revision keeps an unreturned hand-off with Riley and starts a fresh clock. The deputy makes a new call for each version and can use `--also` only if it has no current send. The morning summary shows team sends when auto-approval is on, and `approvals history` shows hand-offs, deliveries and returns.
 
 ### More than one machine
 

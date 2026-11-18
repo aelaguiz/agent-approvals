@@ -100,7 +100,7 @@ Everything else (the frame line `part_of`, `if_no_answer`, `gallery`, `sections`
 
 ## Who counts
 
-- **Buttons and pop-ups:** the card's configured approver can answer. The person who received the latest version from the deputy can also use its buttons and pop-ups in the approvals channel and direct message until they hand it back or the card closes. A refusal names the approver, including when a button is pressed in the conversation the card came from.
+- **Buttons and pop-ups:** the card's configured approver can answer. The current teammate can also answer once the deputy's send is delivered or as soon as the approver hands over the card. A refusal names the approver, including when a button is pressed in the conversation the card came from.
 - **Thread replies:** the card's approver and the teammate who can answer count in the approval thread. The hub also polls replies from the teammate in the direct message. The listener hears events from every configured approver's channel and ignores channels it doesn't serve. The agent's own posts in the thread never count.
 - **Elsewhere:** a yes given outside Slack counts once an agent records it with `approvals record`, quoting the approver's words.
 - **After a decision:** a reply on an approved, declined, done or withdrawn card still goes to the agent, as a reply after the decision.
@@ -190,6 +190,12 @@ The DM shows the full open card and the deputy's reason for sending it, with **N
 
 Teammate answers carry the Slack user in their events and use the name stored on the send for messages, cards and history. The morning summary includes sends since yesterday morning when auto-approval is on and counts only the approver's own plain yeses.
 
+**Hand to** on the channel card or list makes a new current send. It closes the previous send for that version and redraws its direct message with the new person's name. The hand-off saves who handed it over and when, and the return time. The clock starts at the end of quiet hours if delivery is held and counts only time inside the recipient's weekday work window in the workspace time zone. The card's deadline is at least its usual window after the return time. The asker gets one message naming the person and new deadline, and the deputy hears who is holding the card.
+
+The channel card shows who has it, with **Back to me** and **See the card**. The list counts only cards waiting on the approver and shows hand-offs under **With your team**, with the same answer buttons. Once the return time has passed on a delivered send still awaiting its first answer, the hub marks it returned, tells the deputy and mentions the approver in the card's thread. A row answer that leaves other rows open keeps the card with the teammate. A reply followed by the agent's answer on the same version reopens the card with the teammate. In both cases the channel card and list show when the teammate responded, and the direct message drops the return time. The teammate can still answer after an automatic return or **Back to me**. **Not mine** ends their access and also mentions the approver in the thread.
+
+A revision carries an unreturned hand-off to the same person with fresh delivery and return times. A deputy call with `--his` leaves the hand-off in place, and `--also` is refused if the version already has a send. The summary shows the return time for hand-offs awaiting a first answer and records replies, answers and automatic returns. The history shows hand-offs, automatic returns and **Back to me**.
+
 ## Acknowledgements
 
 📨 means one thing: the service saw its message in the agent's transcript. That proves delivery, not understanding.
@@ -197,7 +203,7 @@ Teammate answers carry the Slack user in their events and use the name stored on
 **The agent's acknowledgement:**
 - A decision (a yes, a no, a pick, items) tells the agent to acknowledge first with `approvals ack`, in its own words: what it understood and what it's doing now. For example: "Got it: you approved v2. Posting the reply now, then I'll mark it done."
 - A reply or a question in the thread doesn't: the agent's answer (`approvals answer`) or its next version is the acknowledgement, so the approver meets the answer first and no "Got it, I'm checking" post (November 10, 2026: "Please stop sending me the same approvals and just ... talk to me"). Every post of the agent's on the card counts: an answer, a new version, a status line, a question, a withdrawal, done. A separate `ack` is only for a reply that will take more than a few minutes, saying what's coming and when.
-- `approvals answer` posts the answer with its first sentence in bold and the agent's name in the small line under it. On a card waiting on the agent after a reply, it hands the card back to the approver as it stands (status pending, so it's on his list again) with no new version. On an approved or withdrawn card it posts and changes nothing else.
+- `approvals answer` posts the answer with its first sentence in bold and the agent's name in the small line under it. On a card waiting on the agent after a reply, it reopens the same version as pending. An active hand-off stays with the teammate. Other reopened cards count on the approver's list again. On an approved or withdrawn card it posts and changes nothing else.
 - Deadlines need no acknowledgement.
 - An acknowledgement covers every answer on the card that has gone to the agent (typed in, or read from its inbox), not one still waiting its turn. Answers are counted as gone the moment typing starts, since agents often acknowledge before their transcript shows the message.
 - The thread then shows, from the agent itself, what will happen. Any later difference between the acknowledgement and the action is visible there.

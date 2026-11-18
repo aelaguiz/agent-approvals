@@ -15,7 +15,8 @@ def can_answer(rec, user):
     if user == config.card_target(rec)["approver"]:
         return True
     send = cards.also_on(rec, len(rec.get("versions", [])))
-    return bool(send and send["user"] == user and send.get("sent_at") and not send.get("handed_back_at"))
+    return bool(send and send["user"] == user and (send.get("handed") or send.get("sent_at"))
+                and not send.get("handed_back_at"))
 
 
 def answerer(rec, answer):
@@ -35,13 +36,15 @@ def enqueue(rec, kind, text, react_ts=None, to=None, member=None):
     to="deputy" for the deputy."""
     ref = secrets.token_hex(3)
     if member:
-        text += (f" The card also went to {member}, and {member}'s answer counts as {who(rec)}'s, "
+        send = cards.also_on(rec, len(rec["versions"]))
+        first = f"{who(rec)} handed this card to {member}" if send.get("handed") else f"The card also went to {member}"
+        text += (f" {first}, and {member}'s answer counts as {who(rec)}'s, "
                  "for exactly what the card describes.")
     rec.setdefault("outbox", []).append({
         "ref": ref, "kind": kind, "text": f"{text} (ref {ref})", "created": store.iso(),
         "react_ts": react_ts, "attempts": 0, "next_try": store.iso(), "delivered_at": None,
         "noted_failure": False, "seen_by_agent": False,
-        "needs_ack": kind not in ("expired", "review", "deputy"), "acked_at": None, "ack_warned": False,
+        "needs_ack": kind not in ("expired", "review", "deputy", "handed"), "acked_at": None, "ack_warned": False,
         **({"to": to} if to else {}),
         **({"answerer": member} if member else {}),
     })
@@ -62,9 +65,15 @@ def tell_deputy(rec, news):
 
 def make_your_call(rec):
     rid = rec["id"]
+    send = cards.also_on(rec, len(rec["versions"]))
+    if send and send.get("handed"):
+        name = send["name"]
+        also = f" {who(rec)} handed this card to {name}, so --his leaves it with {name}; --also is not taken."
+    else:
+        also = also_instruction(rec.get("target"))
     return (f'Make your call: `approvals show {rid}` reads it, `approvals pictures {rid}` saves its pictures where you '
             f'can look at them, then `approvals call {rid} --approve --why "<why>"` or `approvals call {rid} --his --why "<why>"`.'
-            + also_instruction(rec.get("target")))
+            + also)
 
 
 def also_instruction(target=None):
@@ -439,6 +448,10 @@ def press(rec, n, what, by):
     """A button press on a card: what it says, applied to the record. Pop-ups are opened elsewhere."""
     if what == "notmine":
         return hand_back(rec, n, by)
+    if what == "mine":
+        return take_mine(rec, n, by)
+    if what.startswith("hand:"):
+        return hand(rec, n, by, what[5:])
     c = rec["versions"][n - 1]["card"] if 1 <= n <= len(rec["versions"]) else {}
     if what in ("approve", "decline"):
         return decide(rec, n, "approved" if what == "approve" else "declined", by=by)
@@ -532,18 +545,105 @@ def send_after(now, quiet):
     return None
 
 
+def work_after(start, hours, work):
+    opens, closes = (time.fromisoformat(t) for t in work)
+    if opens >= closes:
+        raise ValueError("work must start before it ends on the same day")
+    local = cards.local(start)
+    left = timedelta(hours=hours)
+    while left > timedelta(0):
+        end = datetime.combine(local.date(), closes, local.tzinfo)
+        if local.weekday() < 5 and local < end:
+            local = max(local, datetime.combine(local.date(), opens, local.tzinfo))
+            if left <= end - local:
+                return local + left
+            left -= end - local
+        local = datetime.combine(local.date() + timedelta(days=1), opens, local.tzinfo)
+    return local
+
+
+def add_hand(rec, n, by, person):
+    now = store.now()
+    after = send_after(now, person.get("quiet"))
+    due = work_after(store.parse(after) if after else now, config.settings()["handoff_hours"],
+                     person.get("work", ["09:00", "18:00"]))
+    at, return_at = store.iso(now), store.iso(due)
+    send = {"version": n, "name": person["name"], "user": person["user"], "why": "", "at": at,
+            "send_after": after, "handed": {"by": by, "at": at}, "return_at": return_at}
+    rec.setdefault("also", []).append(send)
+    c = card(rec)
+    hours = c.get("deadline_hours") or cards.TYPES[c["type"]]["hours"]
+    deadline = due.astimezone(now.tzinfo) + timedelta(hours=hours)
+    rec["deadline"] = store.iso(max(store.parse(rec["deadline"]), deadline))
+    store.event(rec, "handed", version=n, name=send["name"], return_at=return_at)
+    rec["card_dirty"] = True
+    return send
+
+
+def hand(rec, n, by, name):
+    target = config.card_target(rec)
+    if by != target["approver"]:
+        return f"Only {target['approver_name']} can decide approvals."
+    bad = _check(rec, n)
+    if bad:
+        return bad
+    person = config.settings()["team"].get(name)
+    if rec.get("target") is not None or person is None:
+        return "gone"
+    if rec["status"] == "revising":
+        return "It's back with its agent."
+    if rec["status"] not in ("pending", "question"):
+        return "already"
+    prior = cards.also_on(rec, n)
+    name = person["name"]
+    if cards.handed(rec) and prior["user"] == person["user"]:
+        return f"{name} already has this one."
+    send = add_hand(rec, n, by, person)
+    if prior:
+        prior.update(closed_at=send["at"], closed_for=name)
+    approver = target["approver_name"]
+    when = cards.when(store.parse(send["at"]))
+    due = cards.when(store.parse(send["return_at"]))
+    deadline = cards.when(store.parse(rec["deadline"]))
+    enqueue(rec, "handed", f"{head(rec)} {approver} handed this card to {name} to answer ({when}). "
+            f"{name}'s answer counts as {approver}'s, for exactly what the card describes. "
+            f"If {name} hasn't answered by {due}, it goes back to {approver}. "
+            f"With no answer by {deadline}, it closes as before. Nothing to do or acknowledge.")
+    tell_deputy(rec, f"{approver} handed it to {name} ({when}). It waits on {name} until {due}; there is nothing to call.")
+    return "ok"
+
+
+def take_mine(rec, n, by):
+    target = config.card_target(rec)
+    if by != target["approver"]:
+        return f"Only {target['approver_name']} can decide approvals."
+    bad = _check(rec, n)
+    if bad:
+        return bad
+    if not cards.handed(rec):
+        return "gone"
+    send = cards.also_on(rec, n)
+    send.update(returned_at=store.iso(), returned_by="approver")
+    store.event(rec, "mine", version=n, name=send["name"])
+    rec["card_dirty"] = True
+    return "ok"
+
+
 def call(rec, what, why, by, live, also=None):
     """The deputy's call on the newest version: "approve" (for the approver) or "his" (left for him). Recorded
     either way; an approve approves the card for him only when auto-approval is on (live). Returns 'ok', or why
     nothing was recorded."""
+    n = len(rec["versions"])
     if also is not None:
+        send = cards.also_on(rec, n)
+        if send:
+            return f"{who(rec)} handed this card to {send['name']}; call it without --also."
         team = config.settings()["team"]
         names = ", ".join(sorted(team)) or "none"
         if what != "his" or also not in team or rec.get("target") is not None:
             return f"--also takes a team name with --his on a card for {config.settings()['approver_name']}. Configured names: {names}"
     if rec.get("target") is not None:
         return "this card is for a different approver"
-    n = len(rec["versions"])
     bad = _not_callable(rec, n)
     if bad:
         return bad
@@ -773,6 +873,8 @@ def expire(rec):
 # ---------- Slack side ----------
 
 def mode_for(rec):
+    if cards.handed(rec):
+        return "handed"
     return "final" if rec["status"] in FINAL and (rec.get("decision") or rec["status"] == "withdrawn") else "open"
 
 
