@@ -189,7 +189,7 @@ def test_delivery_and_return_time_respect_quiet_hours(team, slack, monkeypatch, 
     L.sweep()
     if quiet:
         blocks = cards.card_blocks(rec, 1, core.mode_for(rec))
-        assert "It reaches Riley at 5:00 pm and comes back to you Tue 11:00 am" in txt(blocks)
+        assert "It reaches Riley at Mon 5:00 pm and comes back to you Tue 11:00 am" in txt(blocks)
         assert not slack.posts and send["send_after"] == store.iso(NOW + timedelta(hours=5))
         now += timedelta(hours=5)
         L.sweep()
@@ -197,6 +197,30 @@ def test_delivery_and_return_time_respect_quiet_hours(team, slack, monkeypatch, 
     else:
         assert send["send_after"] is None and store.parse(send["return_at"]) == NOW + timedelta(hours=3)
     assert len(slack.posts) == 1 and latest()[1]["sent_at"] == store.iso(now)
+
+
+def test_a_friday_evening_hand_off_starts_its_return_clock_when_it_reaches_the_teammate_on_monday(team, slack, monkeypatch):
+    team["team"]["riley"].update(quiet=["18:00", "05:00"], work=["04:00", "13:00"])
+    config.CONFIG.write_text(json.dumps(team))
+    now = store.parse("2026-01-16T19:00:00+00:00")
+    monkeypatch.setattr(store, "now", lambda: now)
+    card()
+    hand()
+    rec, send = latest()
+    assert send["send_after"] == "2026-01-19T05:00:00+00:00"
+    assert send["return_at"] == "2026-01-19T08:00:00+00:00"
+    assert "It reaches Riley at Mon 5:00 am and comes back to you Mon 8:00 am" in txt(cards.card_blocks(rec, 1, "handed"))
+    L = listener.Listener()
+    L.sweep()
+    now = store.parse(send["send_after"]) - timedelta(seconds=1)
+    L.sweep()
+    assert not slack.opens
+    now += timedelta(seconds=1)
+    L.sweep()
+    assert slack.opens == [USER] and latest()[1]["sent_at"] == store.iso(now)
+    now = store.parse(send["return_at"])
+    L.sweep()
+    assert latest()[1]["returned_at"] == store.iso(now)
 
 
 @pytest.mark.parametrize("deliver", [False, True])

@@ -631,7 +631,7 @@ def cmd_call(a):
         _die(f"The why is {len(why)} characters; keep it under {WHY_MAX}, one or two sentences.")
     name, live = d["reach"]["agent"], bool(d.get("live"))
     what = "approve" if a.approve else "his"
-    r = store.update(a.id, lambda rec: core.call(rec, what, why, name, live, a.also))
+    r = store.update(a.id, lambda rec: core.call(rec, what, why, name, live, a.also, urgent=a.urgent))
     if r != "ok":
         _die(f"Not recorded: {r}.")
     core.refresh_and_clear(a.id)
@@ -642,10 +642,13 @@ def cmd_call(a):
         name = send["name"]
         if send.get("sent_at"):
             delivery = f"also sent to {name}"
-        elif send["send_after"]:
-            delivery = f"goes to {name} at {cards.clock(store.parse(send['send_after']))}, after {name}'s quiet hours"
+        elif send.get("send_after"):
+            delivery = (f"goes to {name} at {cards.when(store.parse(send['send_after']))}, "
+                        f"when {name}'s working hours start")
         else:
             delivery = f"goes to {name} as a direct message within a minute"
+        if send.get("urgent"):
+            delivery += ", as urgent"
         print(f"{a.id}: left for {who} and {delivery}.")
         return
     print(f"{a.id}: left for {who}; the card shows your why." if what == "his" else
@@ -678,8 +681,9 @@ def _happened(rec):
             if e.get("also") is not None:
                 send = next((s for s in rec.get("also", []) if s["version"] == e["version"] and not s.get("handed")), None)
             also = f", also to {send['name']}" if send else ""
+            urgent = ", urgent" if e.get("urgent") else ""
             out.append(f"{at}  {e['by']} on v{e['version']}: " + ("approve" if e["call"] == "approve" else "left it for him")
-                       + f"{mode}{also}. Why: \"{core.one_line(e['why'])}\"")
+                       + f"{mode}{also}{urgent}. Why: \"{core.one_line(e['why'])}\"")
         elif k == "also_sent":
             held = f", held until {_stamp(e['send_after'])} for quiet hours" if e.get("send_after") else ""
             out.append(f"{at}  sent v{e['version']} to {e['name']} in a direct message{held}")
@@ -1017,6 +1021,7 @@ def main(argv=None):
     g.add_argument("--approve", action="store_true", help="approve it for him (only recorded and shown in a dry run)")
     g.add_argument("--his", action="store_true", help="leave it for him")
     s.add_argument("--also", help="with --his, also send the card to one name from the approver's team")
+    s.add_argument("--urgent", action="store_true", help="with --also, send the direct message without waiting for working hours")
     s.add_argument("--why", required=True, help="one or two sentences for the approver, under 300 characters")
     s.set_defaults(fn=cmd_call)
 

@@ -525,8 +525,10 @@ def call_line(rec, n):
                 line += f" · {name} handed it back, {clock(datetime.fromisoformat(send['handed_back_at']))}"
             elif send.get("sent_at"):
                 line += f" · Also sent to {name}, {clock(datetime.fromisoformat(send['sent_at']))}"
+                if send.get("urgent"):
+                    line += ", as urgent"
             elif send.get("send_after"):
-                line += f" · Also goes to {name} at {clock(datetime.fromisoformat(send['send_after']))}"
+                line += f" · Also goes to {name} at {when(datetime.fromisoformat(send['send_after']))}"
             else:
                 line += f" · Also goes to {name}"
         return ctx(line)
@@ -634,7 +636,7 @@ def _card_blocks(rec, n, mode, compact=False, origin=True, deputy=True):
         else:
             due = when(datetime.fromisoformat(send["return_at"]))
             if send["send_after"] and not send.get("sent_at"):
-                at_delivery = clock(datetime.fromisoformat(send["send_after"]))
+                at_delivery = when(datetime.fromisoformat(send["send_after"]))
                 line += f" It reaches {name} at {at_delivery} and comes back to you {due} if {name} hasn't answered."
             else:
                 line += f" It comes back to you {due} if {name} hasn't answered."
@@ -826,7 +828,10 @@ def also_blocks(rec, send):
                 due = when(datetime.fromisoformat(send["return_at"]))
                 last = f"If it's still waiting at {due}, it goes back to {approver}."
         else:
-            first = ctx(f"{esc(rec['agent'])} asks {approver}, and you can answer it too.")
+            intro = f"{esc(rec['agent'])} asks {approver}, and you can answer it too."
+            if send.get("outside_hours"):
+                intro += "\nSent outside your working hours because it can't wait for morning."
+            first = ctx(intro)
             end = [md(f"*Why you:* {esc(send['why'])}")]
         end += [{"type": "actions", "block_id": f"ap|{rec['id']}|{n}|notmine", "elements": [
                     button("Not mine", f"{rec['id']}|{n}|notmine")]},

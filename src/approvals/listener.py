@@ -491,7 +491,7 @@ class Listener:
                 rec = store.load(rec["id"])
             send = cards.also_on(rec, len(rec["versions"]))
             if (send and not any(send.get(k) for k in ("sent_at", "handed_back_at", "skipped"))
-                    and (not send["send_after"] or store.parse(send["send_after"]) <= store.now())):
+                    and (not send.get("send_after") or store.parse(send["send_after"]) <= store.now())):
                 self.send_also(rec, send)
                 rec = store.load(rec["id"])
                 send = cards.also_on(rec, len(rec["versions"]))
@@ -518,7 +518,7 @@ class Listener:
 
                     def save(r):
                         r["also"][index].update(sent)
-                        store.event(r, "also_sent", version=n, name=send["name"], send_after=send["send_after"])
+                        store.event(r, "also_sent", version=n, name=send["name"], send_after=send.get("send_after"))
                         r["card_dirty"] = True
                     store.update(rid, save)
                     return

@@ -79,7 +79,8 @@ def make_your_call(rec):
 def also_instruction(target=None):
     team = config.settings()["team"]
     return (" Add `--also <name>` beside `--his` to also send the card to that person "
-            f"({', '.join(sorted(team))}).") if team and target is None else ""
+            f"({', '.join(sorted(team))}). A card sent this way waits for that person's working hours; "
+            "add --urgent to send it at once when it can't.") if team and target is None else ""
 
 
 def tell_reviewer(rec, news):
@@ -541,10 +542,14 @@ def send_after(now, quiet):
     start, end = (time.fromisoformat(t) for t in quiet)
     local = cards.local(now)
     clock = local.time()
-    if start <= clock < end or (start > end and (clock >= start or clock < end)):
-        day = local.date() + timedelta(days=int(start > end and clock >= start))
-        return store.iso(datetime.combine(day, end, local.tzinfo))
-    return None
+    overnight = start > end
+    in_quiet = (clock >= start or clock < end) if overnight else start <= clock < end
+    if local.weekday() < 5 and not in_quiet:
+        return None
+    day = local.date() + timedelta(days=int(overnight and clock >= start))
+    while day.weekday() >= 5:
+        day += timedelta(days=1)
+    return store.iso(datetime.combine(day, end, local.tzinfo))
 
 
 def work_after(start, hours, work):
@@ -633,11 +638,13 @@ def take_mine(rec, n, by):
     return "ok"
 
 
-def call(rec, what, why, by, live, also=None):
+def call(rec, what, why, by, live, also=None, urgent=False):
     """The deputy's call on the newest version: "approve" (for the approver) or "his" (left for him). Recorded
     either way; an approve approves the card for him only when auto-approval is on (live). Returns 'ok', or why
     nothing was recorded."""
     n = len(rec["versions"])
+    if urgent and (also is None or what != "his"):
+        return "--urgent requires --his and --also <name>"
     if also is not None:
         send = cards.also_on(rec, n)
         if send:
@@ -670,12 +677,21 @@ def call(rec, what, why, by, live, also=None):
         choice = c.get("pick") if c.get("options") else None
     now = store.now()
     extra = {"also": also} if also is not None else {}
+    if urgent:
+        extra["urgent"] = True
     rec.setdefault("calls", []).append({"version": n, "call": what, "why": why, "by": by, "at": store.iso(now), "live": live, **extra})
     store.event(rec, "call", version=n, call=what, why=why, by=by, live=live, **extra)
     if also is not None:
         person = team[also]
-        rec.setdefault("also", []).append({"version": n, "name": person["name"], "user": person["user"], "why": why,
-                                           "at": store.iso(now), "send_after": send_after(now, person.get("quiet"))})
+        after = send_after(now, person.get("quiet"))
+        send = {"version": n, "name": person["name"], "user": person["user"], "why": why, "at": store.iso(now)}
+        if urgent:
+            send["urgent"] = True
+            if after:
+                send["outside_hours"] = True
+        else:
+            send["send_after"] = after
+        rec.setdefault("also", []).append(send)
     rec["card_dirty"] = True
     if what == "approve" and live:
         r = decide(rec, n, "approved", by=by, where="deputy", choice=choice)

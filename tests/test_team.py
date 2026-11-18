@@ -121,6 +121,11 @@ def test_the_deputy_instructions_list_names_only_for_the_default_approvers_team(
     assert "--also" not in core.make_your_call(rec)
 
 
+def test_the_deputy_instructions_explain_urgent_delivery(team):
+    assert ("A card sent this way waits for that person's working hours; add --urgent to send it at once when it can't."
+            in core.also_instruction())
+
+
 @pytest.mark.parametrize("quiet,at,due", [
     (["21:00", "05:00"], "2026-01-12T20:59:00+00:00", None),
     (["21:00", "05:00"], "2026-01-12T21:00:00+00:00", "2026-01-13T05:00:00+00:00"),
@@ -137,6 +142,24 @@ def test_call_records_the_end_of_the_quiet_window(team, slack, monkeypatch, quie
     assert latest()[1]["send_after"] == due
 
 
+@pytest.mark.parametrize("at,due", [
+    ("13T14:00", None),
+    ("13T19:00", "14T05:00"),
+    ("14T03:00", "14T05:00"),
+    ("16T19:00", "19T05:00"),
+    ("17T11:00", "19T05:00"),
+    ("18T20:00", "19T05:00"),
+    ("19T03:00", "19T05:00"),
+])
+def test_a_quiet_window_holds_messages_until_weekday_working_hours(at, due):
+    now = store.parse(f"2026-01-{at}:00+00:00")
+    assert core.send_after(now, ["18:00", "05:00"]) == (f"2026-01-{due}:00+00:00" if due else None)
+
+
+def test_a_teammate_without_a_quiet_window_gets_messages_on_saturday():
+    assert core.send_after(store.parse("2026-01-17T11:00:00+00:00"), None) is None
+
+
 def test_the_sweep_waits_for_local_quiet_hours_and_sends_once(team, slack, monkeypatch, capsys):
     team["timezone"] = "America/Chicago"
     team["team"]["riley"]["quiet"] = ["21:00", "05:00"]
@@ -145,8 +168,8 @@ def test_the_sweep_waits_for_local_quiet_hours_and_sends_once(team, slack, monke
     monkeypatch.setattr(store, "now", lambda: now)
     card()
     leave()
-    assert "goes to Riley at 5:00 am, after Riley's quiet hours" in capsys.readouterr().out
-    assert "Also goes to Riley at 5:00 am" in txt(cards.call_line(store.load(RID), 1))
+    assert "goes to Riley at Tue 5:00 am, when Riley's working hours start" in capsys.readouterr().out
+    assert "Also goes to Riley at Tue 5:00 am" in txt(cards.call_line(store.load(RID), 1))
     L = listener.Listener()
     L.sweep()
     assert not slack.opens
@@ -159,6 +182,64 @@ def test_the_sweep_waits_for_local_quiet_hours_and_sends_once(team, slack, monke
     assert "Also sent to Riley, 5:00 am" in txt(cards.call_line(rec, 1))
     lines = "\n".join(cli._happened(rec))
     assert "also to Riley" in lines and "sent v1 to Riley in a direct message, held until Jan 13 5:00 am" in lines
+
+
+def test_a_send_held_over_the_weekend_shows_monday_and_waits_in_the_workspace_zone(team, slack, monkeypatch, capsys):
+    team["timezone"] = "America/Chicago"
+    team["team"]["riley"]["quiet"] = ["18:00", "05:00"]
+    config.CONFIG.write_text(json.dumps(team))
+    now = store.parse("2026-01-19T02:00:00+00:00")  # Sunday at 8 pm in the workspace
+    monkeypatch.setattr(store, "now", lambda: now)
+    card()
+    leave()
+    rec, send = latest()
+    assert send["send_after"] == "2026-01-19T05:00:00-06:00"
+    assert "goes to Riley at Mon 5:00 am, when Riley's working hours start" in capsys.readouterr().out
+    assert "Also goes to Riley at Mon 5:00 am" in txt(cards.call_line(rec, 1))
+    L = listener.Listener()
+    L.sweep()
+    assert not slack.opens
+    now = store.parse(send["send_after"])
+    L.sweep()
+    assert slack.opens == [USER] and latest()[1]["sent_at"] == store.iso(now)
+
+
+@pytest.mark.parametrize("at,held", [
+    ("13T19:00", True),
+    ("17T11:00", True),
+    ("13T14:00", False),
+])
+def test_urgent_sends_go_at_once_and_explain_a_bypassed_hold(team, slack, monkeypatch, capsys, at, held):
+    team["team"]["riley"]["quiet"] = ["18:00", "05:00"]
+    config.CONFIG.write_text(json.dumps(team))
+    now = store.parse(f"2026-01-{at}:00+00:00")
+    monkeypatch.setattr(store, "now", lambda: now)
+    card()
+    call(RID, "--his", "--also", "riley", "--urgent", "--why", WHY)
+    rec, send = latest()
+    assert rec["calls"][0]["urgent"] is rec["events"][0]["urgent"] is send["urgent"] is True
+    assert "send_after" not in send and not slack.opens
+    assert ", as urgent" in capsys.readouterr().out
+    listener.Listener().sweep()
+    rec, send = latest()
+    assert slack.opens == [USER] and len(slack.posts) == 1 and send["sent_at"] == store.iso(now)
+    blocks = slack.posts[0][1]
+    intro = "Tester asks Sam, and you can answer it too."
+    notice = "Sent outside your working hours because it can't wait for morning."
+    assert blocks[0] == cards.ctx(intro + ("\n" + notice if held else ""))
+    assert txt(blocks).count(notice) == int(held)
+    assert f" · Also sent to Riley, {cards.clock(now)}, as urgent" in txt(cards.call_line(rec, 1))
+    cli.main(["history"])
+    assert 'left it for him, also to Riley, urgent. Why: "' + WHY + '"' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("args", [("--his",), ("--approve",), ("--approve", "--also", "riley")])
+def test_urgent_requires_a_send_to_a_teammate(team, slack, capsys, args):
+    before = card()
+    with pytest.raises(SystemExit):
+        call(RID, *args, "--urgent", "--why", WHY)
+    assert "--urgent requires --his and --also <name>" in capsys.readouterr().err
+    assert store.load(RID) == before and not slack.posts and not slack.updates
 
 
 @pytest.mark.parametrize("outcome", ["approved", "withdrawn", "row answered", "during open"])
