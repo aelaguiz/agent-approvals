@@ -355,6 +355,21 @@ def test_back_to_me_puts_the_card_on_the_list_but_the_teammate_can_still_answer(
     assert store.load(RID)["decision"]["by"] == USER
 
 
+def test_back_to_me_before_delivery_means_it_never_reaches_the_teammate(team, slack, monkeypatch):
+    team["team"]["riley"]["quiet"] = ["10:00", "17:00"]
+    config.CONFIG.write_text(json.dumps(team))
+    now = NOW
+    monkeypatch.setattr(store, "now", lambda: now)
+    card()
+    hand()
+    click("mine", user=APPROVER, channel=CHANNEL)
+    rec, send = latest()
+    assert send["skipped"] and not cards.handed(rec) and digest.waiting(rec) and not core.can_answer(rec, USER)
+    now += timedelta(hours=6)
+    listener.Listener().sweep()
+    assert not slack.posts and not latest()[1].get("sent_at")
+
+
 def test_the_sweep_returns_an_unanswered_card_once_at_its_return_time(team, slack, monkeypatch):
     now = NOW
     monkeypatch.setattr(store, "now", lambda: now)

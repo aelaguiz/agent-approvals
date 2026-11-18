@@ -16,7 +16,7 @@ def can_answer(rec, user):
         return True
     send = cards.also_on(rec, len(rec.get("versions", [])))
     return bool(send and send["user"] == user and (send.get("handed") or send.get("sent_at"))
-                and not send.get("handed_back_at"))
+                and not (send.get("handed_back_at") or send.get("skipped")))
 
 
 def answerer(rec, answer):
@@ -624,6 +624,8 @@ def take_mine(rec, n, by):
         return "gone"
     send = cards.also_on(rec, n)
     send.update(returned_at=store.iso(), returned_by="approver")
+    if not send.get("sent_at"):   # taken back before it reached the teammate, so it never goes out
+        send["skipped"] = True
     store.event(rec, "mine", version=n, name=send["name"])
     rec["card_dirty"] = True
     return "ok"

@@ -414,7 +414,7 @@ def summary(d, since, records):
             latest[r["id"]] = (r, calls[-1])
         if live:
             sends = [s for s in r.get("also", []) if (at := s["at"] if s.get("handed") else s.get("sent_at"))
-                     and store.parse(at) >= since]
+                     and store.parse(at) >= since and not s.get("skipped")]
             if sends:
                 team[r["id"]] = (r, sends[-1])
     if not latest and not team:
