@@ -1,13 +1,40 @@
-"""Finding agent transcripts and live Claude sessions on this Mac."""
+"""Finding agent transcripts and live agent sessions on this machine."""
 import glob
 import json
 import os
 import re
+import shlex
+import subprocess
 from pathlib import Path
 
 from . import store
 
 HOME = Path.home()
+UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
+AGY_USER_RE = re.compile(r"<USER_REQUEST>\s*(.*?)\s*</USER_REQUEST>", re.S)
+CODEX_ROLLOUT_RE = re.compile(r"(.*rollout-[^/\n]*?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl)$")
+AGY_SESSION_RES = (
+    re.compile(r"antigravity-cli/presence/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.lock$"),
+    re.compile(r"antigravity-cli/conversations/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.db"),
+)
+_CODEX_NON_INTERACTIVE = {
+    "exec", "e", "review", "login", "logout", "mcp", "plugin", "app-server", "remote-control", "app",
+    "completion", "update", "doctor", "sandbox", "debug", "apply", "a", "queue", "archive", "delete",
+    "migrate-rollouts", "migrate-nfs-db", "unarchive", "cloud", "exec-server", "features", "help",
+}
+_CODEX_VALUE_FLAGS = {
+    "-c", "--config", "-m", "--model", "-p", "--profile", "-C", "--cd", "-s", "--sandbox",
+    "-a", "--ask-for-approval", "-i", "--image", "--add-dir", "--local-provider", "--enable", "--disable",
+}
+_AGY_NON_INTERACTIVE_FLAGS = {"-p", "--print", "--prompt"}
+_AGY_NON_INTERACTIVE_SUBS = {
+    "acp", "agent", "agents", "changelog", "help", "install", "mcp", "mic-serve", "models",
+    "plugin", "plugins", "remote-control", "update",
+}
+_AGY_VALUE_FLAGS = {
+    "--add-dir", "--agent", "--conversation", "--effort", "-i", "--prompt-interactive", "--input-format",
+    "--json-schema", "--log-file", "--mode", "--model", "--output-format", "--print-timeout", "--project", "--settings",
+}
 
 
 def claude_config_dirs():
@@ -28,10 +55,27 @@ def codex_transcript(thread_id):
     return max(hits, key=os.path.getmtime) if hits else None
 
 
+def agy_transcript(conversation_id):
+    if not conversation_id or "/" in conversation_id or "\\" in conversation_id or conversation_id in (".", ".."):
+        return None
+    logs = HOME / ".gemini/antigravity-cli/brain" / conversation_id / ".system_generated/logs"
+    for name in ("transcript_full.jsonl", "transcript.jsonl"):
+        p = logs / name
+        if p.is_file():
+            return str(p)
+    return None
+
+
 def transcript(runtime, session_id):
     if not session_id:
         return None
-    return claude_transcript(session_id) if runtime == "claude" else codex_transcript(session_id)
+    if runtime == "claude":
+        return claude_transcript(session_id)
+    if runtime == "codex":
+        return codex_transcript(session_id)
+    if runtime == "agy":
+        return agy_transcript(session_id)
+    return None
 
 
 def contains(path, needle):
@@ -88,9 +132,6 @@ def first_user_text(path, limit=400):
     return None
 
 
-UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
-
-
 def opening(path, limit=400):
     """The first prompt and the agent's first reply. A copy AI Manager made of a session carries both word
     for word, except for session ids, which it rewrites everywhere; another run started from the same
@@ -109,6 +150,12 @@ def opening(path, limit=400):
                 role, content, meta = e["type"], (e.get("message") or {}).get("content"), e.get("isMeta")
             elif p.get("type") == "message":                       # Codex
                 role, content, meta = p.get("role"), p.get("content"), False
+            elif e.get("type") == "USER_INPUT" and e.get("source") == "USER_EXPLICIT":    # Antigravity
+                raw = e.get("content") or ""
+                m = AGY_USER_RE.search(raw)
+                role, content, meta = "user", (m.group(1) if m else raw), False
+            elif e.get("type") == "PLANNER_RESPONSE" and (e.get("content") or "").strip():  # Antigravity
+                role, content, meta = "assistant", e.get("content"), False
             else:
                 continue
             if meta:
@@ -262,30 +309,204 @@ def live_claude_sessions():
     return out
 
 
+def _split_cmd(cmd):
+    if isinstance(cmd, (list, tuple)):
+        return [str(x) for x in cmd if x]
+    if not cmd:
+        return []
+    try:
+        return shlex.split(cmd)
+    except ValueError:
+        return cmd.split()
+
+
+def _first_positional(args, value_flags):
+    skip = False
+    for tok in args:
+        if skip:
+            skip = False
+            continue
+        if tok == "--":
+            return None
+        if tok in value_flags:
+            skip = True
+            continue
+        if tok.startswith("-"):
+            continue
+        return tok
+    return None
+
+
+def _is_codex_cmd(cmd, interactive_only=False):
+    args = _split_cmd(cmd)
+    if not args or os.path.basename(args[0]) != "codex":
+        return False
+    if not interactive_only:
+        return True
+    sub = _first_positional(args[1:], _CODEX_VALUE_FLAGS)
+    return sub not in _CODEX_NON_INTERACTIVE
+
+
+def _is_agy_cmd(cmd, interactive_only=False):
+    args = _split_cmd(cmd)
+    if not args or os.path.basename(args[0]) != "agy":
+        return False
+    if not interactive_only:
+        return True
+    for tok in args[1:]:
+        if tok == "--":
+            break
+        if tok in _AGY_NON_INTERACTIVE_FLAGS or tok.startswith(("--print=", "--prompt=")):
+            return False
+    sub = _first_positional(args[1:], _AGY_VALUE_FLAGS)
+    return sub not in _AGY_NON_INTERACTIVE_SUBS
+
+
+def _lsof_lines(pid):
+    try:
+        return subprocess.run(["lsof", "-p", str(pid), "-Fn"], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def _cwd_from_lsof(out):
+    lines = out.splitlines()
+    for i, line in enumerate(lines):
+        if line == "fcwd" and i + 1 < len(lines) and lines[i + 1].startswith("n/"):
+            return lines[i + 1][1:]
+    return None
+
+
+def _pid_files_and_cwd(pid):
+    """(open file paths, cwd) for pid, via /proc on Linux or lsof on macOS."""
+    proc = Path(f"/proc/{pid}")
+    if proc.is_dir():
+        cwd = None
+        try:
+            cwd = os.readlink(proc / "cwd")
+        except OSError:
+            pass
+        paths = []
+        try:
+            for entry in os.listdir(proc / "fd"):
+                try:
+                    paths.append(os.readlink(proc / "fd" / entry))
+                except OSError:
+                    pass
+        except OSError:
+            pass
+        return paths, cwd
+    out = _lsof_lines(pid)
+    cwd = _cwd_from_lsof(out)
+    paths = [line[1:] for line in out.splitlines() if line.startswith("n") and len(line) > 1]
+    return paths, cwd
+
+
+def _is_codex_subagent_rollout(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            first = json.loads(f.readline())
+    except (OSError, json.JSONDecodeError):
+        return False
+    source = (first.get("payload") or {}).get("source")
+    return isinstance(source, dict) and "subagent" in source
+
+
+def _codex_session_from_paths(paths):
+    hits = []
+    seen = set()
+    for path in paths:
+        m = CODEX_ROLLOUT_RE.match(path)
+        if m and m.group(2) not in seen:
+            seen.add(m.group(2))
+            hits.append((m.group(1), m.group(2)))
+    if not hits:
+        return None
+    if len(hits) == 1:
+        return hits[0][1]
+    for path, sid in hits:
+        if os.path.isfile(path) and not _is_codex_subagent_rollout(path):
+            return sid
+    return hits[0][1]
+
+
+def _agy_session_from_paths(paths):
+    for pattern in AGY_SESSION_RES:
+        for path in paths:
+            m = pattern.search(path)
+            if m:
+                return m.group(1)
+    return None
+
+
+def codex_model_effort(path):
+    """(model, effort) from the newest turn_context entry in a Codex rollout, or (None, None)."""
+    if not path or not os.path.exists(path):
+        return None, None
+    model = effort = None
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if '"turn_context"' not in line:
+                    continue
+                try:
+                    e = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if e.get("type") == "turn_context":
+                    pl = e.get("payload") or {}
+                    model = pl.get("model") or model
+                    effort = pl.get("effort") or effort
+    except OSError:
+        return None, None
+    return model, effort
+
+
 def codex_session_for_pid(pid):
     """The Codex thread a process is writing, from the session file it holds open."""
-    import re
-    import subprocess
-    try:
-        out = subprocess.run(["lsof", "-p", str(pid), "-Fn"], capture_output=True, text=True, timeout=10).stdout
-    except (OSError, subprocess.SubprocessError):
-        return None
-    m = re.search(r"rollout-[^/\n]*?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl", out)
-    return m.group(1) if m else None
+    paths, _ = _pid_files_and_cwd(pid)
+    return _codex_session_from_paths(paths)
+
+
+def agy_session_for_pid(pid):
+    """The Antigravity conversation a process holds open (presence lock or conversation DB, never subagent brain folders)."""
+    paths, _ = _pid_files_and_cwd(pid)
+    return _agy_session_from_paths(paths)
 
 
 def live_codex_sessions():
-    import subprocess
     out = []
     ps = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True).stdout
     for line in ps.splitlines():
         pid_s, _, cmd = line.strip().partition(" ")
-        if "/codex" in cmd and "vendor" in cmd:   # the native Codex binary, not its node wrapper
-            sid = codex_session_for_pid(int(pid_s))
+        if _is_codex_cmd(cmd, interactive_only=True):
+            pid = int(pid_s)
+            paths, cwd = _pid_files_and_cwd(pid)
+            sid = _codex_session_from_paths(paths)
             if sid:
-                out.append((int(pid_s), sid, None))
+                out.append((pid, sid, cwd))
+    return out
+
+
+def live_agy_sessions():
+    out = []
+    ps = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True).stdout
+    for line in ps.splitlines():
+        pid_s, _, cmd = line.strip().partition(" ")
+        if _is_agy_cmd(cmd, interactive_only=True):
+            pid = int(pid_s)
+            paths, cwd = _pid_files_and_cwd(pid)
+            sid = _agy_session_from_paths(paths)
+            if sid:
+                out.append((pid, sid, cwd))
     return out
 
 
 def live_sessions(runtime):
-    return live_claude_sessions() if runtime == "claude" else live_codex_sessions()
+    if runtime == "claude":
+        return live_claude_sessions()
+    if runtime == "codex":
+        return live_codex_sessions()
+    if runtime == "agy":
+        return live_agy_sessions()
+    return []

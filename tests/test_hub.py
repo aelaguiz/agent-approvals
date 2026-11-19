@@ -191,6 +191,7 @@ def test_a_machine_that_cannot_post_to_the_workspace_saves_nothing(monkeypatch, 
 def test_a_card_from_a_shell_with_no_session_is_refused(hubbox, monkeypatch, tmp_path, capsys):
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
+    monkeypatch.delenv("ANTIGRAVITY_CONVERSATION_ID", raising=False)
     card = tmp_path / "card.json"
     card.write_text(json.dumps(SAMPLES["money"]))
     with pytest.raises(SystemExit):

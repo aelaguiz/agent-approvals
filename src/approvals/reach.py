@@ -13,6 +13,8 @@ def capture(agent_name=None):
         runtime, sid = "claude", env["CLAUDE_CODE_SESSION_ID"]
     elif env.get("CODEX_THREAD_ID"):
         runtime, sid = "codex", env["CODEX_THREAD_ID"]
+    elif env.get("ANTIGRAVITY_CONVERSATION_ID"):
+        runtime, sid = "agy", env["ANTIGRAVITY_CONVERSATION_ID"]
     else:
         runtime, sid = None, None
     cwd = os.getcwd()
@@ -62,7 +64,7 @@ def refresh(rec, new):
 def running(session_id):
     """Where a session running on this machine is, as reach, or None when it isn't running here: its runtime, folder,
     and Herdr pane when it runs in one."""
-    for runtime in ("claude", "codex"):
+    for runtime in ("claude", "codex", "agy"):
         for pid, sid, cwd in transcripts.live_sessions(runtime):
             if sid == session_id:
                 loc = router.find_pane_for_pid(pid)

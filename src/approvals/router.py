@@ -11,6 +11,10 @@ from . import config, store, transcripts
 CONFIRM_SECONDS = 90
 READY_SECONDS = 180
 TRUST_PROMPT = "Yes, I trust this folder"
+IDENTITY_ENV = (
+    "BASECAMP_PROFILE", "APPROVALS_FROM", "AGENT_ID",
+    "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL",
+)
 
 
 class HerdrError(RuntimeError):
@@ -116,22 +120,60 @@ def _claude_sid_in_pane(h, pane):
     return None
 
 
+def _proc_cmd(p):
+    return p.get("argv") or p.get("cmdline") or p.get("name") or ""
+
+
 def _codex_in_pane(h, pane):
-    return any("codex" in (p.get("cmdline") or "") for p in h.procs(pane))
+    return any("codex" in (p.get("cmdline") or p.get("name") or "") for p in h.procs(pane))
 
 
 def _codex_sid_in_pane(h, pane):
     for p in h.procs(pane):
-        cmd = p.get("cmdline") or ""
-        if "/codex" in cmd and "vendor" in cmd:
+        if transcripts._is_codex_cmd(_proc_cmd(p), interactive_only=True):
             sid = transcripts.codex_session_for_pid(p.get("pid"))
             if sid:
                 return sid
     return None
 
 
+def _agy_in_pane(h, pane):
+    return any(transcripts._is_agy_cmd(_proc_cmd(p), interactive_only=True) for p in h.procs(pane))
+
+
+def _agy_sid_in_pane(h, pane):
+    for p in h.procs(pane):
+        if transcripts._is_agy_cmd(_proc_cmd(p), interactive_only=True):
+            sid = transcripts.agy_session_for_pid(p.get("pid"))
+            if sid:
+                return sid
+    return None
+
+
+def _env_prefix(reach):
+    parts = ["env", "-u", "CLAUDECODE", "-u", "CODEX_THREAD_ID", "-u", "ANTIGRAVITY_CONVERSATION_ID"]
+    if reach.get("agent_identity_bin"):
+        parts.append('PATH="$HOME/.local/share/agent-identity/bin:$PATH"')
+    env = reach.get("env") or {}
+    for key in IDENTITY_ENV:
+        val = env.get(key)
+        if val:
+            parts.append(f"{key}={shlex.quote(str(val))}")
+    return " ".join(parts)
+
+
+def _seen(path, ref, needle=None):
+    return transcripts.contains(path, needle) if needle is not None else transcripts.typed(path, ref)
+
+
 def session_in_pane(h, pane, runtime):
-    return _claude_sid_in_pane(h, pane) if runtime == "claude" else _codex_sid_in_pane(h, pane)
+    if runtime == "claude":
+        return _claude_sid_in_pane(h, pane)
+    if runtime == "codex":
+        return _codex_sid_in_pane(h, pane)
+    if runtime == "agy":
+        return _agy_sid_in_pane(h, pane)
+    return None
 
 
 def herdr_sessions(run=subprocess.run):
@@ -182,10 +224,10 @@ def find_pane_for_pid(pid, first_session=None, run=subprocess.run):
     return None
 
 
-def already_delivered(reach, ref):
+def already_delivered(reach, ref, needle=None):
     runtime = reach.get("runtime")
     ids = [reach.get("session_id")] + list(reach.get("earlier_ids", []))
-    return any(transcripts.typed(transcripts.transcript(runtime, i), ref)
+    return any(_seen(transcripts.transcript(runtime, i), ref, needle)
                for i in ids if i and store.same_family(reach.get("session_id"), i))
 
 
@@ -197,13 +239,17 @@ def live_askers(reach, request_id, run=subprocess.run):
     h = Herdr(reach.get("herdr_session") or config.settings()["default_herdr_session"], run=run)
     out, seen = [], set()
     pane = reach.get("herdr_pane")
-    if pane and h.pane(pane):
+    pane_info = h.pane(pane) if pane else None
+    if pane and pane_info:
         found = session_in_pane(h, pane, runtime)
         if found and (found == sid or transcripts.is_copy(runtime, sid, found, request_id)):
             out.append((found, h.session, pane))
             seen.add(found)
         elif found is None and runtime == "codex" and _codex_in_pane(h, pane):
             return [(sid, h.session, pane)]   # Codex is in the recorded pane but its thread can't be read
+        elif (found is None and runtime == "agy" and _agy_in_pane(h, pane)
+              and pane_info.get("agent") == "agy" and pane_info.get("agent_status") in ("idle", "done", "working")):
+            return [(sid, h.session, pane)]   # Antigravity is in the recorded pane but its conversation can't be read
     for pid, found, found_cwd in transcripts.live_sessions(runtime):
         if found in seen:
             continue
@@ -222,18 +268,19 @@ STOPPED = "the agent's session is stopped at its usage limit, and no session con
 
 
 def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sleep, clock=time.monotonic,
-            popen=None, resume=True, confirm=True):
+            popen=None, resume=True, confirm=True, needle=None):
     """Type `text` into the session that asked. With resume=False a session that isn't running is left alone:
     the answer waits for it. Approvals answers that way; agent-email resumes, so its replies reach a closed session.
-    With confirm=False it returns "sent" once the text is typed, and the caller watches the transcript itself."""
+    With confirm=False it returns "sent" once the text is typed, and the caller watches the transcript itself.
+    When `needle` is set, transcript confirmation looks for that string instead of approvals' `(ref <ref>)` form."""
     runtime, sid = reach.get("runtime"), reach.get("session_id")
-    if runtime not in ("claude", "codex") or not sid:
-        return Result("inbox", "it wasn't asked from a Claude or Codex session")
+    if runtime not in ("claude", "codex", "agy") or not sid:
+        return Result("inbox", "it wasn't asked from a Claude, Codex or Antigravity session")
     # A session whose transcript is here is here. Without one, a card that names its machine was asked from somewhere
     # else, wherever the record says; an older card names only the Mac, whose reported name follows its network.
     if not transcripts.transcript(runtime, sid) and (reach.get("machine") or reach.get("host") != config.hostname()):
         return Result("inbox", f"that session isn't on {config.machine()}", elsewhere=True)
-    if already_delivered(reach, ref):
+    if already_delivered(reach, ref, needle=needle):
         return Result("delivered", "already in the transcript")
 
     moves = []
@@ -297,8 +344,30 @@ def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sl
                 pane, tab, workspace = h.new_workspace(cwd, label)
             except HerdrError:
                 return Result("retry", f"couldn't open a Herdr pane: {e}", moves=moves)
-        resume = "aim claude resume" if runtime == "claude" else "aim codex resume"
-        h.run_cmd(pane, f"cd {shlex.quote(cwd)} && {resume} {target}")
+        if runtime == "claude":
+            cmd = f"cd {shlex.quote(cwd)} && aim claude resume {target}"
+        elif runtime == "codex":
+            # resume-fresh clones the thread to a new id so moving accounts never links OpenAI accounts server-side;
+            # pass saved identity env plus model/effort (from reach or the rollout's turn_context) so nothing is lost.
+            t_model, t_effort = transcripts.codex_model_effort(transcripts.transcript("codex", target))
+            model, effort = reach.get("model") or t_model, reach.get("effort") or t_effort
+            extra = []
+            if model:
+                extra += ["-m", shlex.quote(str(model))]
+            if effort:
+                extra += ["-c", shlex.quote(f'model_reasoning_effort="{effort}"')]
+            tail = f" -- {' '.join(extra)}" if extra else ""
+            cmd = f"cd {shlex.quote(cwd)} && {_env_prefix(reach)} aim codex resume-fresh {shlex.quote(target)}{tail}"
+        else:
+            extra = []
+            if reach.get("model"):
+                extra += ["--model", shlex.quote(str(reach["model"]))]
+            if reach.get("effort"):
+                extra += ["--effort", shlex.quote(str(reach["effort"]))]
+            flags = (" " + " ".join(extra)) if extra else ""
+            cmd = (f"cd {shlex.quote(cwd)} && {_env_prefix(reach)} agy --conversation {shlex.quote(target)}"
+                   f"{flags} --dangerously-skip-permissions")
+        h.run_cmd(pane, cmd)
         start = clock()
         real = None
         while clock() - start < READY_SECONDS:
@@ -315,15 +384,33 @@ def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sl
                 real = _claude_sid_in_pane(h, pane)
                 if real and "bypass permissions" in screen:
                     break
-            else:
+            elif runtime == "codex":
                 # Herdr often can't classify Codex; its idle input screen is the reliable sign.
                 screen = h.read(pane, 15)
+                if "Trust this folder?" in screen and ("Trust and continue" in screen or "enter continue" in screen):
+                    h.call("pane", "send-keys", pane, "Enter")
+                    continue
                 if _codex_in_pane(h, pane) and ("for shortcuts" in screen or "context left" in screen):
-                    real = target
+                    real = _codex_sid_in_pane(h, pane)
+                    if real:
+                        break
+            else:
+                screen = h.read(pane, 15)
+                if "Do you trust the contents of this project?" in screen or (TRUST_PROMPT in screen and "Confirm" in screen):
+                    h.call("pane", "send-keys", pane, "Enter")
+                    continue
+                real = _agy_sid_in_pane(h, pane)
+                if real and (h.agent_status(pane) in ("idle", "done") or "? for shortcuts" in screen):
                     break
         else:
+            timed_sid = real or session_in_pane(h, pane, runtime)
+            retry_reach = {"herdr_session": h.session, "herdr_pane": pane, "herdr_tab": tab, "herdr_workspace": workspace}
+            if timed_sid and store.same_family(target, timed_sid):
+                retry_reach["session_id"] = timed_sid
+                if timed_sid != target:
+                    moves.append([target, timed_sid])
             return Result("retry", "the resumed session didn't come up: " + h.read(pane, 8)[-300:], moves=moves,
-                          reach={"herdr_session": h.session, "herdr_pane": pane, "herdr_tab": tab, "herdr_workspace": workspace})
+                          reach=retry_reach)
         if real and not store.same_family(target, real):
             h.close(pane)
             return Result("waiting", "the resumed session belongs to a different fork family")
@@ -339,7 +426,7 @@ def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sl
         return Result("sent", "typed in", reach=updates, moves=moves)
     start = clock()
     while clock() - start < CONFIRM_SECONDS:
-        if transcripts.typed(transcripts.transcript(runtime, sid), ref):
+        if _seen(transcripts.transcript(runtime, sid), ref, needle):
             return Result("delivered", "seen in the transcript", reach=updates, moves=moves)
         sleep(3)
     return Result("retry", "sent, but not seen in the transcript yet", reach=updates, moves=moves)

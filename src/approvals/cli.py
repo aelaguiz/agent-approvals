@@ -197,7 +197,7 @@ def _submit_one(card, a, set_pos, thread=None):
     if not who["session_id"]:
         # A card with no asker can never have its answer typed back: every reply would wait in an inbox. The way
         # this happened was posting over ssh from another machine, whose shell carries no session.
-        _die("This shell isn't a Claude or Codex session, so the answer to this card could never reach you. "
+        _die("This shell isn't a Claude, Codex or Antigravity session, so the answer to this card could never reach you. "
              "Run `approvals submit` in your own session, on the machine you run on; every machine has the command.")
     hours = card.get("deadline_hours") or cards.TYPES[card["type"]]["hours"]
     deadline = store.now() + (timedelta(minutes=a.deadline_minutes) if a.deadline_minutes else timedelta(hours=hours))
@@ -544,7 +544,7 @@ def cmd_review(a):
         _die(f"Not a card type: {', '.join(unknown)}. The types are {', '.join(cards.TYPES)}.")
     who = reach.capture(a.agent)
     if not who["session_id"]:
-        _die("This shell isn't a Claude or Codex session, so nothing could reach you. Run `approvals review` in your own session.")
+        _die("This shell isn't a Claude, Codex or Antigravity session, so nothing could reach you. Run `approvals review` in your own session.")
     store.set_reviewer({"types": types, "reach": who, "test": config.is_test_run(), "since": store.iso()})
     print(f"This session now reviews every {', '.join(types)} card, as {who['agent']}: each new one, each new version and "
           f"each approver's answers reach you here as an [Approvals] message. "
@@ -602,7 +602,7 @@ def cmd_deputy(a):
         return
     who = reach.capture(a.agent)
     if not who["session_id"]:
-        _die("This shell isn't a Claude or Codex session, so nothing could reach you. Run `approvals deputy` in your own session.")
+        _die("This shell isn't a Claude, Codex or Antigravity session, so nothing could reach you. Run `approvals deputy` in your own session.")
     live = bool(d and d.get("live"))   # a restored session picks up where the old one stood
     store.set_deputy({"reach": who, "live": live, "test": config.is_test_run(), "since": store.iso(),
                       "live_since": d.get("live_since") if live else None})

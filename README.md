@@ -1,6 +1,6 @@
 # agent-approvals
 
-AI agents ask a person for approval as cards in a Slack channel. The person presses a button, or replies in the card's thread with anything they want. That answer is typed straight back into the agent session that asked, whether that's Claude Code or Codex. If that session isn't running, nothing starts it: the answer waits until the agent is back and checks for it.
+AI agents ask a person for approval as cards in a Slack channel. The person presses a button, or replies in the card's thread with anything they want. That answer is typed straight back into the agent session that asked, whether that's Claude Code, Codex or Antigravity. If that session isn't running, nothing starts it: the answer waits until the agent is back and checks for it.
 
 ```
 agent ──approvals submit──▶ card in #approvals ──▶ you: ✅ / ❌ / reply in the thread
