@@ -9,7 +9,9 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from . import config
+from PIL import Image
+
+from . import config, journey
 
 TYPES = {
     "creative":       {"emoji": "🎨", "yes": "Run it",        "no": "Don't run",  "hours": 48, "needs": ["media"]},
@@ -130,7 +132,7 @@ def validate(card, revision=False):
         errs.append("facts must be a list of [label, value] pairs, at least one")
     quotes = card.get("quotes") or []
     for need in TYPES[t]["needs"]:
-        if need == "media" and not (card.get("image") or card.get("video") or card.get("gallery")):
+        if need == "media" and not any(card.get(k) for k in ("image", "video", "gallery", "journey")):
             errs.append("needs " + NEED_TEXT[need])
         if need == "quotes2" and len(quotes) < 2:
             errs.append("needs " + NEED_TEXT[need])
@@ -177,6 +179,9 @@ def _validate_shapes(card):
     for key in ("yes_label", "no_label", "change_label"):
         if card.get(key) and len(card[key]) > BUTTON_MAX:
             errs.append(f"{key} is a button: keep it under {BUTTON_MAX} characters")
+
+    if "journey" in card:
+        errs += _validate_journey(card)
 
     g = card.get("gallery")
     if g is not None:
@@ -264,6 +269,99 @@ def _validate_shapes(card):
     return errs
 
 
+def _validate_journey(card):
+    entries = journey.entries(card)
+    if not isinstance(entries, list) or not 1 <= len(entries) <= 4:
+        return ["Write journey as one entry or a list of 1 to 4 entries, one for each kind of user."]
+    card["journey"] = entries
+    errs = []
+    for e, entry in enumerate(entries, 1):
+        where = f"journey {e}"
+        if not isinstance(entry, dict):
+            errs.append(f"{where}: Write an entry with who and either steps or places.")
+            continue
+        if not _text(entry.get("who"), 200):
+            errs.append(f"{where}: Write who takes this path in up to 200 characters.")
+        for side in journey.SIDES:
+            if side in entry and not _text(entry[side], 40):
+                errs.append(f"{where}: Give {side} a path name of up to 40 characters or leave it out.")
+        shapes = [key for key in ("steps", "places") if key in entry]
+        if len(shapes) != 1:
+            errs.append(f"{where}: Write either steps for an ordered path or places for side-by-side comparisons.")
+            continue
+        shape = shapes[0]
+        steps = shape == "steps"
+        limit = 8 if steps else 6
+        rows = entry[shape]
+        if not isinstance(rows, list) or not 1 <= len(rows) <= limit:
+            errs.append(f"{where}: Write a list of 1 to {limit} {shape}.")
+            continue
+        shows_today, shows_change = False, False
+        for i, row in enumerate(rows, 1):
+            at = f"{where} {'step' if steps else 'place'} {i}"
+            if not isinstance(row, dict):
+                errs.append(f"{at}: Write an object with today's path and what happens after the change.")
+                continue
+            if steps:
+                if not any(side in row for side in journey.SIDES):
+                    errs.append(f"{at}: Write today, after, or both.")
+                if i < len(rows) or "then" in row:
+                    tap = row.get("then")
+                    if not (_text(tap, 80) or (isinstance(tap, dict) and set(tap) == set(journey.SIDES)
+                                              and all(_text(v, 80) for v in tap.values()))):
+                        errs.append(f"{at}: Write then as what the user does next in up to 80 characters, "
+                                    "or give today and after their own text of up to 80 characters each.")
+            else:
+                if not _text(row.get("name"), 60):
+                    errs.append(f"{at}: Write a place name of up to 60 characters.")
+                if "then" in row:
+                    errs.append(f"{at}: Leave then out of a place, which compares one screen on each path.")
+            for side in journey.SIDES:
+                if steps and side not in row:
+                    continue
+                cell = row.get(side)
+                if steps and side == "after" and cell == "same":
+                    today = row.get("today")
+                    if not isinstance(today, dict) or "image" not in today or "ends" in today:
+                        errs.append(f'{at}: Give today a screen before writing "same" for after.')
+                elif steps and isinstance(cell, dict) and "ends" in cell and "image" not in cell:
+                    if not _text(cell["ends"], 200):
+                        errs.append(f"{at} {side}: Write where the path ends in up to 200 characters.")
+                    shows_today |= side == "today"
+                else:
+                    errs += _validate_journey_screen(cell, f"{at} {side}")
+                    if isinstance(cell, dict) and "image" in cell and "ends" not in cell:
+                        shows_today |= side == "today"
+                        shows_change |= side == "after"
+        if not shows_today:
+            errs.append(f'{where}: Show what happens today with a screen or write {{"ends": "…"}} '
+                        "when the path doesn't exist today.")
+        if not shows_change:
+            errs.append(f"{where}: Show the change with at least one after screen with its own image.")
+    return errs
+
+
+def _validate_journey_screen(screen, where):
+    if not isinstance(screen, dict) or "ends" in screen:
+        return [f"{where}: Write a screen with an image, label and source."]
+    errs = []
+    path = screen.get("image")
+    try:
+        if not _text(path) or not _file(path):
+            raise ValueError
+        with Image.open(Path(path).expanduser()) as img:
+            img.verify()
+    except (OSError, ValueError, SyntaxError, Image.DecompressionBombError):
+        errs.append(f"{where}: Give image the path of a picture file that exists.")
+    if not _text(screen.get("label"), LABEL_MAX):
+        errs.append(f"{where}: Write a label saying what the user sees in up to {LABEL_MAX} characters.")
+    if not _text(screen.get("source"), 100):
+        errs.append(f"{where}: Write a source saying real or mock, which phone and build, in up to 100 characters.")
+    if "new" in screen and screen["new"] is not True:
+        errs.append(f"{where}: Write true for new on a new or changed screen, or leave it out.")
+    return errs
+
+
 def _validate_options(options, pick, where, pictures):
     errs = []
     if not isinstance(options, list) or not 2 <= len(options) <= OPTIONS_MAX:
@@ -294,8 +392,13 @@ def _validate_options(options, pick, where, pictures):
 
 
 def _stub(card):
+    files = {k: "F0" for k, _, _ in pictures(card)}
+    version = {"n": 1, "card": card, "files": files}
+    if entries := journey.entries(card):
+        files.update((f"journey:{e}:map", "F0") for e in range(len(entries)))
+        version["journey_url"] = "https://example.com/journey"
     return {"id": "AP-0000", "agent": "agent", "deadline": datetime.now(ZoneInfo("UTC")).isoformat(), "status": "pending",
-            "versions": [{"n": 1, "card": card, "files": {k: "F0" for k, _, _ in pictures(card)}}], "answers": {}}
+            "versions": [version], "answers": {}}
 
 
 def evidence_items(evidence):
@@ -889,6 +992,7 @@ def _body(rec, n, mode, compact=False):
         blocks.append(dict(picture(v["image_file_id"], card.get("image_alt") or card["title"]), title=plain(label, 1900)))
     if v.get("video_url"):
         blocks.append(md(f"▶️ *<{v['video_url']}|Play the video>*" + (f" · {esc(card['video_note'])}" if card.get("video_note") else "")))
+    blocks += _journey(rec, n)
     blocks += _gallery(rec, n, stacked=mode == "view")
     if card.get("options") and any(o.get("image") for o in card["options"]):
         blocks += _option_cards(rec, n, mode)
@@ -915,6 +1019,20 @@ def _body(rec, n, mode, compact=False):
     if opts and not any(o.get("image") for o in opts) and (mode == "view" or any(o.get("title") for o in opts)):
         blocks.append(option_lines(opts, card.get("pick")))
     return blocks
+
+
+def _journey(rec, n):
+    """One map per user, followed by a link to the full-size journey."""
+    v = rec["versions"][n - 1]
+    files = v.get("files") or {}
+    out = []
+    for e, entry in enumerate(journey.entries(v["card"])):
+        if ref := files.get(f"journey:{e}:map"):
+            who = entry["who"]
+            out.append(dict(picture(ref, who), title=plain(who, 1900)))
+    if url := v.get("journey_url"):
+        out.append({"type": "actions", "block_id": "journey", "elements": [button("See it big", url=url, action_id="journey_page")]})
+    return out
 
 
 def _gallery(rec, n, stacked=False):

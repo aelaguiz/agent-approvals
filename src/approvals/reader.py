@@ -7,6 +7,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from . import journey
+
 def lines(v, pad="  "):
     if isinstance(v, list): return "\n".join(pad + "- " + str(x) for x in v)
     return str(v)
@@ -47,6 +49,22 @@ def card_text(c):
             else:
                 section_lines.append(line)
         L.append(f"SECTION {s.get('title')}:\n" + lines(section_lines))
+    for entry in journey.entries(c):
+        L.append(f"JOURNEY ({entry['who']})")
+        for i, row in enumerate(entry.get("steps") or entry["places"], 1):
+            L.append(f"  {row['name']}" if "places" in entry else f"  Step {i}")
+            for side in journey.SIDES:
+                if side not in row:
+                    continue
+                cell = row[side]
+                words = "same" if cell == "same" else cell["ends"] if "ends" in cell else f"{cell['label']} · {cell['source']}"
+                L.append(f"    {entry.get(side, journey.PATH_NAMES[side])}: {words}")
+            if tap := row.get("then"):
+                if isinstance(tap, dict):
+                    for side in journey.SIDES:
+                        L.append(f"    Then ({entry.get(side, journey.PATH_NAMES[side])}): {tap[side]}")
+                else:
+                    L.append(f"    Then: {tap}")
     for g in c.get("gallery") or []: L.append(f"PICTURE: {g.get('label') or g.get('caption') or ''}")
     if c.get("image"): L.append("PICTURE (one image)")
     if c.get("video"): L.append("VIDEO (plays on the card)")

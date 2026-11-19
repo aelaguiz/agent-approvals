@@ -15,6 +15,7 @@
   "timezone": "America/Chicago",
   "default_herdr_session": "default",
   "video_share_command": null,
+  "page_share_command": null,
   "test_approver": null,
   "alarm": null,
   "hub": null,

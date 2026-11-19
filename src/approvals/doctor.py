@@ -69,6 +69,8 @@ def run():
     results.append(_check("herdr", lambda: shutil.which("herdr") or (_ for _ in ()).throw(RuntimeError("not on PATH; answers can't be typed into sessions"))))
     if s.get("video_share_command"):
         results.append(_check("video share command", lambda: " ".join(s["video_share_command"])))
+    if s.get("page_share_command"):
+        results.append(_check("page share command", lambda: " ".join(s["page_share_command"])))
     if s.get("test_approver"):
         print(f"note  test_approver is set ({s['test_approver']}); remove it outside test runs")
     return 0 if all(results) else 1

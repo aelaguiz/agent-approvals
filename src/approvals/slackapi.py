@@ -245,7 +245,15 @@ def bot_id():
 
 def share_video(path, title, description):
     """Publish a video with the configured share command and return the page that plays it, or None if none is set."""
-    cmd = config.settings().get("video_share_command")
+    return _share(config.settings().get("video_share_command"), path, title, description)
+
+
+def share_page(folder, title, description):
+    """Publish the journey folder with the configured command and return its URL, or None if none is set."""
+    return _share(config.settings().get("page_share_command"), folder, title, description)
+
+
+def _share(cmd, path, title, description):
     if not cmd:
         return None
     out = subprocess.run([*(os.path.expanduser(c) for c in cmd), "--title", title[:90], "--description", description[:200], str(path)],

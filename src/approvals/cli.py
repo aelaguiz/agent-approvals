@@ -3,14 +3,16 @@ import argparse
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import basecamp, cards, config, core, pictures, reach, reader, slackapi, store, transcripts
+from . import basecamp, cards, config, core, journey, pictures, reach, reader, slackapi, store, transcripts
 
 
 def _load_card(path):
@@ -91,23 +93,40 @@ def _prepare_media(card, version):
         version["videos"] = videos
 
 
+def _publish_journey(rec, n):
+    """Publish the version's page once it can link back to the Slack card."""
+    card = rec["versions"][n - 1]["card"]
+    if not card.get("journey") or not config.settings().get("page_share_command"):
+        return
+    with tempfile.TemporaryDirectory(prefix="approvals-") as folder:
+        journey.write_page(folder, rec, n)
+        url = slackapi.share_page(folder, card["title"], card["why"])
+    if url:
+        store.update(rec["id"], lambda r: r["versions"][n - 1].__setitem__("journey_url", url))
+
+
 def _share_pictures(rid, n):
     """The card's pictures go in its thread, one post, full size; Slack then shows them in the card too, which is
     redrawn with them. A carousel picture is fitted to the card's landscape frame (zoomed onto what changed when
     it's marked) and also posted whole, at its own resolution, for its Full size button."""
     rec = store.load(rid)
     card = rec["versions"][n - 1]["card"]
-    todo = []
-    for key, path, mark in cards.pictures(card):
-        if cards.in_carousel(card, key):
-            todo.append((key + ":card", pictures.card_frame(path, mark)))
+    with ExitStack() as maps:
+        todo = []
+        entries = journey.entries(card)
+        for e, entry in enumerate(entries):
+            path = journey.draw_map(entry)
+            maps.callback(shutil.rmtree, path.parent)
+            todo.append((f"journey:{e}:map", path))
+        todo.extend((key, path) for path, key in journey.screen_files(entries).items())
+        for key, path, mark in cards.pictures(card):
+            if cards.in_carousel(card, key):
+                todo.append((key + ":card", pictures.card_frame(path, mark)))
             todo.append((key, pictures.outlined(path, mark) if mark else path))
-        else:
-            todo.append((key, pictures.outlined(path, mark) if mark else path))
-    if not todo:
-        return
-    what = "The pictures on this card" if n == 1 else f"The pictures on {cards.version_label(n)}"
-    refs = slackapi.upload_pictures_to_thread([(path, card["title"]) for _, path in todo], rec["thread_ts"], f"🖼 {what}, full size.", **config.channel_args(rec))
+        if not todo:
+            return
+        what = "The pictures on this card" if n == 1 else f"The pictures on {cards.version_label(n)}"
+        refs = slackapi.upload_pictures_to_thread([(path, card["title"]) for _, path in todo], rec["thread_ts"], f"🖼 {what}, full size.", **config.channel_args(rec))
     files = {key: ref for (key, _), ref in zip(todo, refs)}
     store.update(rid, lambda r: r["versions"][n - 1].__setitem__("files", files))
 
@@ -242,7 +261,8 @@ def _submit_one(card, a, set_pos, thread=None):
             store.update(rec["id"], lambda r: r["thread"].__setitem__("small_ts", small_ts))
         except Exception as e:
             print(f"Could not post in the linked Slack conversation ({e}); link the approval card there yourself.", file=sys.stderr)
-    if cards.pictures(card):
+    _publish_journey(rec, 1)
+    if card.get("journey") or cards.pictures(card):
         _share_pictures(rec["id"], 1)
         core.refresh_and_clear(rec["id"])
     _video_in_thread(rec["id"], 1)
@@ -319,6 +339,7 @@ def cmd_revise(a):
         return r
     rec = store.update(a.id, add)
     # The new version goes at the bottom of the thread, where he reads; an earlier copy there shrinks to a line.
+    _publish_journey(rec, n)
     _share_pictures(a.id, n)
     rec = store.load(a.id)
     ts_new = slackapi.post(cards.card_blocks(rec, n, core.mode_for(rec)), cards.card_text(rec, n), thread_ts=rec["thread_ts"], **config.channel_args(rec))
