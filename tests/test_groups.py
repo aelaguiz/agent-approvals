@@ -118,6 +118,7 @@ def test_group_page_reuses_decisions_statuses_and_each_versions_images(tmp_path)
     ("  Library search (two paths): screens", "Library search"),
     ("A" * 40, "A" * 40),
     ("B" * 41, "B" * 39 + "…"),
+    ("(two paths) Library search", "(two paths) Library search"),
 ])
 def test_short_name(name, short):
     assert cards.short_name(name) == short
@@ -305,12 +306,21 @@ def test_read_names_only_when_no_other_card_matches(monkeypatch, tmp_path, capsy
     result = capsys.readouterr()
     lines = result.err.splitlines()
     assert result.out == "Read complete\n"
-    assert "Part of line word for word" in lines[0] and len(lines) == 31
+    assert "Part of line, word for word" in lines[0] and len(lines) == 31
     assert lines[1] == "Library project 31 · 1 card · Tester · Library change 31"
 
     path.write_text(json.dumps({"title": "New layout", "part_of": "library   PROJECT 1"}))
     cli.main(["read", str(path)])
     assert capsys.readouterr().err == ""
+
+    # A hub that can't list the names leaves the read as it was.
+    def no_names(*args, **kw):
+        raise store.StoreError("the hub runs a version without names")
+    monkeypatch.setattr(store, "names", no_names)
+    path.write_text(json.dumps({"title": "New layout", "part_of": None}))
+    cli.main(["read", str(path)])
+    result = capsys.readouterr()
+    assert result.out == "Read complete\n" and result.err == ""
 
 
 def test_submit_names_excludes_the_new_card_and_prints_the_move_command(monkeypatch, tmp_path, capsys, slack):

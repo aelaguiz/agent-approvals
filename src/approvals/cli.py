@@ -31,14 +31,21 @@ def _name_line(summary):
     return f'{summary["name"]} · {count} {"card" if count == 1 else "cards"} · {core.one_line(agents)} · {core.one_line(summary["title"])}'
 
 
-def _suggest_names(recent, name, rid=None):
-    if any(cards.name_key(item["name"]) == cards.name_key(name) for item in recent):
+def _suggest_names(name, rid=None, **where):
+    """When no other recent card carries this card's Part of line, show the lines in use. Only a hint: a hub that
+    can't list them never fails a read, or a submit that has already posted."""
+    try:
+        recent = store.names(3, exclude=rid, **where)
+    except store.StoreError:
         return
-    print("A card from the same ask or work as cards already sent takes their Part of line word for word.", file=sys.stderr)
+    if not recent or any(cards.name_key(item["name"]) == cards.name_key(name) for item in recent):
+        return
+    print("No other card from the last 3 days carries this card's Part of line. A card that comes out of the same ask "
+          "or work as cards already sent takes their Part of line, word for word. In use, newest first:", file=sys.stderr)
     for item in recent[:30]:
         print(_name_line(item), file=sys.stderr)
     if rid:
-        print(f'approvals status {rid} --part-of "<name>"', file=sys.stderr)
+        print(f'To move this card: approvals status {rid} --part-of "<name>"', file=sys.stderr)
 
 
 def cmd_read(a):
@@ -92,8 +99,7 @@ def cmd_read(a):
         raise SystemExit(1)
     channel = settings.get("channel")
     for card in loaded:
-        recent = store.names(3, channel=channel, test=bool(card.get("test") or config.is_test_run()))
-        _suggest_names(recent, card.get("part_of"))
+        _suggest_names(card.get("part_of"), channel=channel, test=bool(card.get("test") or config.is_test_run()))
 
 
 def _prepare_media(card, version):
@@ -232,8 +238,7 @@ def cmd_submit(a):
         for i, card in enumerate(loaded, 1)
     ]
     for rec in posted:
-        recent = store.names(3, channel=channel, test=rec["test"], exclude=rec["id"])
-        _suggest_names(recent, cards.part_of(rec, rec["versions"][-1]["card"]), rec["id"])
+        _suggest_names(cards.part_of(rec, rec["versions"][-1]["card"]), rec["id"], channel=channel, test=rec["test"])
 
 
 def _submit_one(card, a, set_pos, thread=None):

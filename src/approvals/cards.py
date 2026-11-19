@@ -466,8 +466,7 @@ def button(text, value=None, style=None, url=None, action_id=None):
 
 
 def short_name(name):
-    name = re.split(r"[:(]", name, maxsplit=1)[0].strip()
-    return plain(name, 40)["text"]
+    return plain(re.split(r"[:(]", name, maxsplit=1)[0].strip() or name, 40)["text"]
 
 
 def group_button(rec, n):
