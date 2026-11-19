@@ -17,6 +17,7 @@
   "default_herdr_session": "default",
   "video_share_command": null,
   "page_share_command": null,
+  "page_slug_flag": null,
   "test_approver": null,
   "alarm": null,
   "hub": null,

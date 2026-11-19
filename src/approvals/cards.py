@@ -465,6 +465,16 @@ def button(text, value=None, style=None, url=None, action_id=None):
     return b
 
 
+def short_name(name):
+    name = re.split(r"[:(]", name, maxsplit=1)[0].strip()
+    return plain(name, 40)["text"]
+
+
+def group_button(rec, n):
+    if n == len(rec["versions"]) and (group := rec.get("group")):
+        return button(f"All {group['count']} in {short_name(group['name'])}", url=group["url"], action_id="group_page")
+
+
 def quoted(text):
     return "\n".join("> " + esc(line) if line.strip() else ">" for line in str(text).splitlines())
 
@@ -678,11 +688,22 @@ def on_you(rec):
 def status_lines(rec, part=None):
     """The progress lines shown for the card, or for one row: what happened, then what comes next. A row's lines
     sit under its answer, so they carry no check of their own."""
-    lines = [("" if part else "✅ ") + esc(e["text"]) for e in _scope(rec, part) if e["kind"] == "done"]
+    lines = [status_line(e) for e in _scope(rec, part) if e["kind"] == "done"]
     nxt = pending_lines(rec, part).get("next")
     if nxt:
-        lines.append(f"⏳ {esc(nxt['text'])}")
+        lines.append(status_line(nxt))
     return lines
+
+
+def status_line(entry, *, slack=True):
+    kind, text = entry["kind"], entry["text"]
+    if kind == "their_answer":
+        return f"*Their answer*\n{quoted(text)}" if slack else f"Their answer: {text}"
+    label = {"waiting": "Waiting on:", "on_you": "Waiting on you:"}.get(kind)
+    if label:
+        return f"⏳ *{label}* {esc(text)}" if slack else f"⏳ {label} {text}"
+    prefix = "⏳ " if kind == "next" else "" if entry.get("part") else "✅ "
+    return prefix + (esc(text) if slack else text)
 
 
 def their_answer(rec):
@@ -722,7 +743,7 @@ def card_blocks(rec, n, mode="open"):
     blocks = _card_blocks(rec, n, mode, origin=False)
     if len(blocks) > BLOCKS_MAX:
         blocks = _card_blocks(rec, n, mode, compact=True, origin=False)
-    if len(blocks) > BLOCKS_MAX and mode in ("open", "handed") and also_on(rec, n):
+    if len(blocks) > BLOCKS_MAX and (group_button(rec, n) or (mode in ("open", "handed") and also_on(rec, n))):
         blocks = [b for b in blocks if b["type"] != "divider"]
     return blocks
 
@@ -770,7 +791,7 @@ def _card_blocks(rec, n, mode, compact=False, origin=True, deputy=True):
     open_ = mode == "open"
     waits = waiting_on(rec)
     if waits and mode != "view":
-        blocks.append(md(f"⏳ *Waiting on:* {esc(waits['text'])}"))
+        blocks.append(md(status_line(waits)))
     blocks += _body(rec, n, mode, compact)
     if card.get("parts"):
         blocks += _rows(rec, n, mode)
@@ -782,9 +803,11 @@ def _card_blocks(rec, n, mode, compact=False, origin=True, deputy=True):
         if blocks[-1].get("type") != "divider":   # rows end on their own divider
             blocks.append({"type": "divider"})
         blocks.append(md(f"*Your yes covers:* {esc(card['approves'])}\n*It doesn't cover:* {esc(card['does_not_approve'])}"))
-        if card.get("links"):
-            blocks.append({"type": "actions", "block_id": "links", "elements": [
-                button(label, url=url, action_id=f"link{i}") for i, (label, url) in enumerate(card["links"])]})
+    links = [button(label, url=url, action_id=f"link{i}") for i, (label, url) in enumerate(card.get("links") or [])] if mode != "final" else []
+    if mode != "view" and (group := group_button(rec, n)):
+        links.append(group)
+    if links:
+        blocks.append({"type": "actions", "block_id": "links", "elements": links})
     if open_:
         row = _buttons(rec, n)
         if deputy and len(row) < ACTIONS_MAX and (menu := hand_menu(rec, n)):
@@ -813,6 +836,14 @@ def has_frame(rec, card):
     return "frame" in rec or "part_of" in card
 
 
+def part_of(rec, card):
+    return rec.get("frame", card.get("part_of"))
+
+
+def name_key(name):
+    return " ".join((name or "").split()).casefold()
+
+
 def set_pos(rec):
     """ "1 of 3" for a card posted as one of a set, else None."""
     s = rec.get("set")
@@ -825,12 +856,12 @@ def frame_line(rec, card):
     pos = set_pos(rec)
     if not has_frame(rec, card) and not pos and not rec.get("basecamp"):
         return None
-    part_of = (rec["frame"] if "frame" in rec else card["part_of"]) if has_frame(rec, card) else None
+    name = part_of(rec, card)
     bc = (rec.get("basecamp") or [{}])[0].get("url")
     if bc:   # the work's picture is in Basecamp: one tap from his decision to it
-        head = [f"Part of: <{bc}|{esc(part_of or 'the work in Basecamp')}>"]
+        head = [f"Part of: <{bc}|{esc(name or 'the work in Basecamp')}>"]
     else:
-        head = [f"Part of: {esc(part_of)}"] if part_of else [] if pos else ["Stands alone"]
+        head = [f"Part of: {esc(name)}"] if name else [] if pos else ["Stands alone"]
     return ctx(" · ".join(head + ([pos] if pos else []) + [esc(rec["agent"])]))
 
 
@@ -1267,6 +1298,8 @@ def _final_blocks(rec, n):
     if card.get("offer") and _verdict(rec) == "approved":
         blocks += _offer_blocks(rec, n, card)
     see = [button("See the card", f"{rec['id']}|{n}|see")]
+    if group := group_button(rec, n):
+        see.append(group)
     if auto_approved(rec):
         see += take_back_row(rec, n)["elements"]
     blocks.append({"type": "actions", "block_id": f"ap|{rec['id']}|{n}|see", "elements": see})
@@ -1274,33 +1307,21 @@ def _final_blocks(rec, n):
     return blocks
 
 
-def _timeline_blocks(rec, card):
+def decision_line(rec, card):
     d = rec.get("decision") or {}
     member = teammate(rec, d)
     who = esc(member or config.card_target(rec)["approver_name"])
-    blocks = []
-    # His words on it: what he sent with the yes, else his latest reply in the thread since (a change, a condition).
-    after = [e for e in rec.get("events") or [] if e["kind"] == "comment" and e.get("text") and e["at"] >= (d.get("at") or "")]
-    words = d.get("edited") or d.get("words") or (after[-1]["text"] if after else None)
-    if words:
-        word_author = member if d.get("edited") or d.get("words") else teammate(rec, after[-1])
-        label = f"*{esc(word_author)}'s words:*\n" if word_author else "*Your words:*\n" if d.get("edited") else ""
-        blocks.append(md(label + quoted(words)))
-    wait = on_you(rec)
-    if wait:
-        blocks.append(md(f"⏳ *Waiting on you:* {esc(wait['text'])}"))
-    lines = []
     where = f" · {esc(d['where'])}" if d.get("where") not in (None, "button", "pop-up", "rows") else ""
     at = when(datetime.fromisoformat(d["at"])) if d.get("at") else ""
     verdict = _verdict(rec)
     approval = next((c for c in reversed(rec.get("calls") or []) if c["call"] == "approve" and c["live"]), None)
     if rec.get("taken_back") and approval:
         tb = rec["taken_back"]
-        lines.append(f"↩️ Auto-approval taken back by {who}, {when(datetime.fromisoformat(tb['at']))}. "
-                     f"{esc(approval['by'])} had approved it: {esc(approval['why'])}")
+        return (f"↩️ Auto-approval taken back by {who}, {when(datetime.fromisoformat(tb['at']))}. "
+                f"{esc(approval['by'])} had approved it: {esc(approval['why'])}")
     elif auto_approved(rec):
         pick = f", taking the card's pick, {esc(d['choice'])}" if d.get("choice") else ""
-        lines.append(f"🤖 Approved for you by {esc(d['by'])}{pick}, {at}: {esc(d.get('why') or '')}")
+        return f"🤖 Approved for you by {esc(d['by'])}{pick}, {at}: {esc(d.get('why') or '')}"
     elif verdict == "approved" and not card.get("parts"):
         verb = "Picked" if d.get("choice") else "Approved"
         line = f"✅ {verb} by {who}, {at}{where}"
@@ -1309,29 +1330,45 @@ def _timeline_blocks(rec, card):
             line += f" · {len(d['items'])} of {len(card['items'])}" + (f" · held back: {esc(', '.join(held))}" if held else "")
         if d.get("edited"):
             line += f", with {who}'s edited words" if member else ", with your edited words"
-        lines.append(line)
+        return line
     elif verdict == "declined" and not card.get("parts"):
-        lines.append(f"❌ Declined by {who}, {at}{where}")
+        return f"❌ Declined by {who}, {at}{where}"
     elif verdict == "expired":
-        lines.append(f"⌛ No answer by {when(datetime.fromisoformat(rec['deadline']))}, so not approved. A reply in the thread reopens it.")
+        return f"⌛ No answer by {when(datetime.fromisoformat(rec['deadline']))}, so not approved. A reply in the thread reopens it."
     elif removed(rec):
-        lines.append(f"🗑️ Removed from your list by {who}, {when(datetime.fromisoformat(rec['withdrawn']['at']))}. Nothing still waiting on it was approved.")
+        return f"🗑️ Removed from your list by {who}, {when(datetime.fromisoformat(rec['withdrawn']['at']))}. Nothing still waiting on it was approved."
     elif verdict == "withdrawn" and rec.get("withdrawn"):
         w = rec["withdrawn"]
-        lines.append(f"↩️ Withdrawn by {esc(rec['agent'])}, {when(datetime.fromisoformat(w['at']))}: {esc(w['text'])}")
+        return f"↩️ Withdrawn by {esc(rec['agent'])}, {when(datetime.fromisoformat(w['at']))}: {esc(w['text'])}"
+
+
+def _timeline_blocks(rec, card):
+    d = rec.get("decision") or {}
+    blocks = []
+    # His words on it: what he sent with the yes, else his latest reply in the thread since (a change, a condition).
+    after = [e for e in rec.get("events") or [] if e["kind"] == "comment" and e.get("text") and e["at"] >= (d.get("at") or "")]
+    words = d.get("edited") or d.get("words") or (after[-1]["text"] if after else None)
+    if words:
+        word_author = teammate(rec, d if d.get("edited") or d.get("words") else after[-1])
+        label = f"*{esc(word_author)}'s words:*\n" if word_author else "*Your words:*\n" if d.get("edited") else ""
+        blocks.append(md(label + quoted(words)))
+    if wait := on_you(rec):
+        blocks.append(md(status_line(wait)))
+    line = decision_line(rec, card)
+    lines = [line] if line else []
     # What happened, in the order it happened (done included), then what comes next.
-    happened = [(e["at"], 1, f"✅ {esc(e['text'])}") for e in _scope(rec, None) if e["kind"] == "done"]
+    happened = [(e["at"], 1, status_line(e)) for e in _scope(rec, None) if e["kind"] == "done"]
     if rec.get("done"):
         happened.append((rec["done"]["at"], 0, f"✅ *Done, {when(datetime.fromisoformat(rec['done']['at']))}:* {esc(rec['done']['text'])}"))
     lines += [text for *_, text in sorted(happened, key=lambda x: x[:2])]
     nxt = pending_lines(rec).get("next")
     if nxt:
-        lines.append(f"⏳ {esc(nxt['text'])}")
+        lines.append(status_line(nxt))
     if lines:
         blocks.append(md("\n".join(lines)))
-    if card.get("from") and not card.get("items") and verdict == "approved":   # one message sent as him: their reply
+    if card.get("from") and not card.get("items") and _verdict(rec) == "approved":   # one message sent as him: their reply
         ans = their_answer(rec)
-        blocks.append(md("*Their answer*\n" + (quoted(ans["text"]) if ans else "_No reply yet. It shows here when they answer._")))
+        blocks.append(md(status_line(ans) if ans else "*Their answer*\n_No reply yet. It shows here when they answer._"))
     return blocks
 
 

@@ -71,7 +71,8 @@ make install MACHINE=laptop
 | `timezone` | For deadlines shown on cards, team quiet and work hours, and the morning list's 8 am. |
 | `default_herdr_session` | Where the listener opens panes when an agent's own Herdr session is gone. |
 | `video_share_command` | Optional. A command that publishes a video and prints `URL: <link>`. Without it, videos go into the card's thread, where Slack plays them. |
-| `page_share_command` | Optional. A command that publishes a journey's page folder and prints `URL: <link>`. The command takes `--title`, `--description` and the folder path. The card gets a **See it big** button when the command returns a URL. |
+| `page_share_command` | Optional. Publishes journey folders and related-card pages. The command takes `--title`, `--description` and the folder path and prints `URL: <link>`. Set it on the hub for related-card pages. |
+| `page_slug_flag` | Optional. The share command's flag for a stable page address, for example `"--slug"`. The hub passes the flag and the group's saved random slug. With the flag unset, card buttons follow the address returned on each rebuild. |
 | `test_approver` | For test runs only. A user whose `[test reply]` posts count, and only on TEST cards. |
 | `alarm` | Optional. `{"channel": "<Slack channel id>", "wake": ["<program>", "<arg>"]}` posts delivery alarms to that channel and runs the command with the alarm on standard input. A leading `~` in the program path is expanded. |
 | `id_prefix` | Optional. What request numbers start with; `AP` unless set. Each Slack workspace needs its own. |
@@ -155,6 +156,7 @@ approvals deputy --agent "Approver"            # this session hears every card a
 approvals deputy --live                        # auto-approval on: the deputy's approve is the approver's yes (--dry-run pauses it; --off ends the role; alone, says who holds it)
 approvals call AP-0001 --approve --why "Inside the test's cap, like every top-up he has approved"   # the deputy's call (or --his, to leave it for him)
 approvals history --agent "Pricing" --type price --days 30   # cards newest first, each with what happened on it in order; --calls: only cards the deputy called
+approvals names --days 3                       # recent Part of names, card counts, senders and newest titles
 approvals pictures AP-0001                     # saves the newest version's pictures into a folder and prints their paths
 ```
 
@@ -198,6 +200,14 @@ Use `journey` to show today and the proposed change, screen by screen. Give one 
 - Every entry shows what happens today and at least one screen with the change. Use `ends` when the path doesn't exist today.
 
 The journey counts as media for a card that needs it. It can sit above a `gallery` on the same card. Slack shows one map per entry, and the thread has the maps and full-size journey pictures. With `page_share_command` set, **See it big** opens the version's page. Click a screen for the full-screen viewer, or link straight to it with `#big=0` for the first entry or `#big=0:1` for its second step. Use the arrow keys, Space, B and Esc, or swipe on a phone.
+
+### See related approval cards together
+
+Use the same **Part of** line on cards from the same ask. The hub treats names as equal when they differ only in whitespace or case and keeps each target channel and TEST cards separate. When two or more cards have journeys published with picture references, **All 5 in Library search** opens their shared page. It shows cards waiting on the approver first, then up to 20 cards settled in the past seven days, newest first. A short list links to other cards still waiting without a published journey.
+
+The page shows each card's state, latest status and screens, with one viewer across all cards. A link like `#big=AP-0001:0:1` opens the second screen of that card's first entry. Use **Answer on the card** to return to Slack.
+
+`approvals names [--days N]` lists the names used in the past three days by default. When a draft or new card has no other recent card under its name, `approvals read` and `approvals submit` print the recent names for its channel and card type (real or TEST) on standard error. Use `approvals status AP-0001 --part-of "Library search"` to move an existing card.
 
 ## How it works
 

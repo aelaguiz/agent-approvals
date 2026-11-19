@@ -62,7 +62,7 @@ def _last(rec, *kinds):
     return datetime.fromisoformat(at[-1]) if at else None
 
 
-def _waiting_since(rec):
+def waiting_since(rec):
     """When it last came to the approver: the card, its newest version, or the agent's question."""
     return _last(rec, "revised", "question") or datetime.fromisoformat(rec["created"])
 
@@ -178,7 +178,7 @@ def _line(rec, day, detail=None, team=False):
     buttons = []
     if detail is None:
         asked = "❓ asked you a question · " if rec["status"] == "question" else ""
-        detail = (f"{cards.esc(rec['agent'])} · {asked}since {_at(_waiting_since(rec), day)}"
+        detail = (f"{cards.esc(rec['agent'])} · {asked}since {_at(waiting_since(rec), day)}"
                   f" · expires {_at(datetime.fromisoformat(rec['deadline']), day)}")
         buttons = [_buttons(rec)]
     return [cards.md(f"{emoji} {link}  *{_title(rec)}*"), cards.ctx(detail)] + buttons

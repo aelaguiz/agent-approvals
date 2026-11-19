@@ -68,6 +68,13 @@ class Client:
             raise store.StoreError(f"the approvals hub on {config.hub()} runs a version without history; update it first")
         return body["records"]
 
+    def names(self, days, *, channel=None, test=False, exclude=None):
+        q = {k: v for k, v in (("days", days), ("channel", channel), ("test", 1 if test else None), ("exclude", exclude)) if v is not None}
+        code, body = self.call("GET", "/names?" + urlencode(q))
+        if code != 200:
+            raise store.StoreError(f"the approvals hub on {config.hub()} runs a version without names; update it first")
+        return body["names"]
+
     def delete(self, rid):
         self.call("DELETE", f"/records/{rid}")
 
@@ -134,6 +141,10 @@ class Handler(BaseHTTPRequestHandler):
                 one = lambda k: q.get(k, [None])[0]
                 return self._send(200, {"records": store.local_history(one("agent"), one("type"), one("since"),
                                                                         int(one("limit") or 20), bool(one("calls")))})
+            if method == "GET" and parts == ["names"]:
+                one = lambda k: q.get(k, [None])[0]
+                return self._send(200, {"names": store.local_names(int(one("days") or 3), channel=one("channel"),
+                                                                  test=one("test") == "1", exclude=one("exclude"))})
             if parts == ["reviewer"]:
                 if method == "GET":
                     return self._send(200, {"reviewer": store.local_reviewer()})

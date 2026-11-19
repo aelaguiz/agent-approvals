@@ -206,6 +206,11 @@ def write_page(folder, rec, n):
         page_entries.append({"who": entry["who"], shape: rows, **{s: entry.get(s, PATH_NAMES[s]) for s in SIDES}})
     data = {"id": rec["id"], "version": n, "agent": rec["agent"], "title": card["title"], "why": card["why"],
             "link": rec.get("link"), "entries": page_entries, "images": list(names.values())}
+    write_html(folder, data)
+    return {"entries": data["entries"], "images": data["images"]}
+
+
+def write_html(folder, data):
     template = files("approvals").joinpath("journey.html").read_text(encoding="utf-8")
     payload = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c")
-    (folder / "index.html").write_text(template.replace("__JOURNEY_DATA__", payload), encoding="utf-8")
+    (Path(folder) / "index.html").write_text(template.replace("__JOURNEY_DATA__", payload), encoding="utf-8")

@@ -25,6 +25,22 @@ def _die(msg):
     sys.exit(1)
 
 
+def _name_line(summary):
+    count = summary["count"]
+    agents = ", ".join(summary["agents"])
+    return f'{summary["name"]} · {count} {"card" if count == 1 else "cards"} · {core.one_line(agents)} · {core.one_line(summary["title"])}'
+
+
+def _suggest_names(recent, name, rid=None):
+    if any(cards.name_key(item["name"]) == cards.name_key(name) for item in recent):
+        return
+    print("A card from the same ask or work as cards already sent takes their Part of line word for word.", file=sys.stderr)
+    for item in recent[:30]:
+        print(_name_line(item), file=sys.stderr)
+    if rid:
+        print(f'approvals status {rid} --part-of "<name>"', file=sys.stderr)
+
+
 def cmd_read(a):
     loaded = []
     for path in a.card:
@@ -74,6 +90,10 @@ def cmd_read(a):
                 print(f"{path}: reader {reason}" + (f"\n{tail}" if tail else ""), file=sys.stderr)
     if failed:
         raise SystemExit(1)
+    channel = settings.get("channel")
+    for card in loaded:
+        recent = store.names(3, channel=channel, test=bool(card.get("test") or config.is_test_run()))
+        _suggest_names(recent, card.get("part_of"))
 
 
 def _prepare_media(card, version):
@@ -99,10 +119,10 @@ def _publish_journey(rec, n):
     if not card.get("journey"):
         return
     with tempfile.TemporaryDirectory(prefix="approvals-") as folder:
-        journey.write_page(folder, rec, n)
+        data = journey.write_page(folder, rec, n)
         url = slackapi.share_page(folder, card["title"], card["why"])
     if url:
-        store.update(rec["id"], lambda r: r["versions"][n - 1].__setitem__("journey_url", url))
+        store.update(rec["id"], lambda r: r["versions"][n - 1].update(journey_url=url, journey_data=data))
 
 
 def _share_pictures(rid, n):
@@ -179,7 +199,7 @@ def _post_evidence(rec, evidence):
 def cmd_submit(a):
     """One card, or several as a set: each its own decision, posted one after another, each showing "1 of 3"."""
     try:
-        config.target(getattr(a, "to", None))
+        channel = config.target(getattr(a, "to", None))["channel"]
     except config.ConfigError as e:
         _die(str(e))
     if len(a.card) > 1 and "-" in a.card:
@@ -207,8 +227,13 @@ def cmd_submit(a):
                 slackapi.read_thread(thread)
             except Exception as e:
                 print(f"The linked thread won't show the card: {core.one_line(e)}; link the approval card there yourself.", file=sys.stderr)
-    for i, card in enumerate(loaded, 1):
+    posted = [
         _submit_one(card, a, {"n": i, "of": len(loaded)} if len(loaded) > 1 else None, threads[i - 1])
+        for i, card in enumerate(loaded, 1)
+    ]
+    for rec in posted:
+        recent = store.names(3, channel=channel, test=rec["test"], exclude=rec["id"])
+        _suggest_names(recent, cards.part_of(rec, rec["versions"][-1]["card"]), rec["id"])
 
 
 def _submit_one(card, a, set_pos, thread=None):
@@ -270,6 +295,7 @@ def _submit_one(card, a, set_pos, thread=None):
     basecamp.sync(rec["id"])
     print(rec["id"])
     print(link)
+    return rec
 
 
 def cmd_ask(a):
@@ -765,6 +791,11 @@ def cmd_history(a):
         print("No cards match.")
 
 
+def cmd_names(a):
+    for summary in store.names(a.days, test=config.is_test_run()):
+        print(_name_line(summary))
+
+
 def cmd_pictures(a):
     """Save the newest version's pictures, as the card uploaded them to Slack, so an agent session can look at them."""
     rec = store.load(a.id)
@@ -1053,6 +1084,10 @@ def main(argv=None):
     s.add_argument("--limit", type=int, default=20, help="at most this many cards (default 20)")
     s.add_argument("--calls", action="store_true", help="only cards the deputy called")
     s.set_defaults(fn=cmd_history)
+
+    s = sub.add_parser("names", help="recent Part of names, newest first")
+    s.add_argument("--days", type=int, default=3, help="only cards posted in the last N days (default 3)")
+    s.set_defaults(fn=cmd_names)
 
     s = sub.add_parser("pictures", help="save a card's pictures, as uploaded to Slack, into a folder and print their paths")
     s.add_argument("id")

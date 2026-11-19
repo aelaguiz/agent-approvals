@@ -160,9 +160,9 @@ def test_unreadable_thread_keeps_link_but_does_not_post_small(tmp_path, monkeypa
     cli.main(["submit", str(path)])
     rec = store.all_records()[0]
     assert len(posts) == 1 and rec["thread"]["root_ts"] == "1234567890.000001"
-    warning = capsys.readouterr().err
+    warning = capsys.readouterr().err.splitlines()[0]
     assert "small_ts" not in rec["thread"] and "link the approval card there yourself" in warning
-    assert "won't show the card" in warning and len(warning.splitlines()) == 1
+    assert "won't show the card" in warning and "private / conversation" in warning
 
 
 def test_submit_posts_small_to_readable_root_and_records_sender(tmp_path, monkeypatch):

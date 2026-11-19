@@ -248,15 +248,17 @@ def share_video(path, title, description):
     return _share(config.settings().get("video_share_command"), path, title, description)
 
 
-def share_page(folder, title, description):
-    """Publish the journey folder with the configured command and return its URL, or None if none is set."""
-    return _share(config.settings().get("page_share_command"), folder, title, description)
+def share_page(folder, title, description, slug=None):
+    """Publish a page folder and return its URL, or None if no command is set."""
+    s = config.settings()
+    flags = [s["page_slug_flag"], slug] if slug and s.get("page_slug_flag") else []
+    return _share(s.get("page_share_command"), folder, title, description, flags)
 
 
-def _share(cmd, path, title, description):
+def _share(cmd, path, title, description, flags=()):
     if not cmd:
         return None
-    out = subprocess.run([*(os.path.expanduser(c) for c in cmd), "--title", title[:90], "--description", description[:200], str(path)],
+    out = subprocess.run([*(os.path.expanduser(c) for c in cmd), "--title", title[:90], "--description", description[:200], *flags, str(path)],
                          capture_output=True, text=True, timeout=600)
     m = re.search(r"^URL: (\S+)", out.stdout, re.M)
     if out.returncode != 0 or not m:

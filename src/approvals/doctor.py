@@ -71,6 +71,8 @@ def run():
         results.append(_check("video share command", lambda: " ".join(s["video_share_command"])))
     if s.get("page_share_command"):
         results.append(_check("page share command", lambda: " ".join(s["page_share_command"])))
+    if s.get("page_slug_flag"):
+        results.append(_check("page slug flag", lambda: s["page_slug_flag"]))
     if s.get("test_approver"):
         print(f"note  test_approver is set ({s['test_approver']}); remove it outside test runs")
     return 0 if all(results) else 1

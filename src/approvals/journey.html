@@ -27,6 +27,27 @@
   button:focus-visible { outline: 2px solid var(--ink); }
   @media (max-width: 720px) { header, main { padding-inline: 12px; } }
 
+  .group-label, .group-section { font: 700 .78rem system-ui, sans-serif; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-2); }
+  .group-label { margin: 0 0 .35rem; }
+  .group-section { margin: 1.3rem 0 .4rem; padding-bottom: .35rem; border-bottom: 2px solid var(--border); }
+  .group-section.waiting { color: #ffd166; border-color: #8a6d1f; }
+  .group-index { max-width: 78rem; list-style: none; margin: .9rem 0; padding: 0; border: 1px solid var(--border); border-radius: 10px; background: #151a24; overflow: hidden; }
+  .group-index li { display: grid; grid-template-columns: minmax(12rem, 1fr) minmax(0, 2fr) minmax(0, 1.3fr); align-items: baseline; gap: .35rem 1rem; padding: .55rem .8rem; }
+  .group-index li + li { border-top: 1px solid var(--border); }
+  .group-index li.waiting { background: #211e16; }
+  .group-index li > a { color: var(--ink); font-weight: 600; }
+  .group-card { padding: .8rem 0 1rem; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; scroll-margin-top: 12px; }
+  .group-card h3 { margin: .35rem 0 .15rem; font-size: 1.12rem; line-height: 1.3; }
+  .group-card .meta { margin: 0 0 .35rem; }
+  .group-state { display: inline-block; width: fit-content; font-size: .8rem; font-weight: 650; color: var(--ink-2); padding: .08rem .5rem; border: 1px solid var(--border); border-radius: 999px; }
+  .group-state.waiting { color: #ffd166; border-color: #8a6d1f; }
+  .group-status { max-width: 70rem; margin: .3rem 0 .8rem; color: var(--ink-2); }
+  .group-status, .group-index li { overflow-wrap: anywhere; }
+  .group-other { margin: 1rem 0; }
+  @media (max-width: 900px) {
+    .group-index li { grid-template-columns: minmax(0, 1fr); }
+  }
+
   /* Journey strips. */
   .juser { font-size: .95rem; color: var(--ink-2); margin: .5rem 0 .6rem; }
   .jrows { overflow-x: auto; margin: 0 0 1.4rem; padding-bottom: .3rem; }
@@ -104,21 +125,23 @@
 </head>
 <body>
 <header>
+  <p id="part-of" class="group-label" hidden>Part of</p>
   <h1 id="title"></h1>
   <p id="meta" class="meta"></p>
   <p id="why"></p>
   <p id="slack" hidden><a>Answer on the card in Slack</a></p>
-  <p class="keys">Click any screen to open it big. <kbd>←</kbd> <kbd>→</kbd> move along the journey. <kbd>↑</kbd> shows today alone, <kbd>↓</kbd> the change alone, <kbd>B</kbd> both side by side. <kbd>Esc</kbd> closes. On a phone, swipe.</p>
+  <div id="group-index" hidden></div>
+  <p class="keys">Click any screen to open it big. <kbd>←</kbd> <kbd>→</kbd> <span id="arrow-keys">move along the journey</span>. <kbd>↑</kbd> shows today alone, <kbd>↓</kbd> the change alone, <kbd>B</kbd> both side by side. <kbd>Esc</kbd> closes. On a phone, swipe.</p>
 </header>
 <main id="journeys"></main>
 <script type="application/json" id="journey-data">__JOURNEY_DATA__</script>
 <script>
 (() => {
-  const card = JSON.parse(document.getElementById('journey-data').textContent);
+  const data = JSON.parse(document.getElementById('journey-data').textContent);
+  const grouped = 'cards' in data;
   const sides = ['today', 'after'];
   const list = [];
-  const thumb = screen => 't/' + card.images[screen.image];
-  const full = screen => 's/' + card.images[screen.image];
+  const imageUrl = (card, screen, size) => (card.image_base || '') + size + '/' + card.images[screen.image];
   const esc = text => String(text).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
 
   function el(tag, cls, html) {
@@ -139,7 +162,7 @@
     button.setAttribute('aria-label', 'Open big: ' + screen.label);
     button.onclick = () => openAt(idx, side);
     const img = el('img');
-    img.src = thumb(screen); img.alt = screen.label; img.loading = 'lazy';
+    img.src = imageUrl(list[idx].card, screen, 't'); img.alt = screen.label; img.loading = 'lazy';
     button.appendChild(img);
     fig.append(button, el('figcaption', '', '<span class="jcap">' + esc(screen.label) +
       '</span><span class="jtag">' + esc(screen.source) + '</span>'));
@@ -246,7 +269,8 @@
     draw();
     closeButton.focus();
     // Load every full-size screen now, so the arrow keys never wait on a picture.
-    card.images.forEach(name => { new Image().src = 's/' + name; });
+    const card = list[index].card;
+    card.images.forEach((_, image) => { new Image().src = imageUrl(card, {image}, 's'); });
   }
 
   function close() {
@@ -262,24 +286,25 @@
     draw();
   }
 
-  function pane(scr, name, cls) {
+  function pane(card, scr, name, cls) {
     const title = '<div class="jv-pane-name">' + esc(name) + '</div>';
     if (!scr || scr.ends) {
       return '<div class="jv-pane jv-none ' + cls + '">' + title +
         '<div class="jv-none-box">' + esc(scr?.ends || 'No screen on this path at this step.') + '</div></div>';
     }
-    return '<div class="jv-pane ' + cls + '">' + title + '<img src="' + full(scr) + '" alt="' + esc(scr.label) + '">' +
+    return '<div class="jv-pane ' + cls + '">' + title + '<img src="' + esc(imageUrl(card, scr, 's')) + '" alt="' + esc(scr.label) + '">' +
       '<div class="jv-pane-cap">' + esc(scr.label) + ' <span>' + esc(scr.source) + '</span></div></div>';
   }
 
   function draw() {
-    const {entry, row, i, total} = list[current];
+    const {card, entry, row, i, total} = list[current];
+    vTitle.textContent = card.id + ' · ' + card.title + (grouped ? ' · ' + card.state : '');
     vWho.textContent = entry.who;
     vCount.textContent = 'Screen ' + (current + 1) + ' of ' + list.length;
     if (mode === 'both' && row.after === 'same') {
-      vStage.innerHTML = pane(row.today, entry.today + ' and ' + entry.after.toLowerCase() + ': the same screen', 'is-both');
+      vStage.innerHTML = pane(card, row.today, entry.today + ' and ' + entry.after.toLowerCase() + ': the same screen', 'is-both');
     } else {
-      vStage.innerHTML = (mode === 'both' ? sides : [mode]).map(side => pane(cell(row, side), entry[side], 'is-' + side)).join('');
+      vStage.innerHTML = (mode === 'both' ? sides : [mode]).map(side => pane(card, cell(row, side), entry[side], 'is-' + side)).join('');
     }
     const today = tap(row, 'today'), after = tap(row, 'after');
     let move = '';
@@ -299,7 +324,7 @@
       const gap = j > 0 && list[j - 1].entry !== item.entry ? ' gap' : '';
       const images = sides.map(side => {
         const scr = cell(item.row, side);
-        return scr && !scr.ends ? '<img src="' + thumb(scr) + '" alt="">' : '<i></i>';
+        return scr && !scr.ends ? '<img src="' + esc(imageUrl(item.card, scr, 't')) + '" alt="">' : '<i></i>';
       });
       const button = el('button', 'jv-th' + (j === current ? ' on' : '') + gap, images.join(''));
       button.type = 'button';
@@ -335,29 +360,99 @@
     }
   });
 
-  document.title = card.title;
-  document.getElementById('title').textContent = card.title;
-  document.getElementById('meta').textContent = card.id + ' · v' + card.version + ' · Asked by ' + card.agent;
-  document.getElementById('why').textContent = card.why;
-  if (card.link) {
-    const slack = document.getElementById('slack');
-    slack.querySelector('a').href = card.link;
-    slack.hidden = false;
+  function renderJourneys(card, host) {
+    card.entries.forEach((entry, e) => {
+      const base = list.length;
+      const rows = entry.steps || entry.places;
+      rows.forEach((row, i) => list.push({card, entry, row, e, i, total: rows.length}));
+      host.append(el('p', 'juser', '<b>Who:</b> ' + esc(entry.who)),
+        entry.steps ? renderRows(entry, base) : renderPairs(entry, base));
+    });
   }
-  vTitle.textContent = card.id + ' · ' + card.title;
+
+  function link(url, text) {
+    const a = el('a', '', esc(text));
+    a.href = url;
+    return a;
+  }
+
+  function state(card) {
+    return el('span', 'group-state' + (card.waiting ? ' waiting' : ''), esc(card.state));
+  }
+
+  function renderGroup(host) {
+    const waiting = data.cards.filter(card => card.waiting);
+    const answered = data.cards.filter(card => !card.waiting);
+    document.getElementById('part-of').hidden = false;
+    document.getElementById('why').hidden = true;
+    document.getElementById('meta').innerHTML = data.cards.length + ' cards · <b>' +
+      waiting.length + ' waiting on you</b> · ' + answered.length + ' answered';
+    document.getElementById('arrow-keys').textContent = 'step through every screen of every card';
+
+    const index = el('ol', 'group-index');
+    data.cards.forEach(card => {
+      const row = el('li', card.waiting ? 'waiting' : '');
+      const detail = el('span', 'meta');
+      if (card.status) detail.textContent = card.status.text;
+      else if (card.waiting) detail.append(link(card.link, 'Answer on the card in Slack'));
+      row.append(state(card), link('#' + card.id, card.title), detail);
+      index.append(row);
+    });
+    const indexHost = document.getElementById('group-index');
+    indexHost.append(index);
+    indexHost.hidden = false;
+
+    for (const [label, section] of [['Waiting on you', waiting], ['Answered', answered]]) {
+      host.append(el('h2', 'group-section' + (section === waiting ? ' waiting' : ''), label + ' · ' + section.length));
+      section.forEach(card => {
+        const article = el('article', 'group-card');
+        article.id = card.id;
+        const meta = el('p', 'meta');
+        meta.append(link(card.link, card.id), ' · ' + card.agent + ' · version ' + card.version);
+        if (card.waiting) meta.append(' · ', link(card.link, 'Answer on the card'));
+        article.append(state(card), el('h3', '', esc(card.title)), meta);
+        if (card.status) {
+          article.append(el('p', 'group-status', '<b>Where it stands, ' + esc(card.status.at) + ':</b> ' + esc(card.status.text)));
+        }
+        renderJourneys(card, article);
+        host.append(article);
+      });
+    }
+    if (data.omitted) {
+      host.append(el('p', 'meta', data.omitted + (data.omitted === 1 ? ' older answered card is left out.' : ' older answered cards are left out.')));
+    }
+    if (data.without_journey.length) {
+      const other = el('ul', 'group-other');
+      for (const card of data.without_journey) {
+        const item = el('li');
+        item.append(link(card.link, card.title));
+        other.append(item);
+      }
+      host.append(el('h2', 'group-section', 'Also waiting on you'), other);
+    }
+  }
+
   const host = document.getElementById('journeys');
-  card.entries.forEach((entry, e) => {
-    const base = list.length;
-    const rows = entry.steps || entry.places;
-    rows.forEach((row, i) => list.push({entry, row, e, i, total: rows.length}));
-    host.append(el('p', 'juser', '<b>Who:</b> ' + esc(entry.who)),
-      entry.steps ? renderRows(entry, base) : renderPairs(entry, base));
-  });
+  document.title = grouped ? data.name : data.title;
+  document.getElementById('title').textContent = document.title;
+  if (grouped) {
+    renderGroup(host);
+  } else {
+    document.getElementById('meta').textContent = data.id + ' · v' + data.version + ' · Asked by ' + data.agent;
+    document.getElementById('why').textContent = data.why;
+    if (data.link) {
+      const slack = document.getElementById('slack');
+      slack.querySelector('a').href = data.link;
+      slack.hidden = false;
+    }
+    renderJourneys(data, host);
+  }
   fit();
   window.addEventListener('resize', fit);
-  const hash = /^#big=(\d+)(?::(\d+))?$/.exec(location.hash);
-  if (hash) {
-    const index = list.findIndex(item => item.e === +hash[1] && item.i === +(hash[2] || 0));
+  const hash = /^#big=(?:([A-Z]+-\d+):)?(\d+)(?::(\d+))?$/.exec(location.hash);
+  if (hash && grouped === Boolean(hash[1])) {
+    const [, id, entry, step = '0'] = hash;
+    const index = list.findIndex(item => (!grouped || item.card.id === id) && item.e === +entry && item.i === +step);
     if (index !== -1) openAt(index);
   }
 })();

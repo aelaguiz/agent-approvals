@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from slack_sdk.socket_mode import SocketModeClient
 from slack_sdk.socket_mode.response import SocketModeResponse
 
-from . import basecamp, cards, config, core, digest, router, slackapi, store, transcripts
+from . import basecamp, cards, config, core, digest, groups, router, slackapi, store, transcripts
 from . import reach as reach_of
 
 log = logging.getLogger("approvals")
@@ -482,7 +482,8 @@ class Listener:
                 core.expire(rec)
                 return True
 
-        for rec in store.all_records():
+        records = store.all_records()
+        for i, rec in enumerate(records):
             if not rec.get("thread_ts"):
                 continue
             if rec["status"] in ("pending", "question") and store.parse(rec["deadline"]) <= store.now():
@@ -502,6 +503,11 @@ class Listener:
             if rec.get("card_dirty"):
                 self.try_refresh(rec["id"])
             self.warn_unacknowledged(rec)
+            records[i] = rec
+
+        if config.is_hub():
+            for rid in groups.refresh(records):
+                self.try_refresh(rid)
 
     def send_also(self, rec, send):
         rid, n = rec["id"], send["version"]

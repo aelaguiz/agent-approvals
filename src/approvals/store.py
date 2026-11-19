@@ -13,7 +13,7 @@ import os
 import tempfile
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from . import config
 
@@ -97,6 +97,12 @@ def history_records(agent=None, type=None, since=None, limit=20, calls=False):
     Filtered where the records are kept, so a look at a few cards doesn't bring every record across the network."""
     h = hub_client()
     return h.history(agent, type, since, limit, calls) if h else local_history(agent, type, since, limit, calls)
+
+
+def names(days, *, channel=None, test=False, exclude=None):
+    """Recent Part of names, summarized where the records are kept."""
+    h = hub_client()
+    return (h.names if h else local_names)(days, channel=channel, test=test, exclude=exclude)
 
 
 def waiting_records():
@@ -283,6 +289,27 @@ def local_history(agent=None, type=None, since=None, limit=20, calls=False):
             break
         out.append(rec)
     return out
+
+
+def local_names(days, *, channel=None, test=False, exclude=None):
+    from . import cards
+
+    cutoff = now() - timedelta(days=days)
+    targets = config.targets() if channel else {}
+    names = {}
+    for rec in sorted(local_all(), key=lambda r: (r["created"], r["id"]), reverse=True):
+        if (not rec.get("thread_ts") or rec["id"] == exclude or bool(rec.get("test")) != test
+                or parse(rec["created"]) < cutoff or channel and targets[rec.get("target")]["channel"] != channel):
+            continue
+        card = rec["versions"][-1]["card"]
+        name = cards.part_of(rec, card)
+        if not (key := cards.name_key(name)):
+            continue
+        summary = names.setdefault(key, {"name": " ".join(name.split()), "count": 0, "agents": [], "title": card["title"]})
+        summary["count"] += 1
+        if rec["agent"] not in summary["agents"]:
+            summary["agents"].append(rec["agent"])
+    return list(names.values())
 
 
 def local_delete(rid):

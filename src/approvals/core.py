@@ -959,7 +959,7 @@ def refresh_and_clear(rid):
 
     def clear(r):
         # A newer answer may have redrawn the DM while this refresh was still writing to Slack.
-        r["card_dirty"] = bool(r.get("also") and r != rec)
+        r["card_dirty"] = r.get("group") != rec.get("group") or bool(r.get("also") and r != rec)
     store.update(rid, clear)
 
 

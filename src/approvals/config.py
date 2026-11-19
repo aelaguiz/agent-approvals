@@ -49,6 +49,7 @@ DEFAULTS = {
     "default_herdr_session": "default",
     "video_share_command": None,   # e.g. ["bash", "/path/to/cf_share.sh"]; must print "URL: <url>"
     "page_share_command": None,    # a command that publishes a folder and prints "URL: <url>"
+    "page_slug_flag": None,        # e.g. "--slug"; the publisher keeps the group page at the same URL
     "test_approver": None,         # a Slack user id whose "[test reply]" posts count, on TEST cards only
     "alarm": None,                 # channel and command for delivery failures
     "sweep_seconds": 30,

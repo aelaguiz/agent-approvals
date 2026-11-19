@@ -221,8 +221,12 @@ print(f'URL: https://example.com/journey/{n}')
         if publish:
             assert json.loads((receipts / str(n)).read_text()) == [["--title", card["title"], "--description", card["why"]], rec["link"]]
             assert buttons[0]["url"] == version["journey_url"] == f"https://example.com/journey/{n}"
+            assert version["journey_data"]["images"] == [key.replace(":", "-") + ".jpg" for key in keys[2:-1]]
+            assert version["journey_data"]["entries"][0]["steps"][1]["after"] == {
+                "image": 1, "label": screens[1]["label"], "source": screens[1]["source"], "new": True,
+            }
         else:
-            assert "journey_url" not in version and buttons == []
+            assert "journey_url" not in version and "journey_data" not in version and buttons == []
     redrawn = [p["blocks"] for p in slack if p.get("update") == rec["thread_ts"]]
     assert [b["title"]["text"] for b in redrawn[0] if b["type"] == "image"][:2] == [entry["who"], "A returning reader"]
     assert bool(big_button(redrawn[0])) == publish
