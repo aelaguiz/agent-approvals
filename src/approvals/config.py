@@ -39,6 +39,7 @@ REQUIRED = ["channel", "approver", "bot_token_file", "app_token_file"]
 DEFAULTS = {
     "approver_name": "the approver",
     "team": {},
+    "team_answers_any": False,
     "handoff_hours": 3,
     "reader_rules": None,          # Markdown file, optionally #heading, for the card reader
     "reader_knows": None,          # what the card reader should assume the approver knows

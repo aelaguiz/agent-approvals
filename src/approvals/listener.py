@@ -60,9 +60,9 @@ QUIET = 60               # reconnect when Slack hasn't answered a ping for this 
 HELLO = 30               # reconnect when a new connection hasn't heard Slack's hello, which comes within a second or two
 
 
-def is_approver(msg, rec):
+def is_approver(msg, rec, *, allow_workspace_team=True):
     """Replies from someone who can answer count, along with a stand-in's "[test reply]" posts on TEST cards."""
-    if core.can_answer(rec, msg.get("user")) and not msg.get("bot_id"):
+    if core.can_answer(rec, msg.get("user"), allow_workspace_team=allow_workspace_team) and not msg.get("bot_id"):
         return True
     tester = config.test_approver()
     return (bool(tester) and bool(rec.get("test")) and msg.get("user") == tester
@@ -73,7 +73,7 @@ def is_ask(msg, target=None):
     """The approver posting in the channel itself, not in a card's thread, asks for a fresh list. The channel is
     only cards, so any such post means it; in a test run, the stand-in's "[test reply]" posts count."""
     return (msg.get("thread_ts") in (None, msg.get("ts")) and not msg.get("subtype")
-            and is_approver(msg, {"test": config.is_test_run(), "target": target}))
+            and is_approver(msg, {"test": config.is_test_run(), "target": target}, allow_workspace_team=False))
 
 
 def reply_text(msg):
@@ -147,7 +147,7 @@ class Listener:
         send = cards.also_on(rec, n)
         if n != len(rec["versions"]) and send and send["user"] == user and (send.get("sent_at") or send.get("handed")):
             return self.REFUSED["stale"]
-        if not core.can_answer(rec, user):
+        if not core.can_answer(rec, user, allow_workspace_team=what != "notmine"):
             return only
         bad = core._check(rec, n)
         if bad:
@@ -437,7 +437,7 @@ class Listener:
                     continue
                 n = len(r["versions"])
                 member = cards.teammate(r, {"by": user, "version": n})
-                if member and not send:
+                if member and not send and not config.settings()["team_answers_any"]:
                     current = cards.also_on(r, n)
                     since = store.parse(current["handed"]["at"]).timestamp() if current.get("handed") else float(current["ts"])
                     if float(ts) < since:

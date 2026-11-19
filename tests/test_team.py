@@ -775,3 +775,162 @@ def test_a_legacy_card_uses_only_the_approver_and_keeps_its_old_record(team, sla
     assert "also" not in rec and "by" not in rec["events"][-1]
     assert core.plain_yes(rec, 1) and "Sam approved it" in to(RID)[0]["text"]
     assert CREDIT not in to(RID)[0]["text"] and not slack.opens
+
+
+@pytest.fixture
+def team_answers_any(team):
+    team["team_answers_any"] = True
+    config.CONFIG.write_text(json.dumps(team))
+    return team
+
+
+def test_a_teammate_can_approve_without_a_send_and_is_named_to_every_reader(team_answers_any, slack, capsys):
+    rec = card()
+    store.set_reviewer({"types": [rec["type"]], "reach": {"session_id": "sid-reviewer"}, "test": False})
+    call(RID, "--his", "--why", WHY)
+    click("approve", channel="CTEST")
+    rec = store.load(RID)
+    assert rec["status"] == "approved" and rec["events"][-1]["by"] == USER and not slack.opens
+    [answer] = to(RID)
+    assert "Riley approved it" in answer["text"]
+    assert answer["text"].rsplit(" (ref ", 1)[0].endswith(
+        "Riley is on Sam's team, and Riley's answer counts as Sam's, for exactly what the card describes.")
+    assert "Riley approved it" in to(RID, "deputy")[-1]["text"]
+    assert "Riley approved it" in to(RID, "reviewer")[-1]["text"]
+    assert "Approved by Riley" in txt(cards.card_blocks(rec, 1, "final"))
+    assert "Riley approved it" in txt(digest._line(rec, NOW.date()))
+    assert not core.plain_yes(rec, 1)
+    assert "you approved 0 of those without a word" in txt(digest.summary(store.deputy(), NOW, [rec]))
+    capsys.readouterr()
+    cli.main(["history", "--calls"])
+    assert "Riley approved v1" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("sent", [False, True])
+def test_an_unsent_teammates_channel_reply_counts_and_keeps_its_name(team_answers_any, slack, sent):
+    rec = card(thread={"link": "https://slack.test/origin", "small_ts": "8.0", "channel": "CSOURCE", "root_ts": "7.0"})
+    L = listener.Listener()
+    if sent:
+        leave()
+        L.sweep()
+    msg = reply(rec["thread_ts"], "Do it.", user="UTEAM2")
+    slack.threads[rec["thread_ts"]] = [msg]
+    L.poll_thread(rec)
+    [answer] = to(RID)
+    assert 'Morgan replied in Slack' in answer["text"] and "Morgan is on Sam's team" in answer["text"]
+    assert "Morgan" in txt(slack.posts[-1][1])
+    assert core.call(store.load(RID), "approve", WHY, "Deputy", True) == "it is back with its agent after Morgan's reply"
+    cli.main(["record", RID, "--approved", "--words", msg["text"], "--where", "Slack thread"])
+    rec = store.load(RID)
+    assert rec["status"] == "approved" and rec["decision"]["by"] == "UTEAM2"
+
+
+def test_an_unsent_teammate_can_submit_edited_words(team_answers_any, slack):
+    card(kind="as_you")
+    click("edit", channel="CTEST")
+    assert slack.views[-1]["private_metadata"] == f"{RID}|1|edit"
+    payload = submit_payload(f"{RID}|1|edit", {"words": {"words": {"value": "New words"}}}, user=USER)
+    response, follow = listener.Listener().handle_submission(payload)
+    assert response is None
+    run(follow)
+    [answer] = to(RID)
+    assert "Riley approved it with Riley's edited words" in answer["text"]
+    assert "Riley approved it with these words" in slack.notes[-1][1]
+
+
+def test_team_answering_leaves_the_approvers_controls_and_not_mine_reserved(team_answers_any, slack):
+    card()
+    click("hand:riley", user="UAPPROVER", channel="CTEST")
+    L = listener.Listener()
+    L.sweep()
+    for what in ("remove", "mine", "hand:morgan", "notmine"):
+        click(what, user="UTEAM2", channel="CTEST")
+        assert slack.notices[-1] == "Only Sam can decide approvals."
+    assert cards.handed(store.load(RID))
+    click("notmine")
+    assert latest()[1]["handed_back_at"]
+
+    rid = "AP-0002"
+    card(rid)
+    call(rid, "--approve", "--why", WHY)
+    click("takeback", channel="CTEST", rid=rid)
+    assert slack.notices[-1] == "Only Sam can decide approvals." and cards.auto_approved(store.load(rid))
+    run(L.handle_click(press_payload("deputy|0|pause", user=USER)))
+    assert slack.notices[-1] == "Only Sam can decide approvals." and store.deputy()["live"]
+
+    post = {"user": USER, "ts": "2.0", "text": "What's waiting?"}
+    assert not listener.is_ask(post)
+    assert not listener.is_ask(post, "lead")
+    assert not listener.is_ask(dict(post, user="UAPPROVER"), "lead")
+    assert listener.is_ask(dict(post, user="ULEAD"), "lead")
+
+
+def test_team_answering_does_not_grant_access_to_a_stranger(team_answers_any, slack):
+    rec = card()
+    click("approve", user="USTRANGER", channel="CTEST")
+    assert slack.notices[-1] == "Only Sam can decide approvals."
+    slack.threads[rec["thread_ts"]] = [reply(rec["thread_ts"], "Do it.", user="USTRANGER")]
+    listener.Listener().poll_thread(rec)
+    assert store.load(RID)["status"] == "pending" and not to(RID)
+
+
+@pytest.mark.parametrize("user,name", [("UAPPROVER", "Sam"), (USER, "Riley")])
+def test_the_default_approver_and_team_can_answer_a_named_approvers_card(team_answers_any, slack, user, name):
+    card(target="lead")
+    click("approve", user=user, channel="CLEAD")
+    rec = store.load(RID)
+    assert rec["status"] == "approved" and rec["decision"]["by"] == user
+    assert f"{name} approved it" in to(RID)[0]["text"]
+    assert f"Approved by {name}" in txt(cards.card_blocks(rec, 1, "final"))
+
+
+@pytest.mark.parametrize("handed", [False, True])
+def test_team_answering_keeps_the_send_name_and_credit(team_answers_any, slack, handed):
+    card()
+    if handed:
+        click("hand:riley", user="UAPPROVER", channel="CTEST")
+    else:
+        leave()
+    listener.Listener().sweep()
+    team_answers_any["team"]["riley"]["name"] = "Alex"
+    config.CONFIG.write_text(json.dumps(team_answers_any))
+    click("approve")
+    answer = to(RID)[-1]["text"]
+    credit = CREDIT.replace("The card also went to Riley", "Sam handed this card to Riley") if handed else CREDIT
+    assert "Riley approved it" in answer and credit in answer
+
+
+@pytest.mark.parametrize("handed", [False, True])
+def test_the_morning_summary_names_the_teammate_who_answered_someone_elses_send(team_answers_any, slack, handed):
+    rec = card()
+    if handed:
+        c = rec["versions"][0]["card"]
+        c["facts"] = [["Total", "$250"]]
+        room = cards.BLOCKS_MAX - len(cards.card_blocks(rec, 1))
+        c["sections"] = [{"title": f"Section {i}", "lines": ["Detail"]} for i in range(room)]
+        assert cards.validate(c) == []
+        store.save(rec)
+        click("hand:riley", user="UAPPROVER", channel="CTEST")
+    else:
+        leave()
+    listener.Listener().sweep()
+    rec = store.load(RID)
+    blocks = cards.card_blocks(rec, 1, core.mode_for(rec))
+    assert f"{RID}|1|approve" in values(blocks) and len(blocks) <= cards.BLOCKS_MAX
+    if handed:
+        assert any(b.get("accessory", {}).get("value") == f"{RID}|1|mine" for b in blocks)
+        assert all(f"*Section {i}*" in txt(blocks) for i in range(room))
+    click("approve", user="UTEAM2", channel="CTEST")
+    assert "Morgan is on Sam's team" in to(RID)[-1]["text"]
+    recipient = "Riley · handed by you" if handed else "Riley"
+    assert f"{recipient} · Morgan answered first" in txt(digest.summary(store.deputy(), NOW, [store.load(RID)]))
+
+
+def test_the_dry_run_summary_names_a_teammate_and_does_not_count_an_approvers_yes(team_answers_any, slack):
+    deputy = dict(store.deputy(), live=False)
+    store.set_deputy(deputy)
+    card()
+    call(RID, "--approve", "--why", WHY)
+    click("approve", channel="CTEST")
+    summary = txt(digest.summary(deputy, NOW, [store.load(RID)]))
+    assert "Riley approved it" in summary and "you approved 0 without a word, 1 had other answers" in summary

@@ -341,6 +341,12 @@ def _what_he_did(rec, n):
     his = [e for e in rec.get("events") or [] if e["at"] >= posted and (
         e["kind"] in ("feedback", "answer", "comment")
         or e["kind"] in ("decision", "part") and e.get("version") == n and e.get("verdict") != "expired")]
+    if config.settings()["team_answers_any"]:
+        for e in his:
+            if e.get("version") == n and (member := cards.teammate(rec, e)):
+                mark, what = {"approved": ("✅", "approved it"), "chose": ("✅", "made a pick"),
+                              "declined": ("❌", "declined it")}.get(e.get("verdict"), ("💬", "replied"))
+                return f"{mark} {cards.esc(member)} {what}", "B"
     if any(e.get("verdict") == "declined" for e in his):
         return "❌ you declined it", "B"
     if his:
@@ -367,6 +373,8 @@ def _team_outcome(rec, send):
             answers.append(e)
     if answers:
         if answers[0].get("by") != send["user"]:
+            if config.settings()["team_answers_any"] and (member := cards.teammate(rec, answers[0])):
+                return f"{cards.esc(member)} answered first"
             return "you answered first"
         verdict = next((e["verdict"] for e in answers if e.get("by") == send["user"] and "verdict" in e), None)
         return {"approved": "✅ approved it", "chose": "✅ approved it", "declined": "❌ declined it"}.get(verdict, "💬 replied")
@@ -444,7 +452,9 @@ def summary(d, since, records):
         sub = f"By {name} · you took back {took} · it left {len(left)} for you, and you approved {plain} of those without a word"
     else:
         headline = f"🤖 *Dry run: {name} would have approved {n} of the {len(latest)} cards since yesterday morning*"
-        sub = (f"Of those {n}, you approved {counts['A']} without a word, replied on or declined {counts['B']}, "
+        answered = (f"{counts['B']} had other answers" if config.settings()["team_answers_any"]
+                    else f"replied on or declined {counts['B']}")
+        sub = (f"Of those {n}, you approved {counts['A']} without a word, {answered}, "
                f"and {counts['C']} are still open or were withdrawn")
     top = [cards.ctx("🧪 *TEST summary.* It covers TEST cards only.")] if config.is_test_run() else []
     top += [cards.md(headline), cards.ctx(sub)]

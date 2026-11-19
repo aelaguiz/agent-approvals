@@ -11,9 +11,13 @@ from . import cards, config, slackapi, store
 def who(rec):
     return config.card_target(rec)["approver_name"]
 
-def can_answer(rec, user):
+def can_answer(rec, user, *, allow_workspace_team=True):
     if user == config.card_target(rec)["approver"]:
         return True
+    if allow_workspace_team:
+        s = config.settings()
+        if s["team_answers_any"] and (user == s["approver"] or any(p["user"] == user for p in s["team"].values())):
+            return True
     send = cards.also_on(rec, len(rec.get("versions", [])))
     return bool(send and send["user"] == user and (send.get("handed") or send.get("sent_at"))
                 and not (send.get("handed_back_at") or send.get("skipped")))
@@ -31,13 +35,18 @@ def one_line(s):
     return " / ".join(part.strip() for part in str(s).splitlines() if part.strip())
 
 
-def enqueue(rec, kind, text, react_ts=None, to=None, member=None):
+def enqueue(rec, kind, text, react_ts=None, to=None, member=None, by=None):
     """A message for the agent that asked, or with to="reviewer" for the session reviewing the card's type, or
     to="deputy" for the deputy."""
     ref = secrets.token_hex(3)
     if member:
         send = cards.also_on(rec, len(rec["versions"]))
-        first = f"{who(rec)} handed this card to {member}" if send.get("handed") else f"The card also went to {member}"
+        if send and send["user"] == by and (send.get("handed") or send.get("sent_at")):
+            first = f"{who(rec)} handed this card to {member}" if send.get("handed") else f"The card also went to {member}"
+        elif by == config.target()["approver"]:
+            first = f"{member} is the workspace's default approver"
+        else:
+            first = f"{member} is on {who(rec)}'s team"
         text += (f" {first}, and {member}'s answer counts as {who(rec)}'s, "
                  "for exactly what the card describes.")
     rec.setdefault("outbox", []).append({
@@ -343,7 +352,7 @@ def decide(rec, n, verdict, by, where="button", words=None, choice=None, items=N
     if where in ("button", "pop-up"):
         how = "button in Slack" if where == "button" else ("picked in a pop-up in Slack" if items is not None else "Edit the words in Slack")
         enqueue(rec, "decision", msg_decision(rec, verdict, how, choice, items, edited, member),
-                react_ts=card_ts(rec), member=member)
+                react_ts=card_ts(rec), member=member, by=by)
     edited_words = f"{member}'s edited words" if member else "his own edited words"
     what = (f"picked {choice}" if choice is not None else
             f'approved items {", ".join(map(str, items))} of {len(card(rec)["items"])}' if items is not None else
@@ -387,7 +396,7 @@ def answer_part(rec, n, j, verdict, by, where="button", words=None, choice=None,
                 **({"by": by} if member else {}))
     if tell:
         kind = "feedback" if verdict == "change" else "decision"
-        enqueue(rec, kind, msg_part(rec, j, a), react_ts=card_ts(rec), member=member)
+        enqueue(rec, kind, msg_part(rec, j, a), react_ts=card_ts(rec), member=member, by=by)
     if review:
         what = {"approved": "approved", "declined": "declined", "chose": f'chose "{choice}" for',
                 "change": "asked for a change to"}[verdict]
@@ -410,7 +419,7 @@ def approve_all(rec, n, by):
     for j, _ in rows:
         answer_part(rec, n, j, "approved", by, where="Approve all", tell=False, review=False)
     member = cards.teammate(rec, {"by": by, "version": n})
-    enqueue(rec, "decision", msg_all(rec, [j for j, _ in rows], member), react_ts=card_ts(rec), member=member)
+    enqueue(rec, "decision", msg_all(rec, [j for j, _ in rows], member), react_ts=card_ts(rec), member=member, by=by)
     news = f'{member or who(rec)} approved parts {", ".join(str(j) for j, _ in rows)} (Approve all in Slack).'
     tell_reviewer(rec, news)
     if member:
@@ -510,14 +519,16 @@ def answer_offer(rec, n, choice, by):
 # ---------- the deputy ----------
 
 def _answered_on(rec, n, since=None):
-    """The approver has answered version n in some way: a reply in the thread since it was posted, or a row.
+    """An answer on version n, if there is one.
     since: count only what came from then on, for a card sent to a teammate after an earlier reply on it."""
     posted = since or rec["versions"][n - 1].get("posted_at") or rec["created"]
-    return (any(e["kind"] in ("feedback", "answer", "comment") and e.get("version", n) == n and e["at"] >= posted
-                for e in rec.get("events") or [])
-            or (rec.get("decision") or {}).get("version") == n
-            or any(a.get("version") == n and (not since or a["at"] >= since)
-                   for a in (rec.get("answers") or {}).values()))
+    reply = next((e for e in rec.get("events") or [] if e["kind"] in ("feedback", "answer", "comment")
+                  and e.get("version", n) == n and e["at"] >= posted), None)
+    decision = rec.get("decision") or {}
+    if reply or decision.get("version") == n:
+        return reply or decision
+    return next((a for a in (rec.get("answers") or {}).values()
+                 if a.get("version") == n and (not since or a["at"] >= since)), None)
 
 
 def _not_callable(rec, n, since=None):
@@ -529,10 +540,13 @@ def _not_callable(rec, n, since=None):
         return f"it is already decided ({s})"
     if s == "expired":
         return "it closed with no answer by its deadline"
+    team_answers = config.settings()["team_answers_any"]
     if s == "revising":
-        return f"it is back with its agent after {who(rec)}'s reply"
-    if _answered_on(rec, n, since):
-        return f"{who(rec)} has already answered on v{n}"
+        name = answerer(rec, cards.last_reply(rec)) if team_answers else who(rec)
+        return f"it is back with its agent after {name}'s reply"
+    if answer := _answered_on(rec, n, since):
+        name = answerer(rec, answer) if team_answers else who(rec)
+        return f"{name} has already answered on v{n}"
     return None
 
 
@@ -861,7 +875,7 @@ def take_replies(rec, replies, react_ts=None, by=None):
         rec["open_question"] = None
     if cards.also_on(rec, n):
         rec["card_dirty"] = True
-    enqueue(rec, kind, msg_replies(rec, kind, texts, q, member), react_ts=last_ts, member=member)
+    enqueue(rec, kind, msg_replies(rec, kind, texts, q, member), react_ts=last_ts, member=member, by=by)
     said = " / ".join(f'"{one_line(x)}"' for x in texts)
     tell_reviewer(rec, f"{name} replied in the thread: {said}.")
     tell_deputy(rec, f"{name} replied in the thread" + (" after the decision" if member and kind == "comment"

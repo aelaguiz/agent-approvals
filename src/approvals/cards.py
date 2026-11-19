@@ -596,7 +596,7 @@ def responded(rec, send):
 
 
 def teammate(rec, answer):
-    """Use the name that went with the answer's version, even after the team or the card changes."""
+    """Name another answerer, using the version's saved send name first."""
     n, by, at = answer.get("version"), answer.get("by"), answer.get("at")
     at = datetime.fromisoformat(at) if at else None
     for send in reversed(rec.get("also", [])):
@@ -607,6 +607,12 @@ def teammate(rec, answer):
         if start and (not at or at >= datetime.fromisoformat(start)) and (
                 not closed or at and at <= datetime.fromisoformat(closed)):
             return send["name"]
+    if by:
+        s = config.settings()
+        if s["team_answers_any"] and by != config.card_target(rec)["approver"]:
+            if by == s["approver"]:
+                return s["approver_name"]
+            return next((p["name"] for p in s["team"].values() if p["user"] == by), None)
     return None
 
 
@@ -716,7 +722,7 @@ def card_blocks(rec, n, mode="open"):
     blocks = _card_blocks(rec, n, mode, origin=False)
     if len(blocks) > BLOCKS_MAX:
         blocks = _card_blocks(rec, n, mode, compact=True, origin=False)
-    if len(blocks) > BLOCKS_MAX and mode == "open" and also_on(rec, n):
+    if len(blocks) > BLOCKS_MAX and mode in ("open", "handed") and also_on(rec, n):
         blocks = [b for b in blocks if b["type"] != "divider"]
     return blocks
 
@@ -750,8 +756,11 @@ def _card_blocks(rec, n, mode, compact=False, origin=True, deputy=True):
             else:
                 line += f" It comes back to you {due} if {name} hasn't answered."
         base = f"{rec['id']}|{n}"
-        return blocks + [ctx(line), {"type": "actions", "block_id": f"ap|{base}", "elements": [
-            button("Back to me", f"{base}|mine"), button("See the card", f"{base}|see")]}, _footer(rec, n, "open")]
+        if not config.settings()["team_answers_any"]:
+            return blocks + [ctx(line), {"type": "actions", "block_id": f"ap|{base}", "elements": [
+                button("Back to me", f"{base}|mine"), button("See the card", f"{base}|see")]}, _footer(rec, n, "open")]
+        blocks.append(dict(md(line), accessory=button("Back to me", f"{base}|mine")))
+        mode = "open"
     if origin:
         blocks += origin_blocks(rec, include_quote=mode != "final" and origin != "link")
     if card.get("why"):
