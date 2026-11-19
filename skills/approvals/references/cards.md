@@ -99,7 +99,7 @@ Build it the way he would walk it:
 - **One kind of user at a time,** named as he would picture them ("a trial user who cancelled in the store and opens the app again before the trial ends"), in the state most of them are really in. When the change touches a second kind of user (the person who receives the invite, the one who says no, the one who skips where the first one watches), they get an entry of their own, so each path reads straight through.
 - **From where they really are to the first screen of what they get.** A path that starts on the feature's first screen hides how anyone reaches it, and one that stops on "You passed" hides what they got for it. Home, a push, the store's page and the store's own purchase dialog are screens on the path like any other.
 - **Every tap named** (`then`): "Taps Change my plan", "Opens the app again", "Watches to the end". The tap is what makes it a journey. Without it the screens are a set, in whatever order.
-- **Today is a path of its own, for the same user.** A change with no today beside it reads as a new feature, and he can't tell what it replaces. Where today has no screen, say in words where the path ends (`ends`): "Home, as usual. Nothing offers the month." A screen that is the same on both paths is `"after": "same"`.
+- **Today is a path of its own, for the same user, and every screen on it is drawn.** A change with no today beside it reads as a new feature, and he can't tell what it replaces. A screen that is named and not drawn is missing: when today's user lands on Home with nothing new on it, show that Home, since "Home, as usual" in words is the one screen he would have compared. `ends` is for a path that stops where there is nothing to show ("No push arrives, and the user never learns the puzzle is ready"). A screen that is the same on both paths is `"after": "same"`.
 - **Every screen says what it is** (`source`): real or mock, which phone, which build. Its `label` is only what the user sees there; the path's name already says today or after. He takes a screen for the shipped product unless it says otherwise. Take a path's screens from one state, too: screens gathered from different accounts and days contradict each other where he looks first, like a table shown unplayed right after the screen where it was won.
 - **Each screen is its own picture file.** The card draws the path and opens every screen at the full height of his window, which it can only do with the screens themselves. A board you already made, today's screens set above the after, is one picture he can't step through: hand over the screens it was built from.
 - **Nothing drawn on a screen.** He is judging the screen, and a ring or an arrow over it covers what he is looking at. `new: true` frames a new or changed screen from outside, and a change small enough to miss is named in its label ("The row now shows all three raise sizes").
@@ -118,14 +118,16 @@ The journey is as long as the change, and that settles its shape.
    "steps": [
      {"today": {"image": "/abs/play-cancelled.png", "label": "Cancels the trial in Google Play", "source": "Real · Google Play, a Pixel 9"},
       "after": "same", "then": "Opens the app again"},
-     {"today": {"ends": "Home, as usual. Nothing offers the month, and Plus ends with the trial."},
+     {"today": {"image": "/abs/home-today.png", "label": "Home, as usual. Nothing offers the month, and Plus ends with the trial", "source": "Real · Android 2.1.76, the same account"},
       "after": {"image": "/abs/message.png", "label": "\"Not ready for a year?\" shows once, over Home", "source": "Mock · the designer's", "new": true},
       "then": "Taps Change my plan"},
      {"after": {"image": "/abs/manage.png", "label": "Manage subscription: the year, with renewal off", "source": "Real · Android 2.1.76"},
       "then": "Taps Change plan"},
      {"after": {"image": "/abs/change-plan.png", "label": "Change plan: Monthly is already picked", "source": "Real · Android 2.1.76"},
       "then": "Taps Switch to monthly plan"},
-     {"after": {"image": "/abs/play-dialog.png", "label": "Google Play's purchase dialog: the first charge comes when the trial ends", "source": "Real · a test account"}}]}],
+     {"after": {"image": "/abs/play-dialog.png", "label": "Google Play's purchase dialog: the first charge comes when the trial ends", "source": "Real · a test account"},
+      "then": "Taps Subscribe"},
+     {"after": {"image": "/abs/manage-after.png", "label": "Manage subscription now reads Plus Monthly", "source": "Real · Android 2.1.76"}}]}],
  "quotes": [{"label": "The message", "text": "Not ready for a year?\nKeep Plus by the month instead and cancel any time."}],
  "facts": [["Who sees it", "trial users who cancelled and come back before the charge, once; about 36 a week in the US"]],
  "yes_label": "Put it live", "change_label": "Change",
