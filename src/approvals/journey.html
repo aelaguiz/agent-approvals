@@ -245,6 +245,8 @@
     document.documentElement.classList.add('jv-open');
     draw();
     closeButton.focus();
+    // Load every full-size screen now, so the arrow keys never wait on a picture.
+    card.images.forEach(name => { new Image().src = 's/' + name; });
   }
 
   function close() {
