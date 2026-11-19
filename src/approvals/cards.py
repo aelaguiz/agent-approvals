@@ -281,13 +281,15 @@ def _validate_journey(card):
             errs.append(f"{where}: Write an entry with who and either steps or places.")
             continue
         if not _text(entry.get("who"), 200):
-            errs.append(f"{where}: Write who takes this path in up to 200 characters.")
+            errs.append(f"{where}: Say who takes this path, in up to 200 characters: one kind of user, as the approver "
+                        'would picture them ("a trial user who cancelled in the store and opens the app again").')
         for side in journey.SIDES:
             if side in entry and not _text(entry[side], 40):
                 errs.append(f"{where}: Give {side} a path name of up to 40 characters or leave it out.")
         shapes = [key for key in ("steps", "places") if key in entry]
         if len(shapes) != 1:
-            errs.append(f"{where}: Write either steps for an ordered path or places for side-by-side comparisons.")
+            errs.append(f"{where}: Write either steps, for a path the user walks in order, or places, when the same "
+                        "change shows in several places with no order between them.")
             continue
         shape = shapes[0]
         steps = shape == "steps"
@@ -309,8 +311,9 @@ def _validate_journey(card):
                     tap = row.get("then")
                     if not (_text(tap, 80) or (isinstance(tap, dict) and set(tap) == set(journey.SIDES)
                                               and all(_text(v, 80) for v in tap.values()))):
-                        errs.append(f"{at}: Write then as what the user does next in up to 80 characters, "
-                                    "or give today and after their own text of up to 80 characters each.")
+                        errs.append(f'{at}: Write then on every step but the last: what the user does to reach the next '
+                                    'screen ("Taps Change my plan"), in up to 80 characters, or give today and after '
+                                    "their own text when the two paths differ. The tap is what makes it a journey.")
             else:
                 if not _text(row.get("name"), 60):
                     errs.append(f"{at}: Write a place name of up to 60 characters.")
@@ -334,10 +337,12 @@ def _validate_journey(card):
                         shows_today |= side == "today"
                         shows_change |= side == "after"
         if not shows_today:
-            errs.append(f'{where}: Show what happens today with a screen or write {{"ends": "…"}} '
-                        "when the path doesn't exist today.")
+            errs.append(f'{where}: Show what this user gets today, with a screen, or with {{"ends": "…"}} saying where '
+                        "the path stops when the path doesn't exist today. A change with nothing of today beside it "
+                        "reads as a new feature.")
         if not shows_change:
-            errs.append(f"{where}: Show the change with at least one after screen with its own image.")
+            errs.append(f'{where}: Show the change: every after here is "same" or missing, so nothing changes on this '
+                        "path. Screens that only give background go in gallery or evidence.")
     return errs
 
 
@@ -354,9 +359,10 @@ def _validate_journey_screen(screen, where):
     except (OSError, ValueError, SyntaxError, Image.DecompressionBombError):
         errs.append(f"{where}: Give image the path of a picture file that exists.")
     if not _text(screen.get("label"), LABEL_MAX):
-        errs.append(f"{where}: Write a label saying what the user sees in up to {LABEL_MAX} characters.")
+        errs.append(f"{where}: Write a label of up to {LABEL_MAX} characters saying what the user sees on this screen.")
     if not _text(screen.get("source"), 100):
-        errs.append(f"{where}: Write a source saying real or mock, which phone and build, in up to 100 characters.")
+        errs.append(f"{where}: Write a source of up to 100 characters saying what this picture is: real or mock, which "
+                    "phone and build. He takes a screen for the shipped product unless it says otherwise.")
     if "new" in screen and screen["new"] is not True:
         errs.append(f"{where}: Write true for new on a new or changed screen, or leave it out.")
     return errs

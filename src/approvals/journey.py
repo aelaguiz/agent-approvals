@@ -101,12 +101,15 @@ def _strip(cells, taps, gap, label_font, source_font):
     """Place tiles in aligned columns and draw the arrows in the spaces between them."""
     tiles = [_tile(cell, label_font, source_font) for cell in cells]
     w = tiles[0][0].width
+    # One height for every arrow in the row: halfway down its shortest screen.
+    shots = [height for cell, (_, height) in zip(cells, tiles) if cell and "image" in cell]
+    mid = min(shots) // 2 if shots else 0
     arrows = []
     for i, tap in enumerate(taps):
         if tap is not None:
             label = _wrap(tap, source_font, gap - 20)
             height = _text_size(label, source_font) if label else 0
-            y = max(height + 22, min(tiles[i][1], tiles[i + 1][1]) // 2)
+            y = max(height + 22, mid)
             arrows.append((i, label, height, y))
     h = max([tile.height for tile, _ in tiles] + [y + 10 for _, _, _, y in arrows])
     img = Image.new("RGB", (len(tiles) * (w + gap) - gap, h), BG)
@@ -126,7 +129,7 @@ def _strip(cells, taps, gap, label_font, source_font):
 
 def draw_map(entry) -> Path:
     """Write one PNG with the two paths, or a row of pairs for the places they differ."""
-    heading = ImageFont.load_default(size=28)
+    heading = ImageFont.load_default(size=40)   # the path names still read when Slack shows the map at 600 pixels
     label = ImageFont.load_default(size=22)
     source = ImageFont.load_default(size=18)
     names = [entry.get(side, PATH_NAMES[side]) for side in SIDES]
@@ -142,13 +145,13 @@ def draw_map(entry) -> Path:
                 continues = cells[i] and "image" in cells[i] and cells[i + 1]
                 taps.append((tap[side] if isinstance(tap, dict) else tap) if continues else None)
             strips.append(_strip(cells, taps, GAP, label, source))
-        img = Image.new("RGB", (strips[0].width + 2 * PAD, sum(s.height + 66 for s in strips) + PAD), BG)
+        img = Image.new("RGB", (strips[0].width + 2 * PAD, sum(s.height + 84 for s in strips) + PAD), BG)
         draw = ImageDraw.Draw(img)
         y = PAD
         for name, strip, color in zip(names, strips, (DIM, NEW)):
             draw.text((PAD + 6, y), name, font=heading, fill=color)
-            img.paste(strip, (PAD, y + 42))
-            y += strip.height + 66
+            img.paste(strip, (PAD, y + 60))
+            y += strip.height + 84
     else:
         places = entry["places"]
         gap = 56
@@ -156,14 +159,14 @@ def draw_map(entry) -> Path:
         titles = [_wrap(p["name"], heading, pairs[0].width) for p in places]
         path_y = PAD + max(_text_size(t, heading) for t in titles) + 16
         img = Image.new("RGB", (sum(p.width + PAD for p in pairs) + PAD,
-                                path_y + 34 + max(p.height for p in pairs) + PAD), BG)
+                                path_y + 42 + max(p.height for p in pairs) + PAD), BG)
         draw = ImageDraw.Draw(img)
         x = PAD
         for title, pair in zip(titles, pairs):
             draw.multiline_text((x + 6, PAD), title, font=heading, fill=INK)
-            draw.text((x + 6, path_y), names[0], font=source, fill=DIM)
-            draw.text((x + SCREEN + 18 + gap, path_y), names[1], font=source, fill=NEW)
-            img.paste(pair, (x, path_y + 34))
+            draw.text((x + 6, path_y), names[0], font=label, fill=DIM)
+            draw.text((x + SCREEN + 18 + gap, path_y), names[1], font=label, fill=NEW)
+            img.paste(pair, (x, path_y + 42))
             x += pair.width + PAD
     out = Path(tempfile.mkdtemp(prefix="approvals-")) / "map.png"
     img.save(out)
@@ -182,7 +185,7 @@ def write_page(folder, rec, n):
         img = _image(path)
         full = _resize(img, 1400) if img.width > 1400 else img
         full.save(folder / "s" / name, quality=90)
-        _resize(img, 600).save(folder / "t" / name, quality=90)
+        (_resize(img, 600) if img.width > 600 else img).save(folder / "t" / name, quality=90)
 
     # The page references each JPEG by its index, so repeats and "same" share the same file.
     indices = {path: i for i, path in enumerate(names)}
