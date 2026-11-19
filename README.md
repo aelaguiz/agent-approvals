@@ -183,7 +183,7 @@ The full card opens with a link to the conversation and, when readable and writt
 
 If the app cannot read the conversation, the full card still carries its link. The command says that the thread will not show the card and tells the agent to link it there itself.
 
-A card is JSON. The [card reference](skills/approvals/references/cards.md) describes the card types and ways to answer.
+A card is JSON. [skills/approvals/references/cards.md](skills/approvals/references/cards.md) describes every field, type and kind, with an example of each.
 
 ### Show a user journey
 
