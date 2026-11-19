@@ -150,7 +150,7 @@ The first version of that card showed the message and the three screens after it
      "after": {"image": "/abs/board-fix.png", "label": "The bar and \"8 / 30 XP\" show", "source": "Real · test build 21833", "new": true}}]}]
 ```
 
-**Where it turns.** Some things he judges by looking have no path to walk: an ad, a post, a chart, a room's art, an email as designed. Those stay a `gallery`, an `image` or a `video`, and drawing a path for one invents it. A change no screen shows (a price in a table, a server setting) has none either. And the journey is no place for proof: the ten other phones you checked go in `evidence`.
+**Where it turns.** Some things he judges by looking have no path to walk: an ad, a post, a chart, a room's art, an email as designed. Those stay a `gallery`, an `image` or a `video`, and drawing a path for one invents it. A change no screen shows (a price in a table, a server setting) has none either, and neither does one he judges from its words: a release of a dozen wording fixes inside lessons is the list of what changed, and a push is its exact words. And the journey is no place for proof: the ten other phones you checked go in `evidence`.
 
 Before it goes, walk it as him. Follow each user from the first screen to the last reading only the screens and the taps, and ask of each screen what the user did to get there, whether the screen before shows it, and whether everything on it follows from the screens before.
 
