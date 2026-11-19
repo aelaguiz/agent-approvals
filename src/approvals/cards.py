@@ -360,8 +360,8 @@ def _validate_journey_screen(screen, where):
         errs.append(f"{where}: Give image the path of a picture file that exists.")
     if not _text(screen.get("label"), LABEL_MAX):
         errs.append(f"{where}: Write a label of up to {LABEL_MAX} characters saying what the user sees on this screen.")
-    if not _text(screen.get("source"), 100):
-        errs.append(f"{where}: Write a source of up to 100 characters saying what this picture is: real or mock, which "
+    if not _text(screen.get("source"), LABEL_MAX):
+        errs.append(f"{where}: Write a source of up to {LABEL_MAX} characters saying what this picture is: real or mock, which "
                     "phone and build. He takes a screen for the shipped product unless it says otherwise.")
     if "new" in screen and screen["new"] is not True:
         errs.append(f"{where}: Write true for new on a new or changed screen, or leave it out.")

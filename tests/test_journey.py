@@ -119,7 +119,7 @@ def test_a_place_needs_a_name_and_two_screens_and_takes_no_then(screens, changes
     ({"label": ""}, "Write a label"),
     ({"label": "x" * 151}, "Write a label"),
     ({"source": None}, "Write a source"),
-    ({"source": "x" * 101}, "Write a source"),
+    ({"source": "x" * 151}, "Write a source"),
     ({"new": "true"}, "Write true for new"),
 ])
 def test_a_screen_refuses_invalid_fields(entry, changes, refusal):
