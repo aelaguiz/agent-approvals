@@ -1,6 +1,6 @@
 # Cards
 
-Two things shape a card. Its **type** says what the action is: read the section for your type below for what the approver judges and what the card must include. Its **kind** is how he'll judge it and answer it: a yes or no, today beside after, a row each, a pick, a batch. The kinds are combinations of the fields below and work with any type. The examples show the shape; your facts come from your own work.
+Two things shape a card. Its **type** says what the action is: read the section for your type below for what the approver judges and what the card must include. Its **kind** is how he'll judge it and answer it: a yes or no, a journey, a row each, a pick, a batch. The kinds are combinations of the fields below and work with any type. The examples show the shape; your facts come from your own work.
 
 Contents: [Fields](#fields) · [What goes on the card](#what-goes-on-the-card-and-what-goes-in-the-thread) · [Kinds](#kinds-how-he-judges-it-and-answers-it) · [creative](#creative) · [reply](#reply) · [budget](#budget) · [purchase](#purchase) · [money](#money) · [player_message](#player_message) · [price](#price) · [experiment](#experiment) · [page](#page) · [content](#content) · [email](#email) · [account](#account)
 
@@ -22,7 +22,8 @@ Contents: [Fields](#fields) · [What goes on the card](#what-goes-on-the-card-an
 | `part_of` | Required. The initiative the card belongs to, in the approver's words for it, or `null` when it stands alone. Shown under the title. |
 | `basecamp` | Optional. The Basecamp item the card serves (`https://app.basecamp.com/<account>/...`), or a list of them; `approvals submit --basecamp <url>` adds more. "Part of:" links to the first. Each Basecamp card gets one step, written as you, saying where the approval stands; a to-do gets only the link. |
 | `if_no_answer` | What happens if the deadline passes with no answer ("it stops at 72 hours"). Shown with the deadline in the small line under the buttons and on the notification line; told back to you if it expires. |
-| `gallery` | Pictures, each `{"image": "/abs/path.png", "label": "…", "note": "…", "mark": [x, y, w, h], "video": "/abs/clip.mp4"}`. The label says what it is: today or after, real or mock, which phone and build (under 150 characters). `mark` outlines what changed, in the picture's pixels; mark the same place on the today picture so the two line up. `video` adds a Play button (a clip of motion). One picture shows full width; two to ten are a swipeable carousel, each slide zoomed onto its mark (or showing the whole picture) with a Full size button. The pictures also go in the card's thread, full size. |
+| `journey` | For a change to what users see: the user's path today and the path with the change, screen by screen ([how to build one](#a-change-to-what-users-see-the-journey)). One entry for each kind of user, up to 4: `{"who": "…", "steps": [...]}`, or `"places"` in place of `steps`, with optional `"today"` and `"after"` to name the two paths. A step is `{"today": screen, "after": screen, "then": "what the user does next"}`; a screen is `{"image": "/abs/path.png", "label": "what the user sees", "source": "real or mock, which phone and build", "new": true}`. `"after": "same"` repeats today's screen, and `{"ends": "…"}` says in words where a path stops with no screen. A place is `{"name", "today": screen, "after": screen}`. The card shows each entry as a map with a See it big button; the screens also go in the card's thread, full size, in order. |
+| `gallery` | Pictures that aren't a journey (an ad's frames, a chart, a room's art, an email as designed), each `{"image": "/abs/path.png", "label": "…", "note": "…", "mark": [x, y, w, h], "video": "/abs/clip.mp4"}`. The label says what it is: today or after, real or mock, which phone and build (under 150 characters). `mark` outlines what changed, in the picture's pixels; mark the same place on the today picture so the two line up. `video` adds a Play button (a clip of motion). One picture shows full width; two to ten are a swipeable carousel, each slide zoomed onto its mark (or showing the whole picture) with a Full size button. The pictures also go in the card's thread, full size. |
 | `sections` | Titled groups of lines: `{"title": "What the reads found", "lines": [...]}`. A line is text, `[label, value]`, or `{"text": "…", "tag": "Updaters"}`. Start a line with ✅, ⚪ or ⏳ when that helps him read it. |
 | `links` | Up to 5 `[label, "https://…"]` buttons that open a page, beside the answer buttons: the deck, the reads, the clips. |
 | `parts` | Rows answered one by one: `{"title", "note", "quotes", "image", "yes_label", "no_label", "options", "pick", "own_yes", "id"}`. Up to 10. The card numbers the rows, so titles don't need numbers. A row's `quotes` (`{"label", "text"}`, like their message and your reply) are drawn under its title, right above its buttons. Each row gets its own buttons (Approve and No unless you name them), and a row with a picture gets a See it button. Approve all appears while two or more plain rows are open; `own_yes: true` keeps a row out of it (when auto-approval is on, his deputy's approval of the card still covers such a row). A revision keeps the answer of every row you leave exactly as it was (matched by `id`, else position). |
@@ -43,7 +44,7 @@ A card is one decision he makes from what's on it, with the buttons right under 
 Where it went each way, all from cards in November 2026:
 
 - **A set, not rows.** Four people waiting on answers about charges, each with their message and the reply you'd send as him. On one card with a row each, the replies didn't fit in the rows, so they sat behind four Read buttons at the bottom and each row said "The reply is Reply 1 below": "I would rather get separate approval cards than have this weird homework." As four cards sent together, each holds their words, your reply and its own Send and No, and each is answered in one look.
-- **Together, not one by one.** Four small changes toward one goal came as four cards over 34 minutes. He answered them in nine as the set they were (two approved, one declined, one sent back for better words) and asked that related asks "come together rather than individually." Each was judged from its before-and-after picture and a line, so they're rows on one card; had each needed its own reading, a set.
+- **Together, not one by one.** Four small changes toward one goal came as four cards over 34 minutes. He answered them in nine as the set they were (two approved, one declined, one sent back for better words) and asked that related asks "come together rather than individually." Each was judged from its screen today and with the change, and a line, so they're rows on one card; had each needed its own reading, a set.
 - **Rows.** A release's server, Google Play and iPhone. Each is a line, and he answers them differently because the stores leave him different time to catch a problem.
 - **Rows, once the proof moved out.** Two reads that decide one plan. As rows of 300 words each (the method, the counts behind the counts, what each fallback costs) they were a wall; as two or three lines each (what it finds, what it changes, what it costs), with the method in `evidence`, he answers each where he reads it.
 - **One yes, not four rows.** Four small checks toward one purpose at a few dollars each, which he had approved one by one until he answered one that rose to about $15 with "i don't care $15 is cheap". One row, "Run all four", listing them inside it.
@@ -76,7 +77,7 @@ And the paragraph moves to `evidence`, with the link to its source. The approver
 
 Before the fields, shape the card around how he will judge it. Picture the approver deciding: what does he have to see, and what does he have to be able to say back? Most of his replies to cards that failed him were the card's shape, not its content: "show me the before and after for each change", "I don't want to click through and approve each of them", "I want to see it as designed, I don't wanna see plain text", and "I should approve the store builds and app store submission separately from google play". So:
 
-- **If he judges it by looking, put it on the card the way people will meet it.** A change to a screen is today beside the after, each picture saying whether it's real or a mock and from which phone and build, with the change outlined (`gallery`, with `mark`). An email is its designed render at phone width, a push its exact words, an ad its first frame full height. Text describing a screen makes him ask for the screen. Each picture also has to be readable when he opens it full size and zooms in, because the card shows it as a thumbnail and the picture itself is all he has: a screen at the phone's own resolution, a slide or mock exported at two or three times the size it's shown at, and cut to what the row is about rather than a whole slide around it. Rows 2 to 4 of the coaching-at-the-table card on November 9 were whole deck slides at 1,100 pixels, six phone screens to a slide, and nothing in them could be read at any zoom ("I can't tell shit from a blurry small image"); the one screen that changed, at full resolution, could. A picture that only sets the scene, like a hand of six moments shown as one strip, is the exception that reads at a glance, so it needs size but no crop.
+- **If he judges it by looking, put it on the card the way people will meet it.** An email is its designed render at phone width, a push its exact words, an ad its first frame full height. A change to what users see is met as a path: where the user was, what they tapped, what came up. So it goes on the card as its journey (`journey`), today's path and the changed one, never as a strip of separate screens ([A change to what users see](#a-change-to-what-users-see-the-journey)). Text describing a screen makes him ask for the screen, and screens with nothing joining them make him ask for the journey. Each picture also has to be readable when he opens it full size and zooms in, because the card shows it as a thumbnail and the picture itself is all he has: a screen at the phone's own resolution, a slide or mock exported at two or three times the size it's shown at, and cut to what the row is about rather than a whole slide around it. Rows 2 to 4 of the coaching-at-the-table card on November 9 were whole deck slides at 1,100 pixels, six phone screens to a slide, and nothing in them could be read at any zoom ("I can't tell shit from a blurry small image"); the one screen that changed, at full resolution, could. A picture that only sets the scene, like a hand of six moments shown as one strip, is the exception that reads at a glance, so it needs size but no crop.
 - **If he'll want to answer the pieces differently, give each piece its own answer:** a row (`parts`) when a line or two decides it, its own card in a set when it needs its own reading ([One card or a set](#one-card-or-a-set)). A row's own words (their message, your reply) go in its `quotes`, drawn above its buttons. A piece that takes something away from people or speaks in his name never rides on Approve all (`own_yes`).
 - **If the call is between things, each button is one of them, said as what a tap makes happen.** Approve and No don't fit a choice between two things, and they misfire when your pick isn't the yes: a green Approve beside a red No reads as "the work dies if you follow me". Use `options` with your `pick`, on the card or on a row, and name each for what happens ("Stop at 72 h, resume if the read says so" and "Keep training"; "Only never-played users keep the Ticket back"). Everywhere else on the card, call each choice by that name too. A key (A, B, C, 1, 2) is a label of yours that he has to look up and carry while he reads: on November 14 a card's buttons read Pick A, Pick B and Pick C under facts headed "Why C" and "What C takes", and he wrote "I have no idea what A, B, or C are" and "I want to click a button that says, 'We're going to do this thing.'" When a choice takes more than a button holds, give it a `title`, drawn right above the buttons, and keep the button the act. The other edge is a button carrying the case: why it's your pick goes in the facts.
 - **If it's many of the same thing, ask once.** Ten emails to ten creators are one card with `items`: a yes sends all, and Pick which lets him hold some back.
@@ -87,27 +88,75 @@ These combine: a release has what players get and a row per store; a call on spe
 
 Each example is made up, modelled on a real card that failed in its old shape.
 
-### Before and after
+### A change to what users see: the journey
 
-Anything users will see change: a screen, words in the app, a lesson, a store listing. He judges it by comparing, so each change is today's real screen beside the after, the change outlined.
+He judges a change to the product by following one user through it with his eyes: where they are, what they tap, what comes up, and what came up there before. Separate screens leave him to build that path in his head, and he can't: only you know which screen leads to which. In five days of November 2026 he replied on 10 cards asking to be shown it: "I need you to show me the user journey before and after", "I can't figure out ... what changed in this", "Do a quick deck showing me the before-and-after user journey. I can't understand what you're proposing". Most of those cards had the right screens on them. What they lacked was the path. So a card that changes what a user sees carries the path, as `journey`, and he never has to ask for it.
+
+What he gets: on the card, a map of each journey, today's path above the changed one, an arrow between screens naming the tap. Slack shows a picture no bigger than 600 by 400 pixels, so the map shows only the journey's shape: how many steps, and where the change is. Under it, See it big opens a page where every screen shows at the full height of his window, today beside the change, and the arrow keys step along the path. The card's thread gets each screen once, full size, in order.
+
+Build it the way he would walk it:
+
+- **One kind of user at a time,** named as he would picture them ("a trial user who cancelled in the store and opens the app again before the trial ends"), in the state most of them are really in. When the change touches a second kind of user (the person who receives the invite, the one who says no, the one who skips where the first one watches), they get an entry of their own, so each path reads straight through.
+- **From where they really are to the first screen of what they get.** A path that starts on the feature's first screen hides how anyone reaches it, and one that stops on "You passed" hides what they got for it. Home, a push, the store's page and the store's own purchase dialog are screens on the path like any other.
+- **Every tap named** (`then`): "Taps Change my plan", "Opens the app again", "Watches to the end". The tap is what makes it a journey. Without it the screens are a set, in whatever order.
+- **Today is a path of its own, for the same user.** A change with no today beside it reads as a new feature, and he can't tell what it replaces. Where today has no screen, say in words where the path ends (`ends`): "Home, as usual. Nothing offers the month." A screen that is the same on both paths is `"after": "same"`.
+- **Every screen says what it is** (`source`): real or mock, which phone, which build. He takes a screen for the shipped product unless it says otherwise. Take a path's screens from one state, too: screens gathered from different accounts and days contradict each other where he looks first, like a table shown unplayed right after the screen where it was won.
+- **Nothing drawn on a screen.** He is judging the screen, and a ring or an arrow over it covers what he is looking at. `new: true` frames a new or changed screen from outside, and a change small enough to miss is named in its label ("The row now shows all three raise sizes").
+
+The journey is as long as the change, and that settles its shape.
+
+**A new step or a new flow** is the whole path it sits in, from the screen where the user really is:
 
 ```json
-{"type": "content", "title": "Release three lesson fixes to every user",
- "why": "Three lessons teach a step wrong or out of order today, and every user who plays them learns it that way.",
- "part_of": "Today's lessons teach what users need",
- "gallery": [
-   {"image": "/abs/fix1-today.png", "label": "Fix 1 of 3 · TODAY · real screen, iPhone, 2.1.65", "mark": [220, 200, 455, 225]},
-   {"image": "/abs/fix1-after.png", "label": "Fix 1 of 3 · AFTER · real screen, staging", "note": "New: this step comes between step 4 and the board-only question.", "mark": [220, 200, 455, 225]},
-   {"image": "/abs/fix2-today.png", "label": "Fix 2 of 3 · TODAY · real screen, iPhone, 2.1.65"},
-   {"image": "/abs/fix2-after.png", "label": "Fix 2 of 3 · AFTER · real screen, staging"}],
- "facts": [["Who gets it", "every user on today's lessons, app versions back to 2.1.38, in all seven languages"]],
- "yes_label": "Release all 3", "change_label": "Change this fix", "no_label": "No",
- "approves": "these three fixes to today's lessons.", "does_not_approve": "the new Learn path test."}
+{"type": "player_message", "title": "Offer the monthly plan to trial users who cancelled the yearly one",
+ "why": "Trial users who cancel name the price. This offers the month to those who already cancelled the year, so it can't pull yearly payers down.",
+ "part_of": "More trials end in a payment",
+ "journey": [{
+   "who": "A trial user who cancelled the yearly plan in Google Play and opens the app again before the trial ends",
+   "after": "With the message",
+   "steps": [
+     {"today": {"image": "/abs/play-cancelled.png", "label": "Cancels the trial in Google Play", "source": "Real · Google Play, a Pixel 9"},
+      "after": "same", "then": "Opens the app again"},
+     {"today": {"ends": "Home, as usual. Nothing offers the month, and Plus ends with the trial."},
+      "after": {"image": "/abs/message.png", "label": "\"Not ready for a year?\" shows once, over Home", "source": "Mock · the designer's", "new": true},
+      "then": "Taps Change my plan"},
+     {"after": {"image": "/abs/manage.png", "label": "Manage subscription: the year, with renewal off", "source": "Real · Android 2.1.76"},
+      "then": "Taps Change plan"},
+     {"after": {"image": "/abs/change-plan.png", "label": "Change plan: Monthly is already picked", "source": "Real · Android 2.1.76"},
+      "then": "Taps Switch to monthly plan"},
+     {"after": {"image": "/abs/play-dialog.png", "label": "Google Play's purchase dialog: the first charge comes when the trial ends", "source": "Real · a test account"}}]}],
+ "quotes": [{"label": "The message", "text": "Not ready for a year?\nKeep Plus by the month instead and cancel any time."}],
+ "facts": [["Who sees it", "trial users who cancelled and come back before the charge, once; about 36 a week in the US"]],
+ "yes_label": "Put it live", "change_label": "Change",
+ "approves": "this message, as shown, to trial users who cancelled.", "does_not_approve": "any price or plan change."}
 ```
+
+The first version of that card showed the message and the three screens after it as four separate pictures, with no arrows and nothing of today, and he asked for a page that "shows me your proposed user journey".
+
+**One changed screen** is that screen in its place: the screen before it, the screen itself today and with the change, and the screen it leads to when that matters. Three users through twelve screens would bury the one thing that changed.
+
+**The same change in several places** (a layout fix on three screens, new words wherever a button appears) has no order to walk, so it uses `places`: each place named, today beside the change.
+
+```json
+"journey": [{
+  "who": "A user on a phone 320 points wide",
+  "after": "With the fix",
+  "places": [
+    {"name": "The raise row at the table",
+     "today": {"image": "/abs/raise-today.png", "label": "Two raise sizes show; the third is cut off", "source": "Real · 2.1.76, a Pixel set to 320 × 658"},
+     "after": {"image": "/abs/raise-fix.png", "label": "All three raise sizes show", "source": "Real · test build 21833", "new": true}},
+    {"name": "The Leaderboard, before a user qualifies",
+     "today": {"image": "/abs/board-today.png", "label": "The XP bar sits under the tab bar", "source": "Real · 2.1.76"},
+     "after": {"image": "/abs/board-fix.png", "label": "The bar and \"8 / 30 XP\" show", "source": "Real · test build 21833", "new": true}}]}]
+```
+
+**Where it turns.** Some things he judges by looking have no path to walk: an ad, a post, a chart, a room's art, an email as designed. Those stay a `gallery`, an `image` or a `video`, and drawing a path for one invents it. A change no screen shows (a price in a table, a server setting) has none either. And the journey is no place for proof: the ten other phones you checked go in `evidence`.
+
+Before it goes, walk it as him. Follow each user from the first screen to the last reading only the screens and the taps, and ask of each screen what the user did to get there, whether the screen before shows it, and whether everything on it follows from the screens before.
 
 ### A set of related changes, each with its own answer
 
-Several changes toward one initiative, ready around the same time, each decided from its picture and a line. One card, a row each, so he can approve two, decline one and send one back in the same minute.
+Several changes toward one initiative, ready around the same time, each decided from its screen today and with the change, and a line. One card, a row each, so he can approve two, decline one and send one back in the same minute. The screens are one `journey` of `places`, each named as its row is.
 
 ```json
 {"type": "content", "title": "Payers keep using what they paid for: 4 changes",
@@ -116,10 +165,15 @@ Several changes toward one initiative, ready around the same time, each decided 
  "facts": [["Done looks like", "payers active in more of their first two weeks, read against the 30% held back"]],
  "links": [["Open the deck", "https://docs.google.com/presentation/d/…"]], "change_label": "Change",
  "parts": [
-   {"title": "Right after paying, take payers to what they came for", "note": "Everyone who starts Plus", "image": "/abs/after-paying-before-after.png"},
-   {"title": "Practice vs AI stops calling itself a beta", "note": "Everyone who opens Play", "image": "/abs/no-beta-before-after.png"},
-   {"title": "The paywall stops promising \"no ads\"", "note": "Every paywall, and 14 App Store subscription descriptions", "image": "/abs/paywall-before-after.png"},
-   {"title": "Tickets stops selling Plus to people who have it", "note": "Plus users who open Tickets", "image": "/abs/tickets-before-after.png"}],
+   {"title": "Right after paying, take payers to what they came for", "note": "Everyone who starts Plus"},
+   {"title": "Practice vs AI stops calling itself a beta", "note": "Everyone who opens Play"},
+   {"title": "The paywall stops promising \"no ads\"", "note": "Every paywall, and 14 App Store subscription descriptions"},
+   {"title": "Tickets stops selling Plus to people who have it", "note": "Plus users who open Tickets"}],
+ "journey": [{"who": "A user who has just started Plus", "places": [
+   {"name": "Right after paying", "today": {"image": "/abs/after-paying-today.png", "label": "Lands on Home", "source": "Real · iPhone, 2.1.65"},
+    "after": {"image": "/abs/after-paying-after.png", "label": "Lands on the game they tapped Plus for", "source": "Mock", "new": true}},
+   {"name": "Practice vs AI", "today": {"image": "/abs/beta-today.png", "label": "The header says Beta", "source": "Real · iPhone, 2.1.65"},
+    "after": {"image": "/abs/beta-after.png", "label": "No Beta in the header", "source": "Mock", "new": true}}]}],
  "approves": "each row you approve, as shown.", "does_not_approve": "rows you decline or change, or anything else in this work."}
 ```
 
@@ -274,7 +328,12 @@ Only where your repository's rules send a build decision to a card that links it
 {"type": "experiment", "title": "Build and test two screens on the onboarding paywall",
  "why": "The test decides which paywall new users see: if the test half brings more payers by day 8, it goes to everyone; if not, today's stays.",
  "part_of": "More new users pay when they first see Plus",
- "gallery": [{"image": "/abs/test-half.png", "label": "TEST HALF · mock"}, {"image": "/abs/today.png", "label": "Today · real"}],
+ "journey": [{"who": "A new user who has just answered onboarding's last question", "after": "The test half",
+   "steps": [
+     {"today": {"image": "/abs/last-question.png", "label": "Onboarding's last question", "source": "Real · iPhone, 2.1.65"}, "after": "same", "then": "Taps Continue"},
+     {"today": {"image": "/abs/paywall-today.png", "label": "Today's paywall: one screen", "source": "Real · iPhone, 2.1.65"},
+      "after": {"image": "/abs/paywall-test-1.png", "label": "What Plus gives, with Continue", "source": "Mock", "new": true}, "then": "Taps Continue"},
+     {"after": {"image": "/abs/paywall-test-2.png", "label": "The plans and the price", "source": "Mock", "new": true}}]}],
  "facts": [["Who", "half of new users"], ["Decides it", "payers by day 8: about 17 to 35 days, early reads at about 3 and 10"],
            ["Stops it", "about 1.1 fewer trials per 100 users shown, visible in about 9 days"], ["Holds", "this screen until about mid-December"],
            ["Replaces", "the design you sent back at 7:23 pm"]],
