@@ -305,3 +305,20 @@ def test_closed_agy_resumes_with_identity_model_effort_and_enter_trust(monkeypat
     assert ["pane", "send-keys", "w1:p9", "Enter"] in fake.calls
     assert ["pane", "send-keys", "w1:p9", "Down", "Enter"] not in fake.calls
     assert res.reach["session_id"] == SID_A
+
+
+def test_herdr_read_falls_back_to_visible_for_alternate_screen_tuis():
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd[3:])
+        if "--source" in cmd and cmd[cmd.index("--source") + 1] == "visible":
+            return SimpleNamespace(returncode=0, stdout="Do you trust the contents of this project?", stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    h = router.Herdr("brain", run=fake_run)
+    assert "Do you trust" in h.read("w1:p1", 15)
+    assert calls == [
+        ["pane", "read", "w1:p1", "--source", "recent-unwrapped", "--lines", "15"],
+        ["pane", "read", "w1:p1", "--source", "visible"],
+    ]

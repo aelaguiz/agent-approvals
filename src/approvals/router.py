@@ -79,13 +79,22 @@ class Herdr:
         except HerdrError:
             pass
 
-    def read(self, pane_id, lines=40):
+    def read(self, pane_id, lines=40, source="recent-unwrapped"):
         try:
-            r = self.call("pane", "read", pane_id, "--source", "recent-unwrapped", "--lines", str(lines))
+            args = ["pane", "read", pane_id, "--source", source]
+            if source != "visible":
+                args += ["--lines", str(lines)]
+            r = self.call(*args)
             if "raw" in r:          # pane read prints the screen text, not JSON
                 return r["raw"]
             res = r.get("result", {})
-            return res.get("text") or res.get("content") or json.dumps(res)
+            text = res.get("text") or res.get("content")
+            if text:
+                return text
+            if source != "visible":
+                # Alternate-screen TUIs (such as agy) keep scrollback empty; read the visible viewport instead.
+                return self.read(pane_id, lines=lines, source="visible")
+            return ""
         except HerdrError:
             return ""
 
