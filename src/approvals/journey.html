@@ -268,9 +268,6 @@
     document.documentElement.classList.add('jv-open');
     draw();
     closeButton.focus();
-    // Load this card's full-size screens now, so the arrow keys never wait on a picture.
-    const card = list[index].card;
-    card.images.forEach((_, image) => preload(imageUrl(card, {image}, 's')));
   }
 
   // A loaded picture is kept, so showing it again never fetches it again.
@@ -308,9 +305,10 @@
 
   function draw() {
     const {card, entry, row, i, total} = list[current];
-    // The screens on either side load now, so a step into the next card doesn't wait either.
-    for (const near of [list[current - 1], list[current + 1]]) {
-      if (near) sides.forEach(side => { const scr = cell(near.row, side); if (scr && !scr.ends) preload(imageUrl(near.card, scr, 's')); });
+    // Load every full-size screen of this card and of the cards on either side, so the arrow keys never wait
+    // on a picture, into the next card either.
+    for (const near of [list[current], list[current - 1], list[current + 1]]) {
+      if (near) near.card.images.forEach((_, image) => preload(imageUrl(near.card, {image}, 's')));
     }
     vTitle.textContent = card.id + ' · ' + card.title + (grouped ? ' · ' + card.state : '');
     vWho.textContent = entry.who;
