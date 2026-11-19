@@ -96,7 +96,7 @@ def _prepare_media(card, version):
 def _publish_journey(rec, n):
     """Publish the version's page once it can link back to the Slack card."""
     card = rec["versions"][n - 1]["card"]
-    if not card.get("journey") or not config.settings().get("page_share_command"):
+    if not card.get("journey"):
         return
     with tempfile.TemporaryDirectory(prefix="approvals-") as folder:
         journey.write_page(folder, rec, n)

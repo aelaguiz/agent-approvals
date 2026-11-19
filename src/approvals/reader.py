@@ -57,7 +57,12 @@ def card_text(c):
                 if side not in row:
                     continue
                 cell = row[side]
-                words = "same" if cell == "same" else cell["ends"] if "ends" in cell else f"{cell['label']} · {cell['source']}"
+                if cell == "same":
+                    words = "same"
+                elif "ends" in cell:
+                    words = cell["ends"]
+                else:
+                    words = f"{cell['label']} · {cell['source']}"
                 L.append(f"    {entry.get(side, journey.PATH_NAMES[side])}: {words}")
             if tap := row.get("then"):
                 if isinstance(tap, dict):

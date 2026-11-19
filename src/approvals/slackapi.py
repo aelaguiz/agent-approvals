@@ -260,5 +260,8 @@ def _share(cmd, path, title, description):
                          capture_output=True, text=True, timeout=600)
     m = re.search(r"^URL: (\S+)", out.stdout, re.M)
     if out.returncode != 0 or not m:
-        raise RuntimeError("cf-share failed: " + (out.stderr or out.stdout)[-500:])
+        detail = (out.stderr or out.stdout).strip()[-500:]
+        if not detail:
+            detail = f"command exited with status {out.returncode}" if out.returncode else "command did not print URL: <link>"
+        raise RuntimeError("cf-share failed: " + detail)
     return m.group(1)

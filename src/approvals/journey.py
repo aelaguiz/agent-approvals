@@ -86,7 +86,7 @@ def _tile(cell, label_font, source_font):
     shot = _resize(_image(cell["image"]), SCREEN)
     label = _wrap(cell["label"], label_font, SCREEN)
     source = _wrap(cell["source"], source_font, SCREEN)
-    source_y = shot.height + 20 + _text_size(label, label_font)
+    source_y = shot.height + 24 + _text_size(label, label_font)
     img = Image.new("RGB", (SCREEN + 12, source_y + _text_size(source, source_font) + 12), BG)
     draw = ImageDraw.Draw(img)
     if cell.get("new"):
@@ -197,6 +197,8 @@ def write_page(folder, rec, n):
                 if isinstance(cell, dict) and "image" in cell:
                     row[side] = {key: cell[key] for key in ("label", "source", "new") if key in cell}
                     row[side]["image"] = indices[Path(cell["image"]).expanduser().resolve()]
+                elif isinstance(cell, dict):
+                    row[side] = {"ends": cell["ends"]}
             rows.append(row)
         page_entries.append({"who": entry["who"], shape: rows, **{s: entry.get(s, PATH_NAMES[s]) for s in SIDES}})
     data = {"id": rec["id"], "version": n, "agent": rec["agent"], "title": card["title"], "why": card["why"],

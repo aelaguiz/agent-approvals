@@ -70,6 +70,7 @@ make install MACHINE=laptop
 | `timezone` | For deadlines shown on cards, team quiet and work hours, and the morning list's 8 am. |
 | `default_herdr_session` | Where the listener opens panes when an agent's own Herdr session is gone. |
 | `video_share_command` | Optional. A command that publishes a video and prints `URL: <link>`. Without it, videos go into the card's thread, where Slack plays them. |
+| `page_share_command` | Optional. A command that publishes a journey's page folder and prints `URL: <link>`. The command takes `--title`, `--description` and the folder path. The card gets a **See it big** button when the command returns a URL. |
 | `test_approver` | For test runs only. A user whose `[test reply]` posts count, and only on TEST cards. |
 | `alarm` | Optional. `{"channel": "<Slack channel id>", "wake": ["<program>", "<arg>"]}` posts delivery alarms to that channel and runs the command with the alarm on standard input. A leading `~` in the program path is expanded. |
 | `id_prefix` | Optional. What request numbers start with; `AP` unless set. Each Slack workspace needs its own. |
@@ -182,7 +183,18 @@ The full card opens with a link to the conversation and, when readable and writt
 
 If the app cannot read the conversation, the full card still carries its link. The command says that the thread will not show the card and tells the agent to link it there itself.
 
-A card is JSON. [skills/approvals/references/cards.md](skills/approvals/references/cards.md) describes every field, type and kind, with an example of each.
+A card is JSON. The [card reference](skills/approvals/references/cards.md) describes the card types and ways to answer.
+
+### Show a user journey
+
+Use `journey` to show today and the proposed change, screen by screen. Give one entry or a list of up to four, one per kind of user. Each entry needs `who` (up to 200 characters) and can name its paths with `today` and `after` (up to 40 characters each). They default to “Today” and “With the change”.
+
+- Use `steps` for an ordered path of one to eight steps. Each step has `today`, `after` or both. Either side can show a screen or `{"ends": "What happens when this path stops"}` (up to 200 characters). An `after` can also be `"same"` when `today` is a screen. On each step with another step after it, give `then` as the action that gets the user there, up to 80 characters. Use `{"today": "...", "after": "..."}` when the actions differ.
+- Use `places` for one to six separate comparisons. Give each place a `name` (up to 60 characters) and a screen on both sides. Each comparison stands on its own.
+- Each screen needs `image` (a local picture file), `label` (what the user sees, up to 150 characters) and `source` (real or mock, which phone and build, up to 100 characters). Mark a changed screen with `"new": true`.
+- Every entry shows what happens today and at least one screen with the change. Use `ends` when the path doesn't exist today.
+
+The journey counts as media for a card that needs it. It can sit above a `gallery` on the same card. Slack shows one map per entry, and the thread has the maps and full-size journey pictures. With `page_share_command` set, **See it big** opens the version's page. Click a screen for the full-screen viewer, or link straight to it with `#big=0` for the first entry or `#big=0:1` for its second step. Use the arrow keys, Space, B and Esc, or swipe on a phone.
 
 ## How it works
 
