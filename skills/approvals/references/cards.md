@@ -467,6 +467,8 @@ Prices, offers, discounts, or the words on a paywall. The approver judges each c
 
 Turning a test or feature flag on or off, or changing who's in it, when everything it switches is already built. An experiment that needs app or server work before it can run is a decision to build, which goes on a card only when your repository's rules send it there with its deck ([A test to build and read](#a-test-to-build-and-read)). The approver judges what players will see, how many, and for how long.
 
+Where your repository has its own layout for experiment cards, write the card that way. In psbrain it is `$running-experiments` (its `references/cards.md`): the kind of experiment first, what each result does as one marked line a result, how it is read on one line each, and, on a card that ends an experiment or sends it to everyone, the numbers as a table.
+
 - **Must include:** facts for what's being tested, who is in it and how many, and what players see.
 - **Good facts:** what goes wrong if nothing is done.
 
