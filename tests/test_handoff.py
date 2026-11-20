@@ -611,3 +611,16 @@ def test_the_summary_and_history_name_the_hand_off_and_automatic_return(team, sl
     rec = store.load(RID)
     assert "Riley · handed by you · ↩️ came back to you unanswered" in txt(digest.summary(store.deputy(), since, [rec]))
     assert "back with Sam: Riley hadn't answered" in "\n".join(cli._happened(rec))
+
+
+def test_a_question_after_his_yes_leaves_the_yes_standing_past_the_deadline(team, slack, monkeypatch):
+    card()
+    click("approve", user=APPROVER, channel=CHANNEL)
+    cli.main(["ask", RID, "May I clear the second pile the same way?"])
+    rec = store.load(RID)
+    assert rec["status"] == "approved" and rec["open_question"]["text"].startswith("May I")
+    later = store.parse(rec["deadline"]) + timedelta(seconds=1)
+    monkeypatch.setattr(store, "now", lambda: later)
+    listener.Listener().sweep()
+    rec = store.load(RID)
+    assert rec["status"] == "approved" and rec["decision"]["verdict"] == "approved"

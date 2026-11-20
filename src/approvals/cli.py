@@ -308,7 +308,8 @@ def cmd_ask(a):
         send = core.conversation_send(rec)
         reach.refresh(rec, reach.capture())
         rec["open_question"] = {"text": a.question, "at": store.iso()}
-        rec["status"] = "question"
+        if rec["status"] not in core.CLOSED:  # a follow-up on a decided card leaves the decision standing
+            rec["status"] = "question"
         if (cards.also_on(rec, len(rec["versions"])) or {}).get("sent_at"):
             rec["card_dirty"] = True
         core.mark_acked(rec)
