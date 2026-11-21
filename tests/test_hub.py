@@ -307,6 +307,10 @@ def test_a_cards_pictures_and_videos_go_from_its_machine_through_the_hub_into_th
             return self.answer(200, {"record": dict(body["record"], id="AP-0001"), "rev": 1})
 
         def do_GET(self):
+            if self.path == "/api/cards/who":
+                return self.answer(200, {"channel": "CTEST", "approver": "UAPPROVER", "approver_name": "Sam",
+                                         "approvers": {}, "team": {}, "team_order": [], "team_answers_any": False,
+                                         "deputy": None})
             return self.answer(200, {"record": dict(writes[-1]["record"], id="AP-0001"), "rev": len(writes)})
 
         def answer(self, code, obj):

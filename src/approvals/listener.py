@@ -2,7 +2,16 @@
 
 On the workspace's hub it does all of that, delivers to the sessions on its own machine, and serves the records
 to the other machines. On every other machine it only delivers to the sessions there.
+
+A hub that keeps its cards in the pod dashboard's record doesn't connect to Slack. Slack sends every press and pop-up
+answer to the record, which takes it (or refuses it in the presser's thread) before Slack is answered and opens each
+pop-up from the ones kept with the card's version. The hub hears each change from the record's stream: it carries out
+every answer taken and not carried out, in the order taken, with the same press code a Slack press runs here, and the
+write that does names the answer, so the record marks it carried out once. On start it carries out whatever was taken
+while it was stopped. Its own deadlines and hand-backs, the deputy's calls and answers an agent records are answers
+the record takes too.
 """
+import collections
 import logging
 import logging.handlers
 import os
@@ -95,6 +104,15 @@ class Listener:
         self.next_stray_look = 0.0
         self.steps = queue.Queue()        # requests whose Basecamp steps this machine should write
         self.steps_queued = set()
+        self.carrying = threading.Lock()  # one pass over the record's waiting answers at a time, so each in order
+        self.answers_waiting = threading.Event()
+        self.outcomes = collections.OrderedDict()   # answer id -> None (carried out) or the refusal's words
+        self.deputy_live = None           # auto-approval as last heard from the record
+
+    @staticmethod
+    def later(follow_up):
+        """What follows an answer carried out (the card and the list redrawn, words in the thread), off the carrier."""
+        threading.Thread(target=follow_up, daemon=True).start()
 
     # ----- buttons -----
 
@@ -531,7 +549,9 @@ class Listener:
             if not rec.get("thread_ts"):
                 continue
             if rec["status"] in ("pending", "question") and store.parse(rec["deadline"]) <= store.now():
-                if store.update(rec["id"], expire_due):
+                if store.record():
+                    self.give_own(rec, "expire", f"expire:{rec['id']}:{rec['deadline']}")
+                elif store.update(rec["id"], expire_due):
                     log.info("%s expired", rec["id"])
                 rec = store.load(rec["id"])
             send = cards.also_on(rec, len(rec["versions"]))
@@ -542,7 +562,10 @@ class Listener:
                 send = cards.also_on(rec, len(rec["versions"]))
             if (cards.handed(rec) and send.get("sent_at") and store.parse(send["return_at"]) <= store.now()
                     and not core._not_callable(rec, send["version"], send["at"])):
-                self.return_hand(rec)
+                if store.record():
+                    self.give_own(rec, "return", f"return:{rec['id']}:{send['at']}")
+                else:
+                    self.return_hand(rec)
                 rec = store.load(rec["id"])
             if rec.get("card_dirty"):
                 self.try_refresh(rec["id"])
@@ -600,6 +623,7 @@ class Listener:
         if name:
             hours = config.settings()["handoff_hours"]
             self.broadcast_return(rec, f"{cards.esc(name)} hasn't answered this in {hours} working hours, so it's back with you.")
+        return name
 
     def broadcast_return(self, rec, words):
         approver = config.card_target(rec)["approver"]
@@ -866,6 +890,185 @@ class Listener:
             return f"⚠️ Couldn't reach {r['agent']} yet: {res.reason}. Trying again hourly; it's also in its `approvals inbox`."
         return None
 
+    # ----- the answers the record took, when the record keeps the cards -----
+
+    def carry(self, a):
+        """One answer the record took, carried out by the press code its button runs here, in a write that names it.
+        None once carried out, or the words of this hub's own refusal, which are marked on the answer and, for a press
+        in Slack, shown to the presser where the card is."""
+        rid, n, what, user, words = a["card"], a["version"], a["what"], a.get("slack_user"), a.get("words")
+        rec = store.load(rid)
+        via = a["via"]
+        acting = store.ACTOR.set(user if via in ("slack", "dashboard") else None)
+        where = core.VIA.set("dashboard" if via == "dashboard" else "Slack")
+        answer = store.ANSWER.set(a["id"])
+        try:
+            if via in ("slack", "dashboard"):
+                if what in ("change", "edit", "items") or what.endswith(":change"):
+                    r, follow_up = self.submit(rec, n, what, words or "", user, f"answer:{a['id']}", a.get("items"))
+                else:
+                    r, follow_up = self.press(rec, n, what, user, words=words, until=a.get("until_at"))
+            elif via == "deputy":
+                d = store.deputy()
+                detail = a["detail"]
+                r = store.update(rid, lambda r: core.call(r, what.split(":")[1], words, d["reach"]["agent"],
+                                                          bool(detail["live"]), detail.get("also"),
+                                                          urgent=bool(detail.get("urgent")))) if d else \
+                    "Only the deputy's own session can make a call; nobody is the deputy now."
+                follow_up = lambda: (self.try_refresh(rid), self.refresh_list())
+            elif what == "expire":
+                def expire_due(r):
+                    if r["status"] not in ("pending", "question") or store.parse(r["deadline"]) > store.now():
+                        return "already"
+                    core.expire(r)
+                    return "ok"
+                r = store.update(rid, expire_due)
+                follow_up = lambda: (self.try_refresh(rid), self.refresh_list())
+            elif what == "return":
+                r = "ok" if self.return_hand(rec) else "gone"
+                follow_up = lambda: (self.try_refresh(rid), self.refresh_list())
+            else:
+                detail = a["detail"]
+                verdict = "approved" if detail.get("choice") else detail["verdict"]
+                r = store.update(rid, lambda r: core.record_answer(r, verdict, words, detail["where"],
+                                                                   detail.get("part"), detail.get("choice")))
+                follow_up = lambda: (self.try_refresh(rid), self.refresh_list())
+        finally:
+            store.ANSWER.reset(answer)
+            core.VIA.reset(where)
+            store.ACTOR.reset(acting)
+        log.info("answer %s on %s v%s by %s %s -> %s", a["id"], rid, n, via, what, r)
+        if r == "ok":
+            if follow_up:
+                self.later(follow_up)
+            return None
+        refused = self.REFUSED.get(r, r)
+        store.record().refuse(a["id"], refused)
+        if via == "slack":
+            # Where the door says he pressed it, else the card's own thread.
+            detail = a.get("detail") or {}
+            channel = detail.get("channel") or config.card_target(rec)["channel"]
+            try:
+                slackapi.ephemeral(user, refused, detail.get("thread_ts") or rec.get("thread_ts"), channel_id=channel)
+            except Exception as e:
+                log.warning("telling %s that answer %s was refused failed: %s", user, a["id"], e)
+        return refused
+
+    def carry_waiting(self):
+        """Every answer the record took and nothing has carried out, oldest first. A pass that can't reach the record
+        stops where it is, so the next carries on from the same answer."""
+        with self.carrying:
+            for a in store.record().answers():
+                try:
+                    outcome = self.carry(a)
+                except store.Refused as refused:   # the record refused the write that would carry it out
+                    outcome = str(refused)
+                    log.warning("the record refused carrying out answer %s on %s: %s", a["id"], a["card"], refused)
+                    store.record().refuse(a["id"], outcome)
+                self.outcomes[a["id"]] = outcome
+                while len(self.outcomes) > 1000:
+                    self.outcomes.popitem(last=False)
+
+    def give(self, answer):
+        """An answer given on this hub or sent to it (the deputy's call, one an agent records, its own timers): taken by
+        the record, then carried out. 'ok', or Refused with the words."""
+        taken = store.record().take(answer)
+        self.carry_waiting()
+        refused = self.outcomes.get(taken["answer"])
+        if refused:
+            raise store.Refused(refused)
+        return "ok"
+
+    def give_own(self, rec, what, key):
+        """The hub's own answer on its timer: a deadline passed, or a hand-off not answered in time."""
+        try:
+            self.give({"card": rec["id"], "version": len(rec["versions"]), "what": what, "via": "timer", "key": key})
+        except store.Refused as refused:
+            log.info("%s: the record took no %s: %s", rec["id"], what, refused)
+
+    def carrier(self):
+        """Carries out the waiting answers each time the record says a card changed, and at least every sweep, so an
+        answer whose carrying out couldn't reach the record is carried out once it can."""
+        while not self.stop.is_set():
+            self.answers_waiting.wait(self.s["sweep_seconds"])
+            self.answers_waiting.clear()
+            try:
+                self.carry_waiting()
+            except store.StoreError as e:
+                log.warning("carrying out the record's answers: %s", e)
+            except Exception:
+                log.exception("carrying out the record's answers failed")
+
+    def hear(self):
+        """The record's stream of changes: a card changed (an answer may be waiting), a card's thread in Slack changed
+        (it is read now), or a change to no card (who may answer or the deputy may have changed). A stream that is cut
+        comes back from the last change it had."""
+        after = None
+        while not self.stop.is_set():
+            try:
+                for event_id, change in store.record().changes(after):
+                    after = event_id
+                    if change is None:   # the stream's start: what was taken while nobody listened waits too
+                        self.lists_changed()
+                        self.answers_waiting.set()
+                    elif change["thing"] is None:
+                        self.lists_changed()
+                    elif change["kind"] == "approval":
+                        self.answers_waiting.set()
+                    elif change["kind"] == "thread":
+                        self.thread_changed(change["thing"])
+                    if self.stop.is_set():
+                        return
+            except store.StoreError as e:
+                log.warning("%s; hearing it again", e)
+            except Exception:
+                log.exception("hearing the record's changes failed")
+            self.stop.wait(1)
+
+    def thread_changed(self, thing):
+        """A Slack thread the record copies changed: a card's own is read now rather than in its turn. The record names
+        a thread "slack:<team>:<channel>:<time>", its Slack address."""
+        address = (store.record().thing(thing).get("thing") or {}).get("read_from") or ""
+        parts = address.split(":")
+        if len(parts) == 4 and parts[0] == "slack":
+            with self.poke_lock:
+                self.poke.add((parts[2], parts[3]))
+
+    def lists_changed(self):
+        """Who may answer is read again; when auto-approval was switched, the morning summary shows it."""
+        config.forget_lists()
+        d = store.deputy()
+        live = bool(d and d.get("live"))
+        was, self.deputy_live = self.deputy_live, live
+        if was is not None and was != live:
+            log.info("auto-approval %s in the record", "on" if live else "paused")
+            self.redraw_summary(live, store.parse(d["live_since"]) if live and d.get("live_since") else store.now())
+
+    def redraw_summary(self, live, at):
+        """The deputy's summary under the newest morning list, with the other button and who switched it when."""
+        st = digest.load_state()
+        if not st:
+            return
+        try:
+            summary = next((m for m in slackapi.history(st["ts"])
+                            if any(b.get("block_id") == "deputy" for b in m.get("blocks") or [])), None)
+            if summary:
+                slackapi.update(summary["ts"], digest.switched(summary["blocks"], live, at), summary.get("text") or "")
+        except Exception as e:
+            log.warning("redrawing the deputy's summary failed: %s", e)
+
+    def keep_views(self):
+        """Every card whose versions aren't yet kept with their pop-ups gets them, once: the write draws them."""
+        store.all_records()
+        lacking = store.record().without_views()
+        for rid in lacking:
+            try:
+                store.update(rid, lambda r: None)
+            except store.StoreError as e:
+                log.warning("keeping %s's pop-ups failed: %s", rid, e)
+        if lacking:
+            log.info("kept the pop-ups of %d cards' versions in the record", len(lacking))
+
     # ----- run -----
 
     def alarm(self):
@@ -945,19 +1148,8 @@ class Listener:
         cur, since = getattr(self, "_conn", (None, now))   # kept by quiet(), which every pass calls first
         return 0 if getattr(self, "_hello", None) is cur else now - since
 
-    def run(self):
-        if not config.is_hub():
-            return self.run_delivery()
-        if config.settings().get("hub"):
-            from . import hub
-            hub.serve()
-        sm = SlackConnection(app_token=config.app_token(), web_client=slackapi.client())
-        sm.socket_mode_request_listeners.append(self.on_socket)
-        sm.on_message_listeners.append(
-            lambda raw: '"type":"hello"' in raw[:40] and setattr(self, "_hello", sm.current_session))
-        sm.connect()
-        log.info("connected to Slack; watching %s", ", ".join(sorted({t["channel"] for t in config.targets().values()})))
-        threads = [
+    def hub_threads(self):
+        return [
             threading.Thread(target=self.loop, args=(5, self.poll_once), daemon=True),
             threading.Thread(target=self.loop, args=(self.s["sweep_seconds"], self.sweep), daemon=True),
             threading.Thread(target=self.loop, args=(5, self.deliver_due), daemon=True),
@@ -967,6 +1159,38 @@ class Listener:
             threading.Thread(target=self.loop, args=(3, self.confirm_typed), daemon=True),
             threading.Thread(target=self.step_writer, daemon=True),
         ]
+
+    def run_from_record(self):
+        """The hub of a workspace whose cards the record keeps: no Slack connection; every answer from the record."""
+        if config.file_settings().get("hub"):
+            from . import hub
+            hub.serve(carrier=self.give)
+        log.info("hearing answers from the record; not connected to Slack")
+        threads = [threading.Thread(target=self.hear, daemon=True), threading.Thread(target=self.carrier, daemon=True),
+                   threading.Thread(target=self.keep_views, daemon=True), *self.hub_threads()]
+        for t in threads:
+            t.start()
+        try:
+            while not self.stop.is_set():
+                time.sleep(1)
+        finally:
+            self.stop.set()
+
+    def run(self):
+        if not config.is_hub():
+            return self.run_delivery()
+        if store.record():
+            return self.run_from_record()
+        if config.settings().get("hub"):
+            from . import hub
+            hub.serve()
+        sm = SlackConnection(app_token=config.app_token(), web_client=slackapi.client())
+        sm.socket_mode_request_listeners.append(self.on_socket)
+        sm.on_message_listeners.append(
+            lambda raw: '"type":"hello"' in raw[:40] and setattr(self, "_hello", sm.current_session))
+        sm.connect()
+        log.info("connected to Slack; watching %s", ", ".join(sorted({t["channel"] for t in config.targets().values()})))
+        threads = self.hub_threads()
         for t in threads:
             t.start()
         try:

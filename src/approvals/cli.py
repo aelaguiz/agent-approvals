@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 import re
+import secrets
 import shutil
 import sys
 import tempfile
@@ -467,28 +468,25 @@ def cmd_record(a):
     if not (a.approved or a.declined or a.choice):
         _die("Say what they answered: --approved, --declined, or --choice <option>.")
     verdict = "approved" if a.approved or a.choice else "declined"
-    def fn(rec):
-        n = len(rec["versions"])
-        by = core.who(rec)
-        if a.where == "Slack thread":
-            reply = next((e for e in reversed(rec.get("events", [])) if e["kind"] in ("feedback", "answer", "comment")), {})
-            if reply.get("version") == n and cards.teammate(rec, reply):
-                by = reply["by"]
-        if a.part:
-            j = _row(rec, a.part)
-            if not j:
-                return f"there is no row {a.part}"
-            return core.answer_part(rec, n, j, "chose" if a.choice else verdict, by, where=a.where, words=a.words,
-                                    choice=a.choice, tell=False, again=True)
-        if a.choice and a.choice not in [o["name"] for o in rec["versions"][-1]["card"].get("options") or []]:
-            return f"{a.choice} isn't one of this card's options"
-        return core.decide(rec, n, verdict, by=by, where=a.where, words=a.words, choice=a.choice, again=True)
-    r = store.update(a.id, fn)
+    what = f"part {a.part} " if a.part else ""
+    said = f"{a.id} {what}recorded as {'picked ' + a.choice if a.choice else verdict} ({a.where})."
+    if store.keeps_answers():
+        # The record takes it, and the hub carries it out as it does every answer.
+        detail = {"where": a.where, **({"choice": a.choice} if a.choice else {"verdict": verdict}),
+                  **({"part": a.part} if a.part else {})}
+        try:
+            store.give({"card": a.id, "version": len(store.load(a.id)["versions"]), "what": "record",
+                        "via": "recorded", "key": f"record:{a.id}:{secrets.token_hex(8)}", "words": a.words,
+                        "detail": detail})
+        except store.Refused as refused:
+            _die(f"Not recorded: {refused}.")
+        print(said)
+        return
+    r = store.update(a.id, lambda rec: core.record_answer(rec, verdict, a.words, a.where, a.part, a.choice))
     if r != "ok":
         _die(f"Not recorded: {r}.")
     core.refresh_and_clear(a.id)
-    what = f"part {a.part} " if a.part else ""
-    print(f"{a.id} {what}recorded as {'picked ' + a.choice if a.choice else verdict} ({a.where}).")
+    print(said)
 
 
 def cmd_status(a):
@@ -524,11 +522,7 @@ def cmd_status(a):
 
 
 def _row(rec, part):
-    """A row of the newest version by its number (1, 2, 3) or its id; 0 when there's no such row."""
-    parts = rec["versions"][-1]["card"].get("parts") or []
-    if str(part).isdigit():
-        return int(part) if 1 <= int(part) <= len(parts) else 0
-    return next((j for j, p in enumerate(parts, 1) if cards.part_id(p, j) == part), 0)
+    return core.row(rec, part)
 
 
 def cmd_answer(a):
@@ -652,14 +646,18 @@ def _mode(d):
 
 def cmd_deputy(a):
     """This session becomes the deputy, which hears every card and makes its own call on each; running it again from
-    another session moves the role there, keeping its mode. --live and --dry-run switch the mode, from any session.
-    --off: nobody is the deputy. None of these: say who is."""
+    another session moves the role there, keeping its mode. --live and --dry-run switch the mode, from any session,
+    where the hub keeps its own settings; where the record keeps them, only the approver switches it, with the button
+    on the morning summary. --off: nobody is the deputy. None of these: say who is."""
     d = store.deputy()
     if a.off:
         store.set_deputy(None)
         print("Nobody is the deputy now.")
         return
     if a.live or a.dry_run:
+        if store.keeps_answers():
+            _die(f"Only {config.settings()['approver_name']} switches auto-approval, with the button on the morning "
+                 f"summary; it is {_mode(d) if d else 'off, as nobody is the deputy'}.")
         if not d:
             _die("No session is the deputy, so there's no auto-approval to switch.")
         if bool(d.get("live")) == bool(a.live):
@@ -705,10 +703,20 @@ def cmd_call(a):
         _die(f"The why is {len(why)} characters; keep it under {WHY_MAX}, one or two sentences.")
     name, live = d["reach"]["agent"], bool(d.get("live"))
     what = "approve" if a.approve else "his"
-    r = store.update(a.id, lambda rec: core.call(rec, what, why, name, live, a.also, urgent=a.urgent))
-    if r != "ok":
-        _die(f"Not recorded: {r}.")
-    core.refresh_and_clear(a.id)
+    if store.keeps_answers():
+        # The record takes the call, and the hub carries it out as it does every answer.
+        detail = {**({"also": a.also} if a.also is not None else {}), **({"urgent": True} if a.urgent else {})}
+        try:
+            store.give({"card": a.id, "version": len(store.load(a.id)["versions"]), "what": f"call:{what}",
+                        "via": "deputy", "key": f"call:{a.id}:{secrets.token_hex(8)}", "words": why,
+                        "session": me["session_id"], "detail": detail})
+        except store.Refused as refused:
+            _die(f"Not recorded: {refused}.")
+    else:
+        r = store.update(a.id, lambda rec: core.call(rec, what, why, name, live, a.also, urgent=a.urgent))
+        if r != "ok":
+            _die(f"Not recorded: {r}.")
+        core.refresh_and_clear(a.id)
     who = config.settings()["approver_name"]
     if a.also is not None:
         rec = store.load(a.id)
@@ -961,48 +969,6 @@ def cmd_listen(a):
     listener.main()
 
 
-PRESS_ACTIONS = ["approve", "decline", "change", "approve-note", "decline-note", "edit", "remove", "hand", "mine",
-                 "notmine", "takeback", "sleep", "wake"]
-NEEDS_WORDS = {"change", "approve-note", "decline-note", "edit"}
-
-
-def cmd_press(a):
-    """A press on a card from the pod dashboard, run on the hub, where the list of what waits on him is kept: the
-    same steps as the same press in Slack (the tool's own refusals, the answer saved in one write, the card and the
-    list redrawn, his words in the thread), with the asker told it came from the pod dashboard. Prints ok, or the
-    refusal in the words Slack shows."""
-    from . import listener
-    if not config.is_hub():
-        _die("approvals press runs on the workspace's hub.")
-    store.ACTOR.set(a.by)
-    core.VIA.set("dashboard")
-    slackapi.POST_AS = None   # as the listener posts
-    L = listener.Listener()
-    rec = store.load(a.id)
-    act, n = a.action, a.version
-    words = sys.stdin.read() if a.words == "-" else a.words or ""
-    if act in NEEDS_WORDS and not words.strip():
-        r, follow_up = "The words can't be empty.", None
-    elif act == "hand":
-        team = config.settings()["team"]
-        key = next((k for k, p in team.items() if p["user"] == a.teammate), None)
-        r, follow_up = L.press(rec, n, f"hand:{key}", a.by) if key else ("gone", None)
-    elif act in ("approve-note", "decline-note"):
-        r, follow_up = L.press(rec, n, act.split("-")[0], a.by, words=words)
-    elif act == "edit" and cards.editable_quote(rec["versions"][-1]["card"]) is None:
-        r, follow_up = "gone", None
-    elif act in ("change", "edit"):
-        r, follow_up = L.submit(rec, n, act, words, a.by, "dashboard:" + store.iso())
-    else:
-        r, follow_up = L.press(rec, n, act, a.by, until=a.until)
-    if r != "ok":
-        print(L.REFUSED.get(r, r))
-        sys.exit(1)
-    if follow_up:
-        follow_up()
-    print("ok")
-
-
 def cmd_team(a):
     """The team a card can be handed to, as Slack's Hand to menu lists them, for the pod dashboard's Hand to list: one
     JSON list of {"user", "name"}, in the configuration's order."""
@@ -1022,7 +988,7 @@ def cmd_role(a):
 
 # Commands that post to Slack check first that this machine can, so nothing is saved for a card it can't post.
 POSTS = {"submit", "ask", "revise", "answer", "ack", "done", "withdraw", "record", "status", "note", "review",
-         "deputy", "call", "pictures", "press"}
+         "deputy", "call", "pictures"}
 # Commands that can change what a request's Basecamp steps say.
 CHANGES = {"ask", "revise", "answer", "ack", "done", "withdraw", "record", "status"}
 
@@ -1199,16 +1165,6 @@ def main(argv=None):
 
     s = sub.add_parser("listen", help="run the service (launchd runs this)")
     s.set_defaults(fn=cmd_listen)
-
-    s = sub.add_parser("press", help="press a card's button from the pod dashboard, as the Slack user --by; runs on the hub")
-    s.add_argument("id")
-    s.add_argument("version", type=int)
-    s.add_argument("action", choices=PRESS_ACTIONS)
-    s.add_argument("--by", required=True, help="the Slack user id of the person pressing")
-    s.add_argument("--words", help="his words: the change, the note, or the edited words; - reads them from stdin")
-    s.add_argument("--teammate", help="hand: the Slack user id of the teammate")
-    s.add_argument("--until", help="sleep: when it wakes, an ISO time with its offset")
-    s.set_defaults(fn=cmd_press)
 
     s = sub.add_parser("team", help="the team a card can be handed to, in Slack's Hand to order, as JSON")
     s.set_defaults(fn=cmd_team)

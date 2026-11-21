@@ -498,6 +498,34 @@ def press(rec, n, what, by):
     return "gone"
 
 
+def row(rec, part):
+    """A row of the newest version by its number (1, 2, 3) or its id; 0 when there's no such row."""
+    parts = rec["versions"][-1]["card"].get("parts") or []
+    if str(part).isdigit():
+        return int(part) if 1 <= int(part) <= len(parts) else 0
+    return next((j for j, p in enumerate(parts, 1) if cards.part_id(p, j) == part), 0)
+
+
+def record_answer(rec, verdict, words, where, part=None, choice=None):
+    """An answer the approver gave somewhere else, as an agent records it (`approvals record`), on the newest version:
+    'ok', or why it wasn't recorded. In a Slack thread, a teammate's newest reply on that version is the answer."""
+    n = len(rec["versions"])
+    by = who(rec)
+    if where == "Slack thread":
+        reply = next((e for e in reversed(rec.get("events", [])) if e["kind"] in ("feedback", "answer", "comment")), {})
+        if reply.get("version") == n and cards.teammate(rec, reply):
+            by = reply["by"]
+    if part:
+        j = row(rec, part)
+        if not j:
+            return f"there is no row {part}"
+        return answer_part(rec, n, j, "chose" if choice else verdict, by, where=where, words=words, choice=choice,
+                           tell=False, again=True)
+    if choice and choice not in [o["name"] for o in rec["versions"][-1]["card"].get("options") or []]:
+        return f"{choice} isn't one of this card's options"
+    return decide(rec, n, verdict, by=by, where=where, words=words, choice=choice, again=True)
+
+
 def remove(rec, n, by):
     """Remove, on the approver's list: the card comes off it, closed with nothing still waiting on it approved, and
     without a verdict on the idea. Kept as a withdrawn card marked as his, so everything that knows a withdrawn card

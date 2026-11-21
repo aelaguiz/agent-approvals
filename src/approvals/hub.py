@@ -4,6 +4,10 @@ other machines over HTTP, so an agent on any of them can ask and have its answer
 Slack hands each button press to only one connected listener, so a workspace has one hub. Every other machine
 posts to Slack itself and keeps the records here through these calls; its service asks every few seconds for
 the answers waiting on its own sessions (`/due`).
+
+When the hub keeps its cards in the pod dashboard's record, the record takes every answer, and the hub's service
+carries each out. An answer given on another machine (the deputy's call, one an agent records) comes here (`/answers`)
+and is taken and carried out by that service; who may answer comes from the record (`/who`).
 """
 import hmac
 import json
@@ -28,9 +32,9 @@ class Client:
         self.url = config.hub_url()
         self.token = config.hub_token()
 
-    def call(self, method, path, body=None):
-        """(HTTP status, JSON body). A missing record (404) and a changed one (409) are answers; anything else
-        that isn't 200 is an error."""
+    def call(self, method, path, body=None, answers=()):
+        """(HTTP status, JSON body). A missing record (404), a changed one (409) and any status in answers are
+        answers; anything else that isn't 200 is an error."""
         data = json.dumps(body, ensure_ascii=False).encode() if body is not None else None
         req = urllib.request.Request(self.url + path, data=data, method=method,
                                      headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"})
@@ -39,7 +43,7 @@ class Client:
                 return r.status, json.loads(r.read() or b"{}")
         except urllib.error.HTTPError as e:
             text = e.read().decode(errors="replace")
-            if e.code in (404, 409):
+            if e.code in (404, 409, *answers):
                 return e.code, json.loads(text or "{}")
             raise store.StoreError(f"the approvals hub on {config.hub()} refused {method} {path}: {e.code} {text[:200]}")
         except (urllib.error.URLError, OSError) as e:
@@ -114,6 +118,22 @@ class Client:
     def health(self):
         return self.call("GET", "/health")[1]
 
+    def who(self):
+        """Who decides, the team and whether the team may answer any card, as the hub holds them."""
+        code, body = self.call("GET", "/who")
+        if code != 200:
+            raise store.StoreError(f"the approvals hub on {config.hub()} runs a version without /who; update it first")
+        return body
+
+    def give(self, answer):
+        """An answer for the record to take and the hub to carry out; 'ok' once it is carried out, or Refused."""
+        code, body = self.call("POST", "/answers", answer, answers=(422,))
+        if code == 422:
+            raise store.Refused(body["refused"])
+        if code != 200:
+            raise store.StoreError(f"the approvals hub on {config.hub()} carries out no answers: {body.get('error')}")
+        return body["result"]
+
     def forks(self):
         return self.call("GET", "/forks")[1]["forks"]
 
@@ -148,7 +168,18 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if method == "GET" and parts == ["health"]:
                 return self._send(200, {"machine": config.machine(), "id_prefix": config.settings()["id_prefix"],
-                                        "files": bool(store.record())})
+                                        "files": bool(store.record()), "record": bool(store.record())})
+            if method == "GET" and parts == ["who"]:
+                held = config.settings()
+                team = {key: {"user": p["user"], "name": p["name"]} for key, p in held["team"].items()}
+                return self._send(200, {**{k: held[k] for k in config.LISTS}, "team": team, "team_order": list(team)})
+            if method == "POST" and parts == ["answers"]:
+                if not self.server.carrier:
+                    return self._send(404, {"error": "this hub keeps no answers in a record"})
+                try:
+                    return self._send(200, {"result": self.server.carrier(self._body())})
+                except store.Refused as refused:
+                    return self._send(422, {"refused": str(refused)})
             if method == "PUT" and len(parts) == 2 and parts[0] == "files":
                 data = self.rfile.read(int(self.headers.get("Content-Length") or 0))
                 kept = store.record() and store.record().put_file(parts[1], data)
@@ -233,12 +264,15 @@ class Handler(BaseHTTPRequestHandler):
         log.debug("hub: " + fmt, *args)
 
 
-def serve(port=None):
-    """Serve this workspace's records on every interface, at the port its hub_url names. Returns the server."""
+def serve(port=None, carrier=None):
+    """Serve this workspace's records on every interface, at the port its hub_url names. carrier takes and carries
+    out an answer given on another machine, when the record keeps the answers. Returns the server."""
     port = urlparse(config.hub_url()).port if port is None else port
     srv = ThreadingHTTPServer(("", port), Handler)
     srv.daemon_threads = True
     srv.token = config.hub_token()
+    srv.carrier = carrier
+    config.SERVING = True
     threading.Thread(target=srv.serve_forever, daemon=True, name="hub").start()
     log.info("serving records to the other machines on port %s", srv.server_address[1])
     return srv

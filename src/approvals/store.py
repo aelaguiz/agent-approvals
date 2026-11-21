@@ -33,10 +33,17 @@ _fork_cache_lock = threading.RLock()
 # Who is acting in this thread: the Slack user whose press or pop-up is being handled, or the Herdr name of the agent
 # running the command. Each event is stamped with it, so the record writes each one as that person or member.
 ACTOR = contextvars.ContextVar("actor", default=None)
+# The answer the record took that the write being made carries out. Each event the write adds names it, so the record
+# marks that answer carried out in the same write, and only once.
+ANSWER = contextvars.ContextVar("answer", default=None)
 
 
 class StoreError(RuntimeError):
     """The hub that holds the records didn't answer, or refused."""
+
+
+class Refused(StoreError):
+    """The record refused a write or an answer by its rules, in its own words: the words the giver is shown."""
 
 
 def now():
@@ -176,7 +183,8 @@ def set_reviewer(rv):
 
 def deputy():
     """The one session that hears every card and makes its own call on each, as
-    {"reach", "live", "test", "since", "live_since"}, or None. live: its approve is the approver's yes."""
+    {"reach", "live", "test", "since", "live_since"}, or None. live: its approve is the approver's yes. Kept in the
+    record when the record holds the cards."""
     h = hub_client()
     return h.deputy() if h else local_deputy()
 
@@ -188,6 +196,21 @@ def set_deputy(d):
         h.set_deputy(d)
     else:
         local_set_deputy(d)
+
+
+def keeps_answers():
+    """Whether this workspace's answers are taken by the record: its hub keeps the cards there."""
+    h = hub_client()
+    return bool(h.health().get("record")) if h else bool(record())
+
+
+def give(answer):
+    """An answer given here rather than pressed (the deputy's call, one an agent records), when the record takes
+    answers: {"card", "version", "what", "via", "key", and "words", "session", "detail" as it needs}. The record takes
+    it, then the hub's service carries it out, as it does every answer. Returns once it is carried out; raises Refused
+    with the words when the record or the hub's press code refuses it."""
+    from . import hub
+    return hub.Client().give(answer)
 
 
 def forks():
@@ -228,7 +251,8 @@ def waiting(rec):
 
 def event(rec, kind, **data):
     actor = {"actor": ACTOR.get()} if ACTOR.get() and "actor" not in data else {}
-    rec.setdefault("events", []).append(dict(kind=kind, at=iso(), **data, **actor))
+    answer = {"answer": ANSWER.get()} if ANSWER.get() is not None else {}
+    rec.setdefault("events", []).append(dict(kind=kind, at=iso(), **data, **actor, **answer))
 
 
 # ---------- the files, on the hub ----------
@@ -396,11 +420,14 @@ def local_set_reviewer(rv):
 
 
 def local_deputy():
-    return _read_role(config.DEPUTY)
+    return record().who()["deputy"] if record() else _read_role(config.DEPUTY)
 
 
 def local_set_deputy(d):
-    _write_role(config.DEPUTY, d)
+    if record():
+        record().set_deputy(d)
+    else:
+        _write_role(config.DEPUTY, d)
 
 
 def local_forks():
@@ -442,25 +469,31 @@ _record = {}
 def record():
     """The pod dashboard's record, when this workspace's config names it (record_url) and this machine is the hub:
     every card is read and written there, and the hub's own files hold no cards."""
-    url = config.settings().get("record_url")
+    url = config.file_settings().get("record_url")
     if not url or not config.is_hub():
         return None
     key = (str(config.HOME), url)
     if key not in _record:
-        _record[key] = Record(url.rstrip("/"), config.settings()["record_token"])
+        _record[key] = Record(url.rstrip("/"), config.file_settings()["record_token"])
     return _record[key]
 
 
 class Record:
     """The record's card routes. A card is the same document the files held; the record keeps it at a revision, and
-    refuses a write on an older one (409) or one that breaks its rules (422, with the record's reason)."""
+    refuses a write on an older one (409) or one that breaks its rules (422, with the record's reason).
+
+    Each version is kept with the pop-ups its buttons open (cards.views), drawn by the first write that keeps it, so
+    the record opens them whether or not this hub is running. The hub itself never reads them, so its look at every
+    card leaves them out."""
 
     def __init__(self, url, token):
         self.url, self.token = url, token
         self.lock = threading.Lock()
-        self.cache = {}   # id -> (rev, marshal bytes of the card)
+        self.cache = {}   # id -> (rev, marshal bytes of the card without its pop-ups, whether a version lacks them)
 
     def call(self, method, path, body=None):
+        """(HTTP status, JSON body). A missing card (404) and a changed one (409) are answers; a write the record's
+        rules refuse (422) raises Refused with its words; anything else that isn't 200 is an error."""
         data = json.dumps(body, ensure_ascii=False).encode() if body is not None else None
         req = urllib.request.Request(self.url + path, data=data, method=method,
                                      headers={"X-Hub-Token": self.token, "Content-Type": "application/json"})
@@ -471,11 +504,22 @@ class Record:
             text = e.read().decode(errors="replace")
             if e.code in (404, 409):
                 return e.code, json.loads(text or "{}")
+            if e.code == 422:
+                raise Refused(json.loads(text)["error"])
             raise StoreError(f"the record refused {method} {path}: {e.code} {text[:300]}")
         except (urllib.error.URLError, OSError) as e:
             raise StoreError(f"the record ({self.url}) isn't answering: {e}")
 
+    @staticmethod
+    def keep_views(rec):
+        from . import cards
+        for n, v in enumerate(rec.get("versions") or [], 1):
+            if "views" not in v:
+                v["views"] = cards.views(rec, n)
+
     def create(self, rec, media=None):
+        rec = dict(rec, versions=[dict(v) for v in rec.get("versions") or []])
+        self.keep_views(rec)
         return self.call("POST", "/api/cards", {"record": rec, "media": media or []})[1]["record"]
 
     def read(self, rid):
@@ -486,6 +530,7 @@ class Record:
 
     def put(self, rec, rev=None, media=None):
         """The new revision, or None when the card changed since rev. Without rev, written over what is there."""
+        self.keep_views(rec)
         while True:
             at = rev if rev is not None else self.read(rec["id"])[1]
             code, body = self.call("PUT", f"/api/cards/{rec['id']}", {"record": rec, "rev": at, "media": media or []})
@@ -503,8 +548,71 @@ class Record:
             moved = [rid for rid, rev in revs.items() if self.cache.get(rid, (None,))[0] != rev]
             for i in range(0, len(moved), 200):
                 for c in self.call("POST", "/api/cards/read", {"ids": moved[i:i + 200]})[1]["cards"]:
-                    self.cache[c["record"]["id"]] = (c["rev"], marshal.dumps(c["record"]))
+                    versions = c["record"].get("versions") or []
+                    lacking = any("views" not in v for v in versions)
+                    for v in versions:
+                        v.pop("views", None)
+                    self.cache[c["record"]["id"]] = (c["rev"], marshal.dumps(c["record"]), lacking)
             return [marshal.loads(self.cache[rid][1]) for rid in sorted(revs) if rid in self.cache]
+
+    def without_views(self):
+        """The cards a version of which isn't kept with its pop-ups yet, as of the last look at every card."""
+        with self.lock:
+            return sorted(rid for rid, (_, _, lacking) in self.cache.items() if lacking)
+
+    # ----- the answers the record took -----
+
+    def answers(self):
+        """Every answer taken and not yet carried out or refused, oldest first."""
+        return self.call("GET", "/api/cards/answers")[1]["answers"]
+
+    def take(self, answer):
+        """An answer this hub gives: its own deadline or hand-back, the deputy's call, or one an agent records. Returns
+        {"answer", "card", "version", "taken"}; raises Refused with the record's words."""
+        code, body = self.call("POST", "/api/cards/answers", answer)
+        if code == 404:
+            raise Refused(body["error"])
+        return body
+
+    def refuse(self, answer_id, words):
+        """Mark an answer the record took that this hub's press code refused, with the words the giver was shown."""
+        self.call("POST", f"/api/cards/answers/{answer_id}/refused", {"words": words})
+
+    def who(self):
+        """Who decides, the team and the deputy, in the shape of the hub's settings (with "team_order")."""
+        return self.call("GET", "/api/cards/who")[1]
+
+    def set_deputy(self, d):
+        self.call("PUT", "/api/cards/deputy", {"deputy": d})
+
+    def thing(self, thing_id):
+        """One thing of the record as the pod dashboard reads it (its "thing" row, with "read_from")."""
+        return self.call("GET", f"/api/thing/{thing_id}")[1]
+
+    def changes(self, after=None):
+        """The record's stream of changes: (event id, {"thing", "kind", "pod"}) as each is made, starting with
+        (the id it starts after, None), and from `after` when given. Ends when the stream is cut."""
+        path = "/api/changes" + (f"?after={after}" if after is not None else "")
+        req = urllib.request.Request(self.url + path, headers={"X-Hub-Token": self.token})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                kind, event_id, data = None, None, None
+                for raw in r:
+                    line = raw.decode().rstrip("\r\n")
+                    if line.startswith("event:"):
+                        kind = line[6:].strip()
+                    elif line.startswith("id:"):
+                        event_id = int(line[3:].strip())
+                    elif line.startswith("data:"):
+                        data = json.loads(line[5:].strip())
+                    elif not line:
+                        if kind == "start":
+                            yield event_id, None
+                        elif event_id is not None and data is not None:
+                            yield event_id, data
+                        kind, event_id, data = None, None, None
+        except (urllib.error.URLError, OSError) as e:
+            raise StoreError(f"the record's stream of changes ({self.url}) was cut: {e}")
 
     def delete(self, rid):
         self.call("DELETE", f"/api/cards/{rid}")

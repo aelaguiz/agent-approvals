@@ -1416,8 +1416,9 @@ def edit_view(rec, n):
     ], f"{rec['id']}|{n}|edit", card.get("yes_label") or TYPES[card["type"]]["yes"])
 
 
-def items_view(rec, n, ticked=None):
-    """Every item, ticked; the button sends the ticked ones and says how many."""
+def items_view(rec, n, ticked=None, count=None):
+    """Every item, ticked; the button sends the ticked ones and says how many (count, when it says another number
+    than the ticks drawn)."""
     card = rec["versions"][n - 1]["card"]
     items = card["items"]
     ticked = set(range(1, len(items) + 1)) if ticked is None else set(ticked)
@@ -1434,7 +1435,7 @@ def items_view(rec, n, ticked=None):
             el["initial_options"] = chosen
         blocks.append({"type": "input", "block_id": f"items{k // 10}", "optional": len(items) > 10, "dispatch_action": True,
                        "label": plain("Send these" if k == 0 else "And these", 2000), "element": el})
-    label = (card.get("pick_label") or "Approve {n}").replace("{n}", str(len(ticked)))
+    label = (card.get("pick_label") or "Approve {n}").replace("{n}", str(len(ticked) if count is None else count))
     return _modal("Pick which", blocks, f"{rec['id']}|{n}|items", label)
 
 
@@ -1467,6 +1468,31 @@ def picture_view(rec, n, key):
 def see_view(rec, n):
     blocks = [b for b in card_blocks(rec, n, "view") if b["type"] != "header"]
     return _modal("The card as asked", [md(f"*{esc(rec['versions'][n - 1]['card']['title'])}*")] + blocks[:99], f"{rec['id']}|{n}|see")
+
+
+def views(rec, n):
+    """Every pop-up version n's buttons open, keyed by the button's value after the card and the version ("see",
+    "change", "p2:change", "edit", "read:0", "pic:option:1", "items"), so they can be opened while the hub is stopped.
+    Pick which is kept once for each number of ticks ("items:3"), each with the button saying that number: Slack keeps
+    what is ticked when the pop-up is swapped for the one with the count."""
+    card = rec["versions"][n - 1]["card"]
+    out = {"see": see_view(rec, n), "change": change_view(rec, n)}
+    for j, _ in enumerate(card.get("parts") or [], 1):
+        out[f"p{j}:change"] = change_view(rec, n, j)
+    if editable_quote(card) is not None:
+        out["edit"] = edit_view(rec, n)
+    if card.get("items"):
+        out["items"] = items_view(rec, n)
+        for k in range(len(card["items"]) + 1):
+            out[f"items:{k}"] = items_view(rec, n, count=k)
+    for i, q in enumerate(card.get("quotes") or []):
+        if q.get("button"):
+            out[f"read:{i}"] = read_view(rec, n, i)
+    for key, ref in (rec["versions"][n - 1].get("files") or {}).items():
+        # A picture with a link opens in Slack's own viewer; only one without opens a pop-up.
+        if key.split(":")[0] in ("gallery", "option", "part") and not (isinstance(ref, dict) and ref.get("url")):
+            out[f"pic:{key}"] = picture_view(rec, n, key)
+    return out
 
 
 # ---------- channel posts ----------
