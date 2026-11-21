@@ -19,6 +19,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 from . import config
 
@@ -116,6 +117,13 @@ def history_records(agent=None, type=None, since=None, limit=20, calls=False):
     Filtered where the records are kept, so a look at a few cards doesn't bring every record across the network."""
     h = hub_client()
     return h.history(agent, type, since, limit, calls) if h else local_history(agent, type, since, limit, calls)
+
+
+def corrections(card_type):
+    """The open corrections for a card type, each {"id", "title", "says"} as its writer wrote it, from the pod
+    dashboard's record; none where no record keeps the cards."""
+    h = hub_client()
+    return h.corrections(card_type) if h else local_corrections(card_type)
 
 
 def names(days, *, channel=None, test=False, exclude=None):
@@ -385,6 +393,10 @@ def local_names(days, *, channel=None, test=False, exclude=None):
     return list(names.values())
 
 
+def local_corrections(card_type):
+    return record().corrections(card_type) if record() else []
+
+
 def local_delete(rid):
     if record():
         return record().delete(rid)
@@ -584,6 +596,12 @@ class Record:
 
     def set_deputy(self, d):
         self.call("PUT", "/api/cards/deputy", {"deputy": d})
+
+    def corrections(self, card_type):
+        code, body = self.call("GET", f"/api/cards/corrections/{quote(card_type, safe='')}")
+        if code != 200:
+            raise StoreError(f"the record ({self.url}) runs a version without corrections; update it first")
+        return body["corrections"]
 
     def thing(self, thing_id):
         """One thing of the record as the pod dashboard reads it (its "thing" row, with "read_from")."""
