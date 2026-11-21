@@ -140,6 +140,19 @@ A test hub must not connect to Slack: a second connection with the workspace's a
 
 ## Results
 
+### November 21, 2026: a comment typed on the card on the pod dashboard
+
+Unit tests: 585 of 585. Then on a copy of the record (every real card taken out of it, who decides pointed at the test channel), this branch's hub as a test hub (`approvals listen`, never connected), and a TEST card in the test channel:
+
+| What was checked | Result |
+| --- | --- |
+| A comment from the dashboard's box | Taken by the record, carried out by the hub within a second: posted in the card's thread as "💬 Amir replied on the card:", that post's Slack id kept as the reply's and its delivery's, the card back with its asker, the asker's message saying "on the pod dashboard". |
+| The asker's `approvals answer`, and two new versions | Each shown on the open page within about 3 seconds with no reload; the comment's mark became Answered and the card came back waiting. |
+| Slack refusing the post (a bad token) | The comment refused in Slack's words (`invalid_auth`); Try again after the token was put back landed it once. |
+| Delivery to an asker outside Herdr | "Not reached yet · trying again" with the router's own reason, from the outbox. |
+
+Not seen live: 📨 on a session that takes the comment (no test asker ran in Herdr), and asking again at 10 and 40 minutes (unit tests only).
+
 ### November 21, 2026: the hub works from the record, rehearsed for the change-over
 
 Unit tests: 580 of 580. Then the change-over rehearsed end to end on copies of the live record: today's hub as a copy fed Socket Mode requests in Slack's own shape, then this hub with `approvals listen`, against a copy of the dashboard on the change-over branch, TEST cards in the test channel.
