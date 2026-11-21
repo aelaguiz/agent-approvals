@@ -226,3 +226,11 @@ def test_press_runs_only_on_the_hub(team, slack, capsys, monkeypatch):
     with pytest.raises(SystemExit):
         cli.main(["press", RID, "1", "approve", "--by", APPROVER])
     assert "approvals press runs on the workspace's hub." in capsys.readouterr().err
+
+
+def test_words_can_come_on_stdin(team, slack, capsys, monkeypatch):
+    import io
+    card()
+    monkeypatch.setattr("sys.stdin", io.StringIO("Make it $200.\nAnd sooner."))
+    assert press(capsys, "change", "--words", "-") == (0, "ok")
+    assert store.load(RID)["events"][-1]["text"] == "Make it $200.\nAnd sooner."

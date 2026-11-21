@@ -979,7 +979,8 @@ def cmd_press(a):
     slackapi.POST_AS = None   # as the listener posts
     L = listener.Listener()
     rec = store.load(a.id)
-    act, n, words = a.action, a.version, a.words or ""
+    act, n = a.action, a.version
+    words = sys.stdin.read() if a.words == "-" else a.words or ""
     if act in NEEDS_WORDS and not words.strip():
         r, follow_up = "The words can't be empty.", None
     elif act == "hand":
@@ -1198,7 +1199,7 @@ def main(argv=None):
     s.add_argument("version", type=int)
     s.add_argument("action", choices=PRESS_ACTIONS)
     s.add_argument("--by", required=True, help="the Slack user id of the person pressing")
-    s.add_argument("--words", help="his words: the change, the note, or the edited words")
+    s.add_argument("--words", help="his words: the change, the note, or the edited words; - reads them from stdin")
     s.add_argument("--teammate", help="hand: the Slack user id of the teammate")
     s.add_argument("--until", help="sleep: when it wakes, an ISO time with its offset")
     s.set_defaults(fn=cmd_press)
