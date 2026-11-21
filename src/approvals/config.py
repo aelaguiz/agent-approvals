@@ -256,8 +256,9 @@ def app_token():
 
 def record_token():
     """The token the pod dashboard's record takes from the hub: record_token_file/record_token_key, read from the
-    secrets checkout like the Slack tokens, or a raw record_token in this machine's own settings."""
-    s = settings()
+    secrets checkout like the Slack tokens, or a raw record_token in this machine's own settings. Read from the file
+    alone: the full settings ask the record who may answer, which needs this token."""
+    s = file_settings()
     if s.get("record_token_file"):
         return _read_env_file(s["record_token_file"], s.get("record_token_key", "APPROVALS_RECORD_TOKEN"))
     if s.get("record_token"):

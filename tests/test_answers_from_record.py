@@ -390,3 +390,13 @@ def test_each_version_is_kept_with_every_pop_up_its_buttons_open(hub, record):
 def test_team_lists_the_hand_to_menu_in_its_order(team, capsys):
     cli.main(["team"])
     assert json.loads(capsys.readouterr().out) == [{"user": USER, "name": "Riley"}, {"user": "UTEAM2", "name": "Morgan"}]
+
+
+def test_a_hub_reaches_its_record_with_the_token_its_own_settings_name():
+    """The token is read from this machine's own settings: the full settings ask the record who may answer, which
+    needs the token, so reading it through them never ended (the first start of a hub on this branch, November 21)."""
+    held = json.loads(config.CONFIG.read_text())
+    config.CONFIG.write_text(json.dumps(held | {"hub": "testbox", "hub_url": "http://127.0.0.1:1",
+                                                "record_url": "http://127.0.0.1:2", "record_token": "made-up"}))
+    store._record.clear()
+    assert store.record().token == "made-up"
