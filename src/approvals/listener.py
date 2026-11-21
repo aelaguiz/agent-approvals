@@ -330,7 +330,7 @@ class Listener:
         elif what == "edit":
             if not words.strip():
                 return {"response_action": "errors", "errors": {"words": "The words can't be empty."}}, None
-        r, follow_up = self.submit(rec, n, what, words, user, "view:" + view["id"], ticked)
+        r, follow_up = self.submit(rec, n, what, words, user, "view:" + view.get("id", ""), ticked)
         if r != "ok":
             return {"response_action": "errors", "errors": {first: self.REFUSED.get(r, r)}}, None
         return None, follow_up
