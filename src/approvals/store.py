@@ -474,7 +474,7 @@ def record():
         return None
     key = (str(config.HOME), url)
     if key not in _record:
-        _record[key] = Record(url.rstrip("/"), config.file_settings()["record_token"])
+        _record[key] = Record(url.rstrip("/"), config.record_token())
     return _record[key]
 
 

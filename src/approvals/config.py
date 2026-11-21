@@ -254,6 +254,17 @@ def app_token():
     return _read_env_file(s["app_token_file"], s["app_token_key"])
 
 
+def record_token():
+    """The token the pod dashboard's record takes from the hub: record_token_file/record_token_key, read from the
+    secrets checkout like the Slack tokens, or a raw record_token in this machine's own settings."""
+    s = settings()
+    if s.get("record_token_file"):
+        return _read_env_file(s["record_token_file"], s.get("record_token_key", "APPROVALS_RECORD_TOKEN"))
+    if s.get("record_token"):
+        return s["record_token"]
+    raise ConfigError("record_url is set but neither record_token_file nor record_token is")
+
+
 def hostname():
     return socket.gethostname().split(".")[0]
 
