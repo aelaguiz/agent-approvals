@@ -127,7 +127,7 @@ The question is whether, with many agents and many requests open at once, every 
 
 ## More than one machine
 
-A test hub must not connect to Slack: a second connection with the workspace's app token takes some of the approver's real button presses. [tests/live/hub_without_socket.py](../tests/live/hub_without_socket.py) runs everything the hub does except that connection and the morning list; thread replies still reach it by polling.
+A test hub must not connect to Slack: a second connection with the workspace's app token takes some of the approver's real button presses. A test hub whose settings name a `record_url` (a copy of the pod dashboard's record, on a spare port) is `approvals listen` itself, since that hub never connects; Slack's presses are then sent to the copy's door in Slack's own shapes, signed with a test secret. [tests/live/hub_without_socket.py](../tests/live/hub_without_socket.py) runs everything the hub does except that connection and the morning list; thread replies still reach it by polling.
 
 **Setup:** on the hub machine and a second machine, one scratch folder each with the same `config.json`: the workspace's channel and token files, an `id_prefix` of its own so test numbers can't be mistaken for real ones, `hub` naming the hub machine, a `hub_url` on a port of its own, and `test_approver` set to the bot's user id. Run the test hub on the hub machine with `APPROVALS_HOME` and `APPROVALS_MACHINE` set, and `approvals listen` the same way on the second machine. Start an agent on the second machine with the same two variables and `APPROVALS_TEST=1`.
 
@@ -139,6 +139,22 @@ A test hub must not connect to Slack: a second connection with the workspace's a
 **Clean-up:** `approvals purge-tests --only <ids>` with the test folder's settings, then stop both services, close the agent and any Herdr session the test started, and delete the scratch folders.
 
 ## Results
+
+### November 21, 2026: the hub works from the record, rehearsed for the change-over
+
+Unit tests: 580 of 580. Then the change-over rehearsed end to end on copies of the live record: today's hub as a copy fed Socket Mode requests in Slack's own shape, then this hub with `approvals listen`, against a copy of the dashboard on the change-over branch, TEST cards in the test channel.
+
+| What was checked | Result |
+| --- | --- |
+| A press before the switch, through today's Slack path | Pass. Carried out at once, as today. |
+| Presses taken by the record while today's hub still ran, and while this hub was stopped | Pass. Each kept; carried out in the order taken within 0.3 seconds of this hub listening, the Slack cards redrawn. |
+| A press while this hub runs | Pass. Carried out 0.2 to 1 second after the record took it. |
+| A pop-up's answer, Pick which with two of three ticked, Decline with words from the dashboard | Pass, with the hub running and with it stopped. |
+| A change taken while a yes on the same card waited | The yes was carried out; the change was refused by the hub's own steps ("This one is already decided."), marked refused on the answer and told to the presser. |
+| A deadline passing, after the record refuses answers that skip it | Pass. The hub's own answer was taken and carried out at the next sweep. |
+| First start on a full copy of the live record | Every open card's pop-ups kept within a second of the hub listening, all 1,994 cards' in 21 seconds; three answers waiting were carried out at once. |
+
+Found and fixed: the hub could not start at all once `record_token_file` came in from main (reading the token asked the record who may answer, which needed the token); `approvals doctor` failed on a hub with Socket Mode off; pop-ups were kept oldest card first.
 
 ### November 15, 2026: an answer follows an agent to its new session; the list; the service's tools
 
