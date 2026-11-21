@@ -51,7 +51,9 @@ def run():
         if not r.get("ok"):
             raise RuntimeError(r.get("error"))
         return "a connection can open"
-    if config.is_hub():   # only the hub holds the Slack connection
+    # Only the hub holds the Slack connection, and not one whose cards the record keeps: Slack sends that workspace's
+    # presses to the record, and the app's Socket Mode is off, so a connection can't open.
+    if config.is_hub() and not config.file_settings().get("record_url"):
         results.append(_check("Socket Mode token", socket_mode))
 
     def hub():
