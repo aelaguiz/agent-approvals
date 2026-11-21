@@ -1061,10 +1061,12 @@ class Listener:
             log.warning("redrawing the deputy's summary failed: %s", e)
 
     def keep_views(self):
-        """Every card whose versions aren't yet kept with their pop-ups gets them, once: the write draws them."""
+        """Every card whose versions aren't yet kept with their pop-ups gets them, once: the write draws them. Newest
+        first, since those are the cards still open: on the hub's first start every card lacks them, drawing all
+        takes about 20 seconds, and a pop-up button the record keeps nothing for is refused until then."""
         store.all_records()
         lacking = store.record().without_views()
-        for rid in lacking:
+        for rid in sorted(lacking, reverse=True):
             try:
                 store.update(rid, lambda r: None)
             except store.StoreError as e:
