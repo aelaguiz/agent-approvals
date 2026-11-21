@@ -958,6 +958,19 @@ POSTS = {"submit", "ask", "revise", "answer", "ack", "done", "withdraw", "record
 CHANGES = {"ask", "revise", "answer", "ack", "done", "withdraw", "record", "status"}
 
 
+def _herdr_name():
+    """The Herdr name of the agent running this command, the name the pod dashboard knows it by, or None."""
+    pane = os.environ.get("HERDR_PANE_ID")
+    if os.environ.get("HERDR_ENV") != "1" or not pane:
+        return None
+    try:
+        result = subprocess.run(["herdr", "agent", "list"], capture_output=True, timeout=10)
+        agents = json.loads(result.stdout)["result"]["agents"]
+    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError):
+        return None
+    return next((agent.get("name") for agent in agents if agent["pane_id"] == pane), None)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="approvals", description="Ask for approval as a Slack card; the answer comes back into this session.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -1143,6 +1156,7 @@ def main(argv=None):
         if a.cmd in {"ask", "revise", "answer", "ack", "done", "withdraw", "record", "status", "note", "show", "pictures"}:
             rec = store.load(a.id)
             config.card_target(rec)
+        store.ACTOR.set(_herdr_name())
         a.fn(a)
     except (store.StoreError, config.ConfigError) as e:
         _die(str(e))

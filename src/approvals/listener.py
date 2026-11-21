@@ -102,6 +102,7 @@ class Listener:
         kind = (req.payload or {}).get("type")
         if req.type == "interactive" and kind in ("block_actions", "view_submission"):
             follow_up, answer = None, None
+            acting = store.ACTOR.set((req.payload.get("user") or {}).get("id"))
             try:
                 if kind == "block_actions":
                     follow_up = self.handle_click(req.payload)
@@ -109,6 +110,8 @@ class Listener:
                     answer, follow_up = self.handle_submission(req.payload)
             except Exception:
                 log.exception("%s failed", kind)
+            finally:
+                store.ACTOR.reset(acting)
             client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id, payload=answer))
             if follow_up:
                 threading.Thread(target=follow_up, daemon=True).start()

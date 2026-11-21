@@ -5,6 +5,7 @@ read: when someone else changed the record in between, the hub refuses it and th
 new copy, so a function passed to update() can run more than once and must only change the record it is given.
 """
 import contextlib
+import contextvars
 import fcntl
 import hashlib
 import json
@@ -13,6 +14,8 @@ import os
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta, timezone
 
 from . import config
@@ -24,6 +27,9 @@ _records_cache = {}
 _records_cache_lock = threading.Lock()
 _fork_cache = {}
 _fork_cache_lock = threading.RLock()
+# Who is acting in this thread: the Slack user whose press or pop-up is being handled, or the Herdr name of the agent
+# running the command. Each event is stamped with it, so the record writes each one as that person or member.
+ACTOR = contextvars.ContextVar("actor", default=None)
 
 
 class StoreError(RuntimeError):
@@ -73,6 +79,8 @@ def save(rec):
 def update(rid, fn):
     """Load, change with fn(rec), save. Returns fn's result."""
     h = hub_client()
+    if not h and record():
+        h = _RecordAsHub()
     if not h:
         with locked():
             rec = local_read(rid)[0]
@@ -188,7 +196,8 @@ def waiting(rec):
 
 
 def event(rec, kind, **data):
-    rec.setdefault("events", []).append(dict(kind=kind, at=iso(), **data))
+    actor = {"actor": ACTOR.get()} if ACTOR.get() and "actor" not in data else {}
+    rec.setdefault("events", []).append(dict(kind=kind, at=iso(), **data, **actor))
 
 
 # ---------- the files, on the hub ----------
@@ -230,6 +239,8 @@ def new_id():
 
 
 def local_create(rec_without_id):
+    if record():
+        return record().create(rec_without_id)
     with locked():
         rid = new_id()
         rec = dict(rec_without_id, id=rid)
@@ -239,6 +250,8 @@ def local_create(rec_without_id):
 
 def local_read(rid):
     """(record, revision). Raises FileNotFoundError for a request that doesn't exist."""
+    if record():
+        return record().read(rid)
     data = _path(rid).read_bytes()
     return json.loads(data), rev_of(data)
 
@@ -246,6 +259,8 @@ def local_read(rid):
 def local_put(rec, rev=None):
     """Write a record. Given the revision it was read at, only if nobody changed it since: returns the new
     revision, or None when it changed."""
+    if record():
+        return record().put(rec, rev)
     with locked():
         if rev is not None:
             try:
@@ -258,6 +273,8 @@ def local_put(rec, rev=None):
 
 
 def local_all():
+    if record():
+        return record().all()
     config.ensure_dirs()
     with _records_cache_lock:
         paths = sorted(config.REQUESTS.glob(f"{config.settings()['id_prefix']}-*.json"))
@@ -313,6 +330,8 @@ def local_names(days, *, channel=None, test=False, exclude=None):
 
 
 def local_delete(rid):
+    if record():
+        return record().delete(rid)
     with locked():
         _path(rid).unlink(missing_ok=True)
 
@@ -381,3 +400,90 @@ def local_inbox_count(session_id):
                      if not i.get("delivered_at") and not i.get("seen_by_agent")
                      and (roles.get(i["to"], False) if i.get("to") else own))
     return count
+
+
+# ---------- the record, when it holds the cards ----------
+
+_record = {}
+
+
+def record():
+    """The pod dashboard's record, when this workspace's config names it (record_url) and this machine is the hub:
+    every card is read and written there, and the hub's own files hold no cards."""
+    url = config.settings().get("record_url")
+    if not url or not config.is_hub():
+        return None
+    key = (str(config.HOME), url)
+    if key not in _record:
+        _record[key] = Record(url.rstrip("/"), config.settings()["record_token"])
+    return _record[key]
+
+
+class Record:
+    """The record's card routes. A card is the same document the files held; the record keeps it at a revision, and
+    refuses a write on an older one (409) or one that breaks its rules (422, with the record's reason)."""
+
+    def __init__(self, url, token):
+        self.url, self.token = url, token
+        self.lock = threading.Lock()
+        self.cache = {}   # id -> (rev, marshal bytes of the card)
+
+    def call(self, method, path, body=None):
+        data = json.dumps(body, ensure_ascii=False).encode() if body is not None else None
+        req = urllib.request.Request(self.url + path, data=data, method=method,
+                                     headers={"X-Hub-Token": self.token, "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.status, json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            text = e.read().decode(errors="replace")
+            if e.code in (404, 409):
+                return e.code, json.loads(text or "{}")
+            raise StoreError(f"the record refused {method} {path}: {e.code} {text[:300]}")
+        except (urllib.error.URLError, OSError) as e:
+            raise StoreError(f"the record ({self.url}) isn't answering: {e}")
+
+    def create(self, rec):
+        return self.call("POST", "/api/cards", {"record": rec})[1]["record"]
+
+    def read(self, rid):
+        code, body = self.call("GET", f"/api/cards/{rid}")
+        if code == 404:
+            raise FileNotFoundError(f"no request {rid}")
+        return body["record"], body["rev"]
+
+    def put(self, rec, rev=None):
+        """The new revision, or None when the card changed since rev. Without rev, written over what is there."""
+        while True:
+            at = rev if rev is not None else self.read(rec["id"])[1]
+            code, body = self.call("PUT", f"/api/cards/{rec['id']}", {"record": rec, "rev": at})
+            if code == 200:
+                return body["rev"]
+            if rev is not None:
+                return None
+
+    def all(self):
+        """Every card, read again only where its revision moved since the last look."""
+        revs = {c["id"]: c["rev"] for c in self.call("GET", "/api/cards")[1]["cards"]}
+        with self.lock:
+            for rid in self.cache.keys() - revs.keys():
+                del self.cache[rid]
+            moved = [rid for rid, rev in revs.items() if self.cache.get(rid, (None,))[0] != rev]
+            for i in range(0, len(moved), 200):
+                for c in self.call("POST", "/api/cards/read", {"ids": moved[i:i + 200]})[1]["cards"]:
+                    self.cache[c["record"]["id"]] = (c["rev"], marshal.dumps(c["record"]))
+            return [marshal.loads(self.cache[rid][1]) for rid in sorted(revs) if rid in self.cache]
+
+    def delete(self, rid):
+        self.call("DELETE", f"/api/cards/{rid}")
+
+
+class _RecordAsHub:
+    """update() on the hub when the record holds the cards: the same read, change and write-if-unchanged as on any
+    other machine."""
+
+    def read(self, rid):
+        return record().read(rid)
+
+    def put(self, rec, rev):
+        return record().put(rec, rev) is not None
