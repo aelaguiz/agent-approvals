@@ -21,5 +21,7 @@
   "test_approver": null,
   "alarm": null,
   "hub": null,
-  "hub_url": null
+  "hub_url": null,
+  "record_url": null,
+  "record_token": null
 }

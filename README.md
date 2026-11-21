@@ -77,10 +77,21 @@ make install MACHINE=laptop
 | `alarm` | Optional. `{"channel": "<Slack channel id>", "wake": ["<program>", "<arg>"]}` posts delivery alarms to that channel and runs the command with the alarm on standard input. A leading `~` in the program path is expanded. |
 | `id_prefix` | Optional. What request numbers start with; `AP` unless set. Each Slack workspace needs its own. |
 | `folders` | Optional. Agents working in these folders, or inside them, use this workspace. See [More than one Slack workspace](#more-than-one-slack-workspace). |
-| `record_url`, `record_token` | Optional. The pod dashboard's address and the token its `POD_DASHBOARD_HUB_TOKEN` is set to. When set, the hub keeps every card in the dashboard's record instead of in `requests/`: each read and write goes to the record, which refuses an answer on an old version and logs each event as the person or agent who made it. Nothing else changes. |
+| `record_url`, `record_token` | Optional. The pod dashboard's address and the token its `POD_DASHBOARD_HUB_TOKEN` is set to. When set, the hub keeps every card in the dashboard's record instead of in `requests/`, and works from the record's answers: see [When the record keeps the cards](#when-the-record-keeps-the-cards). |
 | `hub`, `hub_url` | Optional. The machine that holds the records and the Slack connection, and where the others reach it. See [More than one machine](#more-than-one-machine). |
 
 Tokens stay in their own files; the config only points at them.
+
+### When the record keeps the cards
+
+With `record_url` set, the pod dashboard's record is where every answer lands, and the hub carries each one out:
+
+- **The hub doesn't connect to Slack.** The Slack app's Socket Mode is off, and its interactivity and events go to the record's own address. The record takes every press and pop-up answer, keeps it, and only then answers Slack; it refuses in the words the buttons always used, in the presser's thread. It opens each pop-up from the ones kept with the card's version, so a pop-up opens while the hub is stopped.
+- **The hub carries out every answer the record took**, in the order taken, with the same steps a press runs (the card redrawn, the list crossed off, the asker told), as it hears each card change on the record's stream of changes. The write that carries one out names it, so the record marks it carried out once. When the hub starts, it carries out whatever was taken while it was stopped. If its own steps refuse an answer (the card moved on in a way the record's rules don't cover), the presser is told in Slack, as before, and the record marks the answer refused with those words.
+- **Every version is kept with its pop-ups**: the card as asked, Change, Edit the words, each quote and picture's own, and Pick which once for each number of ticks. The first write of each version draws them; on start the hub draws them for any version without.
+- **The hub's own deadlines and hand-backs, the deputy's calls and answers recorded with `approvals record` go through the record too**, which refuses them in the same words the commands always printed. `approvals call` and `approvals record` on any machine send theirs to the hub, which has the record take it and carries it out before the command returns.
+- **Who decides, the team and the deputy are the record's**: `approver`, `approver_name`, `channel`, `approvers`, `team` and `team_answers_any` are read from it, and every other machine asks the hub for them. A teammate's `quiet` and `work` hours stay in these settings, under a `team` entry with the same Slack `user`. Only the approver switches auto-approval, with the button on the morning summary; the hub redraws the summary when the record says it changed.
+- **A thread reply is read at once** when the record says a card's thread changed, and otherwise on the usual pass through every card's thread.
 
 ### More than one approver
 
@@ -154,7 +165,7 @@ approvals doctor
 approvals review --types budget,purchase,money --agent "CFO"   # this session reviews those cards; again from a new session moves it there; --off ends it
 approvals note AP-0001 --file read.md          # the reviewer's read, in the card's thread
 approvals deputy --agent "Approver"            # this session hears every card and makes its own call on each; again from a new session moves it there
-approvals deputy --live                        # auto-approval on: the deputy's approve is the approver's yes (--dry-run pauses it; --off ends the role; alone, says who holds it)
+approvals deputy --live                        # auto-approval on: the deputy's approve is the approver's yes (--dry-run pauses it; --off ends the role; alone, says who holds it). With the record keeping the cards, only the approver switches it, from the morning summary
 approvals call AP-0001 --approve --why "Inside the test's cap, like every top-up he has approved"   # the deputy's call (or --his, to leave it for him)
 approvals history --agent "Pricing" --type price --days 30   # cards newest first, each with what happened on it in order; --calls: only cards the deputy called
 approvals names --days 3                       # recent Part of names, card counts, senders and newest titles
