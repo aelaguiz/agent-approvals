@@ -344,3 +344,48 @@ def test_a_cards_pictures_and_videos_go_from_its_machine_through_the_hub_into_th
     assert writes[0]["media"] == [{"version": 1, "key": "video", "address": name},
                                   {"version": 1, "key": "gallery:1", "address": name}]
     assert writes[1]["media"] == [{"version": 2, "key": "video", "address": name}] and writes[1]["record"]["title"] == "Changed"
+
+
+def test_a_card_names_what_it_decides_and_the_records_refusal_reaches_its_machine_whole(hubbox, monkeypatch):
+    """about, the record thing a card decides, goes with the card as any field does; the record checks it, and its
+    refusal reaches the agent's own machine in the record's words, however long."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    writes = []
+    refusal = "put_card: AP-0002 names F-999, which is not in the record. " + "Every word of it. " * 30
+
+    class Dashboard(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            writes.append(body)
+            if body["record"]["versions"][0]["card"]["about"] == "F-999":
+                return self.answer(422, {"error": refusal})
+            return self.answer(200, {"record": dict(body["record"], id="AP-0001"), "rev": 1})
+
+        def answer(self, code, obj):
+            data = json.dumps(obj).encode()
+            self.send_response(code)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args):
+            pass
+
+    dashboard = ThreadingHTTPServer(("127.0.0.1", 0), Dashboard)
+    threading.Thread(target=dashboard.serve_forever, daemon=True).start()
+    record = store.Record(f"http://127.0.0.1:{dashboard.server_address[1]}", "hub-token")
+    monkeypatch.setattr(store, "record", lambda: record)
+    rec = make_rec(SAMPLES["money"]) | {"id": None}
+    try:
+        rec["versions"][0]["card"]["about"] = "X-346"
+        assert store.create(rec)["id"] == "AP-0001"
+        rec["versions"][0]["card"]["about"] = "F-999"
+        with pytest.raises(store.Refused) as refused:
+            store.create(rec)
+    finally:
+        dashboard.shutdown()
+        dashboard.server_close()
+    assert writes[0]["record"]["versions"][0]["card"]["about"] == "X-346"
+    assert str(refused.value) == refusal

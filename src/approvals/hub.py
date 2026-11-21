@@ -34,7 +34,8 @@ class Client:
 
     def call(self, method, path, body=None, answers=()):
         """(HTTP status, JSON body). A missing record (404), a changed one (409) and any status in answers are
-        answers; anything else that isn't 200 is an error."""
+        answers; a write the record refused (422) raises Refused with the record's words; anything else that isn't
+        200 is an error."""
         data = json.dumps(body, ensure_ascii=False).encode() if body is not None else None
         req = urllib.request.Request(self.url + path, data=data, method=method,
                                      headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"})
@@ -45,6 +46,8 @@ class Client:
             text = e.read().decode(errors="replace")
             if e.code in (404, 409, *answers):
                 return e.code, json.loads(text or "{}")
+            if e.code == 422:
+                raise store.Refused(json.loads(text)["refused"])
             raise store.StoreError(f"the approvals hub on {config.hub()} refused {method} {path}: {e.code} {text[:200]}")
         except (urllib.error.URLError, OSError) as e:
             raise store.StoreError(f"the approvals hub on {config.hub()} ({self.url}) isn't answering: {e}")
@@ -244,6 +247,9 @@ class Handler(BaseHTTPRequestHandler):
                     store.local_delete(rid)
                     return self._send(200, {})
             return self._send(404, {"error": f"no {method} {url.path}"})
+        except store.Refused as refused:
+            # The record's own words, whole: a card it refuses is refused to the agent on its own machine as it is here.
+            return self._send(422, {"refused": str(refused)})
         except Exception as e:
             log.exception("hub %s %s failed", method, self.path)
             return self._send(500, {"error": str(e)[:300]})

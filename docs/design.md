@@ -84,6 +84,8 @@ One card is answered one way:
 
 Everything else (the frame line `part_of`, `if_no_answer`, `journey`, `gallery`, `sections`, `links`, `from`) can go on any card.
 
+**What a card decides** (`about`): where the pod dashboard's record keeps the cards, a card may name the one thing in the record it decides, by its id (`X-346`, `F-21`, `POD-4`). It goes with the version like any other field, and the record checks it: a card naming a thing the record doesn't hold, or a thing another open card already asks about, is refused, and the refusal reaches the agent in the record's own words on whatever machine it submitted from. The approver's answer on that version lands as his decision on that thing. Each version names its own, so a new version without `about` no longer sits on the thing. Nothing refuses a card without it.
+
 **A user journey** compares today with the change for up to four kinds of user. An entry lays out ordered steps with the action between screens, or pairs of screens that compare the change in different places. It shows what happens today, including where a path ends, and at least one screen with the change. A journey meets a card type's media requirement, and its maps and page button count toward Slack's block limit. The cold reader gets the words of each path and action in journey order.
 
 **A set** is several cards sent in one `approvals submit a.json b.json`, for things that belong together but each need their own reading. Each is its own record, thread, deadline and answer; the record keeps `set: {"n", "of"}`, and the frame line and the notification line show "2 of 4". All are validated before any is posted, so a set never goes out half.
