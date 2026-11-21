@@ -60,6 +60,21 @@ layer, a fallback path, a flag or a mode, ask what real failure it prevents.
   missing.
 - Match the surrounding code: its naming, comment density and idiom.
   Comments explain non-obvious intent, never syntax.
+- **`main` is what runs.** Every machine installs this tool from this
+  repository's `main`, and its sync reinstalls from `main` whenever the
+  installed skill differs from `main`'s, the hub included, within a couple
+  of minutes of any push. So a build is live only once `main` holds it. One
+  installed on the hub from a branch keeps running until the next push to
+  `main` by anyone, and then `main` comes back over it as an old build. On
+  November 21, 2026 the hub had kept its cards in the dashboard's record
+  for two hours on a branch build when a one-line change to the skill's
+  text reached `main`: the hub was reinstalled from `main`, read its card
+  files of two hours earlier, could not find thirty cards, and gave a new
+  card a number another card already held. Prove a change to the hub on a
+  test hub ([docs/testing.md](docs/testing.md)), then merge it and let the
+  sync install it. And before a push to `main`, however small, see that
+  what the hub runs is `main`: the installed tool's `direct_url.json` names
+  the folder it was installed from.
 - [skills/approvals/](skills/approvals/) is what agents read to use this.
   Edit it with `$skill-authoring` and `$prompt-authoring`: teach agents why,
   with a few varied examples, rather than adding if-then rules. Keep
