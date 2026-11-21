@@ -39,6 +39,7 @@ def answerer(rec, answer):
 
 FINAL = {"approved", "declined", "expired", "done", "withdrawn"}
 CLOSED = {"approved", "declined", "done", "withdrawn"}   # a reply now is about a settled request
+REPLIES = {"feedback", "answer", "comment"}
 
 
 def one_line(s):
@@ -63,7 +64,8 @@ def enqueue(rec, kind, text, react_ts=None, to=None, member=None, by=None):
         "ref": ref, "kind": kind, "text": f"{text} (ref {ref})", "created": store.iso(),
         "react_ts": react_ts, "attempts": 0, "next_try": store.iso(), "delivered_at": None,
         "noted_failure": False, "seen_by_agent": False,
-        "needs_ack": kind not in ("expired", "review", "deputy", "handed"), "acked_at": None, "ack_warned": False,
+        "needs_ack": kind not in ("expired", "review", "deputy", "handed", "again"), "acked_at": None, "ack_warned": False,
+        **({"asks_again": True} if kind in REPLIES and not to else {}),
         **({"to": to} if to else {}),
         **({"answerer": member} if member else {}),
     })
@@ -146,6 +148,15 @@ def mark_acked(rec):
             item["acked_at"] = store.iso()
             kinds.append(item["kind"])
     return kinds
+
+
+def msg_again(rec, item):
+    """A reply the agent was handed and hasn't answered on the card, typed in again with its words and when it first
+    went."""
+    first = item["text"].rsplit(" (ref ", 1)[0]
+    return (f'{head(rec)} Asked again: this reached you at {cards.when(store.parse(item["delivered_at"]))} and nothing '
+            f'of yours has been posted on the card since. Answer it on the card; until you post there, it comes again '
+            f'every 30 minutes. What was sent: {first}')
 
 
 def acknowledge(rec, text, ts):
@@ -519,11 +530,17 @@ def record_answer(rec, verdict, words, where, part=None, choice=None):
         j = row(rec, part)
         if not j:
             return f"there is no row {part}"
-        return answer_part(rec, n, j, "chose" if choice else verdict, by, where=where, words=words, choice=choice,
-                           tell=False, again=True)
+        result = answer_part(rec, n, j, "chose" if choice else verdict, by, where=where, words=words, choice=choice,
+                             tell=False, again=True)
+        if result == "ok":
+            mark_acked(rec)
+        return result
     if choice and choice not in [o["name"] for o in rec["versions"][-1]["card"].get("options") or []]:
         return f"{choice} isn't one of this card's options"
-    return decide(rec, n, verdict, by=by, where=where, words=words, choice=choice, again=True)
+    result = decide(rec, n, verdict, by=by, where=where, words=words, choice=choice, again=True)
+    if result == "ok":
+        mark_acked(rec)
+    return result
 
 
 def remove(rec, n, by):
@@ -956,8 +973,9 @@ def take_replies(rec, replies, react_ts=None, by=None):
     member = cards.teammate(rec, {"by": by, "version": n})
     name = member or who(rec)
     end_sleep(rec)
+    via = "dashboard" if VIA.get() == "dashboard" else "slack"
     for ts, t in replies:
-        store.event(rec, kind, text=t, ts=ts, **({"by": by, "version": n} if member else {}))
+        store.event(rec, kind, text=t, ts=ts, via=via, **({"by": by, "version": n} if member else {}))
     if kind != "comment":
         if rec["status"] == "expired":
             rec["decision"] = None

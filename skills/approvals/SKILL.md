@@ -72,7 +72,7 @@ A card that changes what a user sees carries the user's `journey`: today's path 
 
 ## When the answer arrives
 
-Answers arrive as messages starting with `[Approvals]` that name who answered and quote their words exactly. They are typed into this session while it's running, or printed by `approvals inbox` for one that came while it wasn't. For a yes, a no, a pick or a set of items, first post one line with `approvals ack AP-0013 "<what you understood and what you're doing now>"`, such as "Got it: posting the reply now, then I'll mark it done." For a reply or a question, your answer or your next version is the acknowledgement; post nothing before it. A deadline passing needs no acknowledgement.
+Answers arrive as messages starting with `[Approvals]` that name who answered and quote their words exactly. They are typed into this session while it's running, or printed by `approvals inbox` for one that came while it wasn't. For a yes, a no, a pick or a set of items, first post one line with `approvals ack AP-0013 "<what you understood and what you're doing now>"`, such as "Got it: posting the reply now, then I'll mark it done." For a reply or a question, your answer or your next version is the acknowledgement; post nothing before it. A deadline passing needs no acknowledgement. A comment made on the pod dashboard reaches you as the same message, posted in the card's thread; answer it there with the same commands.
 
 | The message says | Do this |
 | --- | --- |

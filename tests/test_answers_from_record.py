@@ -400,3 +400,93 @@ def test_a_hub_reaches_its_record_with_the_token_its_own_settings_name():
                                                 "record_url": "http://127.0.0.1:2", "record_token": "made-up"}))
     store._record.clear()
     assert store.record().token == "made-up"
+
+
+# ---------- a comment typed on the pod dashboard ----------
+
+def posting(slack, monkeypatch, refuse=None):
+    """Slack's note answering with its post's id, as the real one does; or refusing, in Slack's own error."""
+    def note(ts, text, **kw):
+        if refuse:
+            raise slackapi_error(refuse)
+        slack.notes.append((ts, text))
+        return f"9.{len(slack.notes)}"
+    monkeypatch.setattr(slackapi, "note", note)
+
+
+def reply_item(rec, kind="feedback"):
+    return next(i for i in rec["outbox"] if i["kind"] == kind and not i.get("to"))
+
+
+def deliver_reply(minutes_ago=0):
+    at = store.iso(store.now() - timedelta(minutes=minutes_ago))
+    store.update(RID, lambda r: reply_item(r).update(delivered_at=at))
+
+
+def slackapi_error(code):
+    from slack_sdk.errors import SlackApiError
+    return SlackApiError("The request to the Slack API failed.", {"ok": False, "error": code})
+
+
+def test_a_comment_is_posted_in_the_thread_and_reaches_the_asker_as_his_reply(hub, record, slack, monkeypatch):
+    card()
+    posting(slack, monkeypatch)
+    assert carried(hub, record, "comment", words="why does this need a backend change?") is None
+    rec = store.load(RID)
+    assert slack.notes[-1] == ("1.1", "💬 Sam replied on the card:\n> why does this need a backend change?")
+    reply = rec["events"][-1]
+    assert (reply["kind"], reply["ts"], reply["via"], reply["answer"]) == ("feedback", "9.1", "dashboard", 1)
+    assert rec["status"] == "revising" and reply_item(rec)["react_ts"] == "9.1"
+    [said] = asker_texts()
+    assert "replied on the pod dashboard" in said and "why does this need a backend change?" in said
+    assert record.rows[0]["carried"]
+
+
+def test_a_comment_on_a_decided_card_changes_nothing_about_it(hub, record, slack, monkeypatch):
+    card()
+    carried(hub, record, "approve")
+    posting(slack, monkeypatch)
+    assert carried(hub, record, "comment", words="wait, I take that back") is None
+    rec = store.load(RID)
+    assert rec["status"] == "approved" and rec["events"][-1]["kind"] == "comment"
+
+
+def test_slack_refusing_the_post_refuses_the_comment_in_slacks_words(hub, record, slack, monkeypatch):
+    card()
+    posting(slack, monkeypatch, refuse="not_in_channel")
+    assert carried(hub, record, "comment", words="hello") == "not_in_channel"
+    assert record.rows[0]["refused"] == "not_in_channel" and store.load(RID)["status"] == "pending"
+
+
+def test_a_reply_not_acknowledged_is_asked_again_at_ten_minutes_then_every_thirty(hub, record, slack, monkeypatch):
+    card()
+    posting(slack, monkeypatch)
+    carried(hub, record, "comment", words="give me a table by game mode")
+    deliver_reply(minutes_ago=11)
+    hub.ask_again(store.load(RID))
+    hub.ask_again(store.load(RID))
+    rec = store.load(RID)
+    asked = rec["outbox"][-1]
+    assert asked["kind"] == "again" and not asked["needs_ack"] and not asked.get("to")
+    assert "Asked again" in asked["text"] and "give me a table by game mode" in asked["text"]
+    assert len(reply_item(rec)["asked_again"]) == 1
+    half_hour_ago = [store.iso(store.now() - timedelta(minutes=31))]
+    store.update(RID, lambda r: reply_item(r).update(asked_again=half_hour_ago))
+    hub.ask_again(store.load(RID))
+    assert len(reply_item(store.load(RID))["asked_again"]) == 2
+    store.update(RID, core.mark_acked)
+    before = len(store.load(RID)["outbox"])
+    store.update(RID, lambda r: reply_item(r).update(asked_again=half_hour_ago))
+    hub.ask_again(store.load(RID))
+    assert len(store.load(RID)["outbox"]) == before
+
+
+def test_recording_his_answer_acknowledges_what_was_sent(hub, record, slack, monkeypatch):
+    card()
+    posting(slack, monkeypatch)
+    carried(hub, record, "comment", words="No dude. Don't introduce this complexity right now")
+    deliver_reply()
+    assert carried(hub, record, "record", via="recorded",
+                   detail={"verdict": "declined", "where": "Slack thread"},
+                   words="No dude. Don't introduce this complexity right now") is None
+    assert reply_item(store.load(RID))["acked_at"]

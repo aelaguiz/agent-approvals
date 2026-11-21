@@ -62,6 +62,7 @@ POLL_BUDGET_PER_MIN = 40
 DM_POLL_SECONDS = 15
 FAILURE_NOTE_AFTER = 3
 ACK_MINUTES = 10         # a delivered answer the agent hasn't acknowledged by then gets a warning in the thread
+ASK_AGAIN_MINUTES = 30   # after that, a reply it hasn't answered is typed in again this often, until it posts on the card
 FETCH_SECONDS = 5        # how often a machine other than the hub asks it for answers to deliver
 WAITING = "hourglass_flowing_sand"   # ⏳ on a card while its decision waits for the agent to catch up
 STRAY_SECONDS = 60       # how often a machine looks for answers whose session turned up on it
@@ -570,6 +571,7 @@ class Listener:
             if rec.get("card_dirty"):
                 self.try_refresh(rec["id"])
             self.warn_unacknowledged(rec)
+            self.ask_again(rec)
             records[i] = rec
 
         if config.is_hub():
@@ -733,6 +735,29 @@ class Listener:
         except Exception as e:
             log.warning("ack warning for %s failed: %s", rec["id"], e)
         log.info("%s: no acknowledgement for %s", rec["id"], ", ".join(sorted(refs)))
+
+    def ask_again(self, rec):
+        """A reply typed into the agent's session and not acknowledged is typed in again ACK_MINUTES after it landed,
+        then every ASK_AGAIN_MINUTES, until the agent posts on the card (which acknowledges everything it was sent) or
+        the card is withdrawn or done. One waiting for an agent that isn't running is never delivered, so never asked
+        again: it waits for the agent, as answers do."""
+        if rec["status"] in ("withdrawn", "done"):
+            return
+        now = store.now()
+        due = {i["ref"] for i in rec.get("outbox", []) if i.get("asks_again") and i.get("delivered_at")
+               and not i.get("acked_at")
+               and now - store.parse((i.get("asked_again") or [i["delivered_at"]])[-1])
+               >= timedelta(minutes=ASK_AGAIN_MINUTES if i.get("asked_again") else ACK_MINUTES)}
+        if not due:
+            return
+
+        def again(r):
+            for i in r["outbox"]:
+                if i["ref"] in due and not i.get("acked_at"):
+                    i.setdefault("asked_again", []).append(store.iso())
+                    core.enqueue(r, "again", core.msg_again(r, i))
+        store.update(rec["id"], again)
+        log.info("%s: asked again for %s", rec["id"], ", ".join(sorted(due)))
 
     def delivery_worker(self):
         while not self.stop.is_set():
@@ -904,7 +929,9 @@ class Listener:
         answer = store.ANSWER.set(a["id"])
         try:
             if via in ("slack", "dashboard"):
-                if what in ("change", "edit", "items") or what.endswith(":change"):
+                if what == "comment":
+                    r, follow_up = self.comment(rec, user, words or "", a["id"])
+                elif what in ("change", "edit", "items") or what.endswith(":change"):
                     r, follow_up = self.submit(rec, n, what, words or "", user, f"answer:{a['id']}", a.get("items"))
                 else:
                     r, follow_up = self.press(rec, n, what, user, words=words, until=a.get("until_at"))
@@ -953,6 +980,33 @@ class Listener:
             except Exception as e:
                 log.warning("telling %s that answer %s was refused failed: %s", user, a["id"], e)
         return refused
+
+    def comment(self, rec, user, words, answer_id):
+        """A comment typed on the pod dashboard, which is to the asker his reply in the card's thread: posted in the
+        thread first, as the line the hub posts for a note from the dashboard, and that post's Slack id is the reply's,
+        so 📨 lands on it and the dashboard shows the line once. Then it is a reply like any other, by the card's state.
+        Slack refusing the post refuses the comment, in Slack's words."""
+        rid = rec["id"]
+        name = core.answerer(rec, {"by": user, "version": len(rec["versions"])})
+        text = f"💬 {cards.esc(name)} replied on the card:\n{cards.quoted(words)}"
+        try:
+            ts = slackapi.note(rec["thread_ts"], text, **config.channel_args(rec))
+        except Exception as e:
+            return (getattr(e, "response", None) or {}).get("error") or str(e), None
+
+        def apply(r):
+            dm = core.conversation_send(r) if user == config.card_target(r)["approver"] else None
+            return core.take_replies(r, [(ts, words)], by=user), dm
+        kind, dm = store.update(rid, apply)
+        log.info("%s: comment from %s on the pod dashboard -> %s", rid, name, kind)
+
+        def follow_up():
+            self.copy_to_source(store.load(rid), words, f"answer:{answer_id}", store.now(), name)
+            core.post_to_teammate(rid, dm, text)
+            if store.load(rid).get("card_dirty"):
+                self.try_refresh(rid)
+            self.refresh_list()
+        return "ok", follow_up
 
     def carry_waiting(self):
         """Every answer the record took and nothing has carried out, oldest first. A pass that can't reach the record
