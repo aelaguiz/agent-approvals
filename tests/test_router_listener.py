@@ -712,3 +712,23 @@ def test_a_missing_herdr_is_never_read_as_a_closed_pane():
         with pytest.raises(RuntimeError, match="herdr isn't on this service's PATH on testbox") as e:
             ask()
         assert not isinstance(e.value, router.HerdrError)
+
+
+def test_alarm_posts_for_a_card_with_no_slack_thread(monkeypatch):
+    """AP-1942 (November 21, 2026) was made without a Slack post; its alarm crashed building the thread link."""
+    from datetime import timedelta
+
+    now = store.now()
+    monkeypatch.setattr(store, "now", lambda: now)
+    calls = []
+    monkeypatch.setattr(listener.slackapi, "post", lambda blocks, text, channel_id: calls.append(text))
+    monkeypatch.setattr(listener.subprocess, "run", lambda cmd, **kw: None)
+    rec = make_rec(SAMPLES["money"], reach={"machine": "studio"})
+    rec["thread_ts"] = None
+    core.enqueue(rec, "feedback", "answer")
+    rec["outbox"][0].update(created=store.iso(now - timedelta(seconds=75)), last_error="no session")
+    store.save(rec)
+    L = listener.Listener()
+    L.s["alarm"] = {"channel": "COPS", "wake": ["~/wake"]}
+    L.alarm()
+    assert len(calls) == 1 and "AP-0001" in calls[0] and "no session" in calls[0]

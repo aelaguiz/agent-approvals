@@ -1160,8 +1160,9 @@ class Listener:
             name = i.get("answerer") or core.who(r)
             try:
                 line = (f"🚨 {name}'s answer on {rid} ({core.one_line(r['title'])}) hasn't reached "
-                        f"{core.one_line(r['agent'])} after {age} seconds: {core.one_line(reason)}. "
-                        f"{slackapi.message_url(r['thread_ts'], **config.channel_args(r))}")
+                        f"{core.one_line(r['agent'])} after {age} seconds: {core.one_line(reason)}."
+                        # A card made without a Slack post has no thread to link (AP-1942, November 21, 2026).
+                        + (f" {slackapi.message_url(r['thread_ts'], **config.channel_args(r))}" if r.get("thread_ts") else ""))
                 slackapi.post([], line, channel_id=alarm["channel"])
             except Exception:
                 log.exception("alarm post for %s %s failed", rid, ref)
