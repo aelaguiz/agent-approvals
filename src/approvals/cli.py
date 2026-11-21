@@ -1003,6 +1003,12 @@ def cmd_press(a):
     print("ok")
 
 
+def cmd_team(a):
+    """The team a card can be handed to, as Slack's Hand to menu lists them, for the pod dashboard's Hand to list: one
+    JSON list of {"user", "name"}, in the configuration's order."""
+    print(json.dumps([{"user": p["user"], "name": p["name"]} for p in config.settings()["team"].values()]))
+
+
 def cmd_role(a):
     """What this machine's service does for the workspace: hub, delivery, or none (with why), for the installer."""
     try:
@@ -1203,6 +1209,9 @@ def main(argv=None):
     s.add_argument("--teammate", help="hand: the Slack user id of the teammate")
     s.add_argument("--until", help="sleep: when it wakes, an ISO time with its offset")
     s.set_defaults(fn=cmd_press)
+
+    s = sub.add_parser("team", help="the team a card can be handed to, in Slack's Hand to order, as JSON")
+    s.set_defaults(fn=cmd_team)
 
     s = sub.add_parser("role", help=argparse.SUPPRESS)
     s.set_defaults(fn=cmd_role)

@@ -235,7 +235,7 @@ def msg_part(rec, j, a):
     n_parts = len(c["parts"])
     t = cards.when(store.now())
     rid = rec["id"]
-    where = "button in Slack" if a.get("where") == "button" else a.get("where") or "Slack"
+    where = f"button {said_in()}" if a.get("where") == "button" else a.get("where") or "Slack"
     top = f'{head(rec)} part {j} of {n_parts} "{p["title"]}":'
     scope = f'This answer is for part {j} only; {_others(rec, {j})}.'
     name = answerer(rec, a)

@@ -1,5 +1,6 @@
 """`approvals press`: a press from the pod dashboard runs the Slack press's own steps, and Sleep and Wake now."""
 import copy
+import json
 from datetime import timedelta
 
 import pytest
@@ -234,3 +235,15 @@ def test_words_can_come_on_stdin(team, slack, capsys, monkeypatch):
     monkeypatch.setattr("sys.stdin", io.StringIO("Make it $200.\nAnd sooner."))
     assert press(capsys, "change", "--words", "-") == (0, "ok")
     assert store.load(RID)["events"][-1]["text"] == "Make it $200.\nAnd sooner."
+
+
+def test_a_set_answered_from_the_dashboard_names_the_pod_dashboard_on_each_row(team, slack, capsys):
+    card(kind="set")
+    assert press(capsys, "approve") == (0, "ok")
+    rows = [t for t in asker_texts() if "This answer is for part" in t]
+    assert rows and all("button on the pod dashboard" in t and "in Slack" not in t for t in rows)
+
+
+def test_team_lists_the_hand_to_menu_in_its_order(team, capsys):
+    cli.main(["team"])
+    assert json.loads(capsys.readouterr().out) == [{"user": USER, "name": "Riley"}, {"user": "UTEAM2", "name": "Morgan"}]
