@@ -77,7 +77,7 @@ make install MACHINE=laptop
 | `alarm` | Optional. `{"channel": "<Slack channel id>", "wake": ["<program>", "<arg>"]}` posts delivery alarms to that channel and runs the command with the alarm on standard input. A leading `~` in the program path is expanded. |
 | `id_prefix` | Optional. What request numbers start with; `AP` unless set. Each Slack workspace needs its own. |
 | `folders` | Optional. Agents working in these folders, or inside them, use this workspace. See [More than one Slack workspace](#more-than-one-slack-workspace). |
-| `record_url`, `record_token` | Optional. The pod dashboard's address and the token its `POD_DASHBOARD_HUB_TOKEN` is set to. When set, the hub keeps every card in the dashboard's record instead of in `requests/`: each read and write goes to the record, which refuses an answer on an old version and logs each event as the person or agent who made it. Nothing else changes. |
+| `record_url`, `record_token_file`, `record_token_key` | Optional. The pod dashboard's address, and the env file and key holding the token its `POD_DASHBOARD_HUB_TOKEN` is set to (a raw `record_token` also works, in a machine's own settings only). When set, the hub keeps every card in the dashboard's record instead of in `requests/`: each read and write goes to the record, which refuses an answer on an old version and logs each event as the person or agent who made it. Nothing else changes. |
 | `hub`, `hub_url` | Optional. The machine that holds the records and the Slack connection, and where the others reach it. See [More than one machine](#more-than-one-machine). |
 
 Tokens stay in their own files; the config only points at them.
