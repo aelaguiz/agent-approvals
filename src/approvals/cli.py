@@ -106,10 +106,10 @@ def _prepare_media(card, version):
     """Upload the pictures privately and publish any videos; store the handles on the version. A video's first
     frame gets a play mark, and a picture with a `mark` gets an outline round what changed. Returns the card's picture
     as uploaded, or None."""
-    path = None
+    image = None
     if card.get("image"):
-        path = pictures.with_play_mark(card["image"]) if card.get("video") else card["image"]
-        version["image_file_id"] = slackapi.upload_private_image(path, card["title"])
+        image = pictures.with_play_mark(card["image"]) if card.get("video") else card["image"]
+        version["image_file_id"] = slackapi.upload_private_image(image, card["title"])
     if card.get("video"):
         version["video_url"] = slackapi.share_video(card["video"], card["title"], card.get("video_note") or "A video waiting for approval.")
     videos = {}
@@ -119,7 +119,7 @@ def _prepare_media(card, version):
             videos[key] = url
     if videos:
         version["videos"] = videos
-    return path
+    return image
 
 
 def _picture_files(card, maps):
