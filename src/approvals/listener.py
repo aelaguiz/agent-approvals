@@ -965,6 +965,9 @@ class Listener:
                     outcome = str(refused)
                     log.warning("the record refused carrying out answer %s on %s: %s", a["id"], a["card"], refused)
                     store.record().refuse(a["id"], outcome)
+                except FileNotFoundError:   # the card was taken out of the store since
+                    outcome = self.REFUSED["gone"]
+                    store.record().refuse(a["id"], outcome)
                 self.outcomes[a["id"]] = outcome
                 while len(self.outcomes) > 1000:
                     self.outcomes.popitem(last=False)

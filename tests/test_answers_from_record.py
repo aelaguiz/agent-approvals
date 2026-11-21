@@ -190,6 +190,17 @@ def test_a_refusal_the_records_write_makes_is_marked_on_the_answer(hub, record):
     assert record.rows[0]["refused"].startswith("put_card: AP-0001 asks for a pick") and hub.outcomes[aid]
 
 
+def test_an_answer_on_a_card_taken_out_of_the_store_is_refused_and_the_next_is_carried_out(hub, record):
+    card()
+    card(rid="AP-0002")
+    gone = taken(record, "approve")
+    record.delete(RID)
+    taken(record, "approve", rid="AP-0002")
+    hub.carry_waiting()
+    assert record.rows[0]["refused"] == hub.REFUSED["gone"] and hub.outcomes[gone] == hub.REFUSED["gone"]
+    assert store.load("AP-0002")["status"] == "approved"
+
+
 def test_a_teammates_answer_on_a_handed_card_counts_as_theirs(hub, record):
     card()
     assert carried(hub, record, "hand:riley") is None
