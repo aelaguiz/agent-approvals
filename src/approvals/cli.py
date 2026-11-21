@@ -961,6 +961,47 @@ def cmd_listen(a):
     listener.main()
 
 
+PRESS_ACTIONS = ["approve", "decline", "change", "approve-note", "decline-note", "edit", "remove", "hand", "mine",
+                 "notmine", "takeback", "sleep", "wake"]
+NEEDS_WORDS = {"change", "approve-note", "decline-note", "edit"}
+
+
+def cmd_press(a):
+    """A press on a card from the pod dashboard, run on the hub, where the list of what waits on him is kept: the
+    same steps as the same press in Slack (the tool's own refusals, the answer saved in one write, the card and the
+    list redrawn, his words in the thread), with the asker told it came from the pod dashboard. Prints ok, or the
+    refusal in the words Slack shows."""
+    from . import listener
+    if not config.is_hub():
+        _die("approvals press runs on the workspace's hub.")
+    store.ACTOR.set(a.by)
+    core.VIA.set("dashboard")
+    slackapi.POST_AS = None   # as the listener posts
+    L = listener.Listener()
+    rec = store.load(a.id)
+    act, n, words = a.action, a.version, a.words or ""
+    if act in NEEDS_WORDS and not words.strip():
+        r, follow_up = "The words can't be empty.", None
+    elif act == "hand":
+        team = config.settings()["team"]
+        key = next((k for k, p in team.items() if p["user"] == a.teammate), None)
+        r, follow_up = L.press(rec, n, f"hand:{key}", a.by) if key else ("gone", None)
+    elif act in ("approve-note", "decline-note"):
+        r, follow_up = L.press(rec, n, act.split("-")[0], a.by, words=words)
+    elif act == "edit" and cards.editable_quote(rec["versions"][-1]["card"]) is None:
+        r, follow_up = "gone", None
+    elif act in ("change", "edit"):
+        r, follow_up = L.submit(rec, n, act, words, a.by, "dashboard:" + store.iso())
+    else:
+        r, follow_up = L.press(rec, n, act, a.by, until=a.until)
+    if r != "ok":
+        print(L.REFUSED.get(r, r))
+        sys.exit(1)
+    if follow_up:
+        follow_up()
+    print("ok")
+
+
 def cmd_role(a):
     """What this machine's service does for the workspace: hub, delivery, or none (with why), for the installer."""
     try:
@@ -974,7 +1015,7 @@ def cmd_role(a):
 
 # Commands that post to Slack check first that this machine can, so nothing is saved for a card it can't post.
 POSTS = {"submit", "ask", "revise", "answer", "ack", "done", "withdraw", "record", "status", "note", "review",
-         "deputy", "call", "pictures"}
+         "deputy", "call", "pictures", "press"}
 # Commands that can change what a request's Basecamp steps say.
 CHANGES = {"ask", "revise", "answer", "ack", "done", "withdraw", "record", "status"}
 
@@ -1151,6 +1192,16 @@ def main(argv=None):
 
     s = sub.add_parser("listen", help="run the service (launchd runs this)")
     s.set_defaults(fn=cmd_listen)
+
+    s = sub.add_parser("press", help="press a card's button from the pod dashboard, as the Slack user --by; runs on the hub")
+    s.add_argument("id")
+    s.add_argument("version", type=int)
+    s.add_argument("action", choices=PRESS_ACTIONS)
+    s.add_argument("--by", required=True, help="the Slack user id of the person pressing")
+    s.add_argument("--words", help="his words: the change, the note, or the edited words")
+    s.add_argument("--teammate", help="hand: the Slack user id of the teammate")
+    s.add_argument("--until", help="sleep: when it wakes, an ISO time with its offset")
+    s.set_defaults(fn=cmd_press)
 
     s = sub.add_parser("role", help=argparse.SUPPRESS)
     s.set_defaults(fn=cmd_role)

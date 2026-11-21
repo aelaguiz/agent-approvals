@@ -1,4 +1,5 @@
 """What happens to a request: decisions, replies, deadlines, card refreshes, messages to the agent."""
+import contextvars
 import json
 import logging
 import re
@@ -6,6 +7,15 @@ import secrets
 from datetime import datetime, time, timedelta
 
 from . import cards, config, slackapi, store
+
+
+# Where the answer being handled was given: Slack, or the pod dashboard (`approvals press`). The record is the same
+# either way; only the messages that say where it came from name the place.
+VIA = contextvars.ContextVar("via", default="Slack")
+
+
+def said_in():
+    return "on the pod dashboard" if VIA.get() == "dashboard" else "in Slack"
 
 
 def who(rec):
@@ -106,7 +116,7 @@ def tell_reviewer(rec, news):
 
 
 def where_said(where):
-    return {"button": "button in Slack", "pop-up": "in Slack", "deputy": "auto-approval by his deputy"}.get(where, where)
+    return {"button": f"button {said_in()}", "pop-up": said_in(), "deputy": "auto-approval by his deputy"}.get(where, where)
 
 
 def quoted_words(words, member=None):
@@ -194,7 +204,7 @@ def msg_decision(rec, verdict, where, choice=None, items=None, edited=None, memb
 def msg_removed(rec):
     t = cards.when(store.now())
     kept = (" Parts he had already answered keep those answers." if card(rec).get("parts") and len(cards.open_rows(rec)) < len(card(rec)["parts"]) else "")
-    return (f'{head(rec)} {who(rec)} removed it from his list (Remove, on his list of what waits on him in Slack, {t}). '
+    return (f'{head(rec)} {who(rec)} removed it from his list (Remove, on his list of what waits on him {said_in()}, {t}). '
             f'The card is closed and nothing still waiting on it is approved.{kept} {ack_step(rec, "that you are dropping it")} '
             f'Then drop it and don\'t post it again. Removing isn\'t declining: it says this card shouldn\'t be waiting on him, '
             f'not that the idea is wrong. If what it was for still matters, work out why it didn\'t belong in front of him '
@@ -273,15 +283,15 @@ def msg_replies(rec, kind, texts, question=None, member=None):
     one_reply = (f'Your reply is your acknowledgement: post nothing before it, and if it needs more than a few minutes of '
                  f'work, say first in one line what is coming and when, with `approvals ack {rid} "<what and when>"`.')
     if kind == "answer":
-        return (f'{head(rec)} {name} answered your question ("{one_line(question)}") in Slack at {t}: {said}. '
+        return (f'{head(rec)} {name} answered your question ("{one_line(question)}") {said_in()} at {t}: {said}. '
                 f'If it asks for a change, carry on with `approvals revise {rid} <card.json>`. '
                 f'If it approves the card as it stands (a yes, or a detail you asked about settled with no change to the card), '
                 f'record it with `approvals record {rid} --approved --words "<their words>" --where "Slack thread"`, do it, then run `approvals done {rid} "<readback>"`. {one_reply}')
     if kind == "comment":
-        return (f'{head(rec)} {name} replied in Slack at {t}, after the decision: {said}. '
+        return (f'{head(rec)} {name} replied {said_in()} at {t}, after the decision: {said}. '
                 f'If it asks something, answer it with `approvals answer {rid} "<the answer, verdict first>"`. '
                 f'If it changes what you do, say so in one line with `approvals ack {rid} "<what changes>"`. No new card unless asked for one.')
-    return (f'{head(rec)} {name} replied in Slack at {t}: {said}. '
+    return (f'{head(rec)} {name} replied {said_in()} at {t}: {said}. '
             f'If it asks a question, answer it with `approvals answer {rid} "<the answer, verdict first>"`: that hands the card back as it stands, with no new version. '
             f'If it asks for a change, post the next version with `approvals revise {rid} <card.json>` (say what changed in "changes"). '
             f'If you truly cannot go on without one fact, ask it with `approvals ask {rid} "<question>"`. {one_reply} '
@@ -343,6 +353,7 @@ def decide(rec, n, verdict, by, where="button", words=None, choice=None, items=N
     if d and d.get("version") == n and d.get("verdict") in ("approved", "declined") and not (
             again and rec["status"] == "revising"):
         return "already"
+    end_sleep(rec)
     rec["decision"] = {"verdict": verdict, "version": n, "by": by, "where": where, "words": words, "at": store.iso()}
     rec["decision"].update({k: v for k, v in (("choice", choice), ("items", items), ("edited", edited)) if v is not None})
     rec["status"] = verdict
@@ -350,7 +361,8 @@ def decide(rec, n, verdict, by, where="button", words=None, choice=None, items=N
     rec["card_dirty"] = True
     store.event(rec, "decision", verdict=verdict, version=n, where=where, words=words, choice=choice, items=items, edited=edited, **actor)
     if where in ("button", "pop-up"):
-        how = "button in Slack" if where == "button" else ("picked in a pop-up in Slack" if items is not None else "Edit the words in Slack")
+        how = (f"button {said_in()}" if where == "button" else
+               f"picked in a pop-up {said_in()}" if items is not None else f"Edit the words {said_in()}")
         enqueue(rec, "decision", msg_decision(rec, verdict, how, choice, items, edited, member),
                 react_ts=card_ts(rec), member=member, by=by)
     edited_words = f"{member}'s edited words" if member else "his own edited words"
@@ -391,6 +403,7 @@ def answer_part(rec, n, j, verdict, by, where="button", words=None, choice=None,
     a = {"verdict": verdict, "version": n, "by": by, "where": where, "at": store.iso()}
     a.update({k: v for k, v in (("words", words), ("choice", choice)) if v is not None})
     answers[pid] = a
+    end_sleep(rec)
     member = cards.teammate(rec, a)
     store.event(rec, "part", part=j, verdict=verdict, version=n, where=where, words=words, choice=choice,
                 **({"by": by} if member else {}))
@@ -494,6 +507,7 @@ def remove(rec, n, by):
         return bad
     if rec["status"] in CLOSED:
         return "already"
+    end_sleep(rec)
     rec["status"] = "withdrawn"
     rec["withdrawn"] = {"text": f"{who(rec)} removed it from his list", "at": store.iso(), "by": by}
     rec["open_question"] = None
@@ -592,6 +606,7 @@ def add_hand(rec, n, by, person):
     send = {"version": n, "name": person["name"], "user": person["user"], "why": "", "at": at,
             "send_after": after, "handed": {"by": by, "at": at}, "return_at": return_at}
     rec.setdefault("also", []).append(send)
+    end_sleep(rec)
     c = card(rec)
     hours = c.get("deadline_hours") or cards.TYPES[c["type"]]["hours"]
     deadline = due.astimezone(now.tzinfo) + timedelta(hours=hours)
@@ -650,6 +665,53 @@ def take_mine(rec, n, by):
     store.event(rec, "mine", version=n, name=send["name"])
     rec["card_dirty"] = True
     return "ok"
+
+
+SLEEP_TIME = "Choose a future time before the answer deadline."
+
+
+def sleep(rec, n, by, until):
+    """Sleep, from the pod dashboard: the card leaves his waiting list until `until` (an ISO time), and comes back by
+    itself once that time has passed. Nothing else changes: not its deadline, its status, its Slack card or its
+    buttons, and nobody is told. Any answer ends the sleep."""
+    target = config.card_target(rec)
+    if by != target["approver"]:
+        return f"Only {target['approver_name']} can decide approvals."
+    bad = _check(rec, n)
+    if bad:
+        return bad
+    if rec["status"] not in ("pending", "question") or cards.handed(rec):
+        return "already"
+    try:
+        wake_at = store.parse(until)
+    except (TypeError, ValueError):
+        return SLEEP_TIME
+    if wake_at.tzinfo is None or not store.now() < wake_at < store.parse(rec["deadline"]):
+        return SLEEP_TIME
+    at = store.iso()
+    rec["sleep"] = {"until": store.iso(wake_at), "by": by, "at": at}
+    store.event(rec, "slept", version=n, until=rec["sleep"]["until"])
+    return "ok"
+
+
+def wake(rec, n, by):
+    """Wake now: a sleeping card is back on his waiting list at once."""
+    target = config.card_target(rec)
+    if by != target["approver"]:
+        return f"Only {target['approver_name']} can decide approvals."
+    bad = _check(rec, n)
+    if bad:
+        return bad
+    if rec["status"] not in ("pending", "question") or not rec.get("sleep"):
+        return "already"
+    rec.pop("sleep")
+    store.event(rec, "woke", version=n)
+    return "ok"
+
+
+def end_sleep(rec):
+    """Any answer on a card ends its sleep."""
+    rec.pop("sleep", None)
 
 
 def call(rec, what, why, by, live, also=None, urgent=False):
@@ -735,7 +797,7 @@ def hand_back(rec, n, by):
     store.event(rec, "also_handed_back", version=n, name=send["name"])
     rec["card_dirty"] = True
     name = send["name"]
-    tell_deputy(rec, f"{name} handed it back as not {name}'s to answer (button in Slack, {cards.when(now)}). "
+    tell_deputy(rec, f"{name} handed it back as not {name}'s to answer (button {said_in()}, {cards.when(now)}). "
                      f"It stays with {who(rec)}; there is nothing to call.")
     return "ok"
 
@@ -784,12 +846,12 @@ def take_back(rec, n, by):
     store.event(rec, "taken_back", by=by)
     # Not paced like a decision: it takes back a yes, so it is typed right behind that yes if it hasn't gone yet.
     enqueue(rec, "taken_back", msg_taken_back(rec), react_ts=card_ts(rec))
-    tell_deputy(rec, f"{who(rec)} took back your approval (button in Slack, {cards.when(store.now())}), so it is not approved.")
+    tell_deputy(rec, f"{who(rec)} took back your approval (button {said_in()}, {cards.when(store.now())}), so it is not approved.")
     return "ok"
 
 
 def msg_taken_back(rec):
-    return (f'{head(rec)} {who(rec)} took back the approval his deputy gave (button in Slack, {cards.when(store.now())}), '
+    return (f'{head(rec)} {who(rec)} took back the approval his deputy gave (button {said_in()}, {cards.when(store.now())}), '
             f'so it is not approved. {ack_step(rec, "that you are stopping, and what is already done")} '
             f'If you haven\'t acted, don\'t. If you have, undo what can be undone, and say on the card where it stands with '
             f'`approvals status {rec["id"]} "<what>"`. He may say more in the thread.')
@@ -865,6 +927,7 @@ def take_replies(rec, replies, react_ts=None, by=None):
     n = len(rec["versions"])
     member = cards.teammate(rec, {"by": by, "version": n})
     name = member or who(rec)
+    end_sleep(rec)
     for ts, t in replies:
         store.event(rec, kind, text=t, ts=ts, **({"by": by, "version": n} if member else {}))
     if kind != "comment":
