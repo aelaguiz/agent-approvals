@@ -518,8 +518,8 @@ class Record:
                 v["views"] = cards.views(rec, n)
 
     def create(self, rec, media=None):
-        rec = dict(rec, versions=[dict(v) for v in rec.get("versions") or []])
-        self.keep_views(rec)
+        """A new card, given its number by the record; its pop-ups are drawn by the write that follows, which knows
+        the number they carry."""
         return self.call("POST", "/api/cards", {"record": rec, "media": media or []})[1]["record"]
 
     def read(self, rid):

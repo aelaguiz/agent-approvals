@@ -48,7 +48,7 @@ class FakeRecord:
 
     def create(self, rec, media=None):
         rec = dict(rec, id=rec.get("id") or f"AP-{len(self.cards) + 1:04d}")
-        self.put(rec)
+        self.cards[rec["id"]] = (1, copy.deepcopy(rec))
         return self.read(rec["id"])[0]
 
     def all(self):
