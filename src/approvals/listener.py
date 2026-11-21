@@ -102,6 +102,7 @@ class Listener:
         kind = (req.payload or {}).get("type")
         if req.type == "interactive" and kind in ("block_actions", "view_submission"):
             follow_up, answer = None, None
+            acting = store.ACTOR.set((req.payload.get("user") or {}).get("id"))
             try:
                 if kind == "block_actions":
                     follow_up = self.handle_click(req.payload)
@@ -109,6 +110,8 @@ class Listener:
                     answer, follow_up = self.handle_submission(req.payload)
             except Exception:
                 log.exception("%s failed", kind)
+            finally:
+                store.ACTOR.reset(acting)
             client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id, payload=answer))
             if follow_up:
                 threading.Thread(target=follow_up, daemon=True).start()
@@ -142,7 +145,7 @@ class Listener:
         if user == target["approver"]:
             return None
         only = f"Only {target['approver_name']} can decide approvals."
-        if what in ("remove", "takeback", "mine") or what.startswith("hand:"):
+        if what in ("remove", "takeback", "mine", "sleep", "wake") or what.startswith("hand:"):
             return only
         send = cards.also_on(rec, n)
         if n != len(rec["versions"]) and send and send["user"] == user and (send.get("sent_at") or send.get("handed")):
@@ -190,20 +193,45 @@ class Listener:
             return lambda: slackapi.ephemeral(user, refused, thread_ts, channel_id=channel_id)
         if what in ("change", "edit", "items") or what.endswith(":change"):
             return lambda: self.open_view(rid, n, what, trigger, user, thread_ts, channel_id)
-        def apply(rec):
-            result = self.answer_refusal(rec, n, what, user) or core.press(rec, n, what, by=user)
-            send = cards.also_on(rec, n) if result == "ok" and what == "notmine" else None
-            return result, send
-        r, handed_back = store.update(rid, apply)
-        log.info("click %s v%s %s -> %s", rid, n, what, r)
+        r, follow_up = self.press(rec, n, what, user)
         if r != "ok":
             return lambda: slackapi.ephemeral(user, self.REFUSED.get(r, r), thread_ts, channel_id=channel_id)
-        if handed_back:
-            if handed_back.get("handed"):
-                text = f"{cards.esc(handed_back['name'])} handed this back, so it's back with you."
-                return lambda: (self.broadcast_return(rec, text), self.try_refresh(rid), self.refresh_list())
-            return lambda: self.try_refresh(rid)
-        return lambda: (self.try_refresh(rid), self.refresh_list())
+        return follow_up
+
+    def press(self, rec, n, what, user, words=None, until=None):
+        """A press of one of the card's buttons, saved, as (result, what follows it): the card and the list redrawn,
+        and for Not mine the line in the thread. The pod dashboard's presses come here too (`approvals press`), and
+        its yes or no with a note adds his words as a reply in the thread, in the same write: the two things he does
+        in Slack for the same result. Sleep and Wake now are the dashboard's own; they redraw nothing."""
+        rid = rec["id"]
+
+        def apply(r):
+            if what == "sleep":
+                return self.answer_refusal(r, n, what, user) or core.sleep(r, n, user, until), None
+            if what == "wake":
+                return self.answer_refusal(r, n, what, user) or core.wake(r, n, user), None
+            dm = core.conversation_send(r) if words and user == config.card_target(r)["approver"] else None
+            result = self.answer_refusal(r, n, what, user) or core.press(r, n, what, by=user)
+            if result == "ok" and words:
+                core.take_replies(r, [(None, words)], react_ts=core.card_ts(r), by=user)
+            send = cards.also_on(r, n) if result == "ok" and what == "notmine" else dm
+            return result, send
+        r, send = store.update(rid, apply)
+        log.info("click %s v%s %s -> %s", rid, n, what, r)
+        if r != "ok":
+            return r, None
+        if what in ("sleep", "wake"):
+            return r, None
+        if what == "notmine" and send:
+            if send.get("handed"):
+                text = f"{cards.esc(send['name'])} handed this back, so it's back with you."
+                return r, lambda: (self.broadcast_return(rec, text), self.try_refresh(rid), self.refresh_list())
+            return r, lambda: self.try_refresh(rid)
+        if words:
+            name = core.answerer(rec, {"by": user, "version": n})
+            return r, lambda: (self.after_submission(rid, "note", words, "dashboard:" + store.iso(), name, send),
+                               self.refresh_list())
+        return r, lambda: (self.try_refresh(rid), self.refresh_list())
 
     def switch_deputy(self, live, payload, user):
         """Turn auto-approval on or pause it, from the morning summary's button: saved before the ack, then the
@@ -294,14 +322,27 @@ class Listener:
         if refused:
             return {"response_action": "errors", "errors": {first: refused}}, None
         words = ((values.get("words") or {}).get("words") or {}).get("value") or ""
+        ticked = None
         if what == "items":
             ticked = self._ticked(view)
             if not ticked:
                 return {"response_action": "errors", "errors": {first: "Tick at least one, or press No on the card."}}, None
-            apply = lambda rec: core.decide(rec, n, "approved", by=user, where="pop-up", items=ticked)
         elif what == "edit":
             if not words.strip():
                 return {"response_action": "errors", "errors": {"words": "The words can't be empty."}}, None
+        r, follow_up = self.submit(rec, n, what, words, user, "view:" + view.get("id", ""), ticked)
+        if r != "ok":
+            return {"response_action": "errors", "errors": {first: self.REFUSED.get(r, r)}}, None
+        return None, follow_up
+
+    def submit(self, rec, n, what, words, user, key, ticked=None):
+        """A pop-up's answer saved, as (result, what follows it): the items he ticked, his own words, or his change,
+        then the card redrawn and his words in the thread. The pod dashboard's Change and Edit the words come here
+        too (`approvals press`)."""
+        rid = rec["id"]
+        if what == "items":
+            apply = lambda rec: core.decide(rec, n, "approved", by=user, where="pop-up", items=ticked)
+        elif what == "edit":
             apply = lambda rec: core.decide(rec, n, "approved", by=user, where="pop-up", edited=words)
         else:
             j = int(what[1:].split(":")[0]) if what.startswith("p") else None
@@ -315,18 +356,21 @@ class Listener:
         r, send = store.update(rid, save)
         log.info("pop-up %s v%s %s -> %s", rid, n, what, r)
         if r != "ok":
-            return {"response_action": "errors", "errors": {first: self.REFUSED.get(r, r)}}, None
+            return r, None
         name = core.answerer(rec, {"by": user, "version": n})
-        return None, lambda: self.after_submission(rid, what, words, view["id"], name, send)
+        return r, lambda: self.after_submission(rid, what, words, key, name, send)
 
-    def after_submission(self, rid, what, words, view_id, who, send):
-        """Words from a pop-up go in the thread too, so the thread keeps the whole record."""
+    def after_submission(self, rid, what, words, key, who, send):
+        """Words from a pop-up, or a note on a yes or no from the pod dashboard, go in the thread too, so the thread
+        keeps the whole record."""
         self.try_refresh(rid)
         rec = store.load(rid)
-        if words and (what == "edit" or what.endswith("change")):
-            self.copy_to_source(rec, words, "view:" + view_id, store.now(), who)
+        if words and (what in ("edit", "note") or what.endswith("change")):
+            self.copy_to_source(rec, words, key, store.now(), who)
         try:
-            if what == "edit":
+            if what == "note":
+                slackapi.note(rec["thread_ts"], f"💬 {cards.esc(who)} replied on the card:\n{cards.quoted(words)}", **config.channel_args(rec))
+            elif what == "edit":
                 slackapi.note(rec["thread_ts"], f"✍️ {who} approved it with these words:\n{cards.quoted(words)}", **config.channel_args(rec))
             elif what.endswith("change"):
                 row = f" to part {what[1:].split(':')[0]}" if what.startswith("p") else ""

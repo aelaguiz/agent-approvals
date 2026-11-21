@@ -45,8 +45,8 @@ class Client:
         except (urllib.error.URLError, OSError) as e:
             raise store.StoreError(f"the approvals hub on {config.hub()} ({self.url}) isn't answering: {e}")
 
-    def create(self, rec):
-        return self.call("POST", "/records", {"record": rec})[1]["record"]
+    def create(self, rec, media=None):
+        return self.call("POST", "/records", {"record": rec, **({"media": media} if media else {})})[1]["record"]
 
     def read(self, rid):
         code, body = self.call("GET", f"/records/{rid}")
@@ -54,9 +54,24 @@ class Client:
             raise FileNotFoundError(f"no request {rid}")
         return body["record"], body["rev"]
 
-    def put(self, rec, rev=None):
+    def put(self, rec, rev=None, media=None):
         """True when written; False when the record changed since it was read at rev."""
-        return self.call("PUT", f"/records/{rec['id']}", {"record": rec, "rev": rev})[0] == 200
+        body = {"record": rec, "rev": rev, **({"media": media} if media else {})}
+        return self.call("PUT", f"/records/{rec['id']}", body)[0] == 200
+
+    def put_file(self, name, data):
+        """Hand one picture or video to the hub for the record; True when the record kept it."""
+        req = urllib.request.Request(f"{self.url}/files/{name}", data=data, method="PUT",
+                                     headers={"Authorization": f"Bearer {self.token}",
+                                              "Content-Type": "application/octet-stream"})
+        try:
+            with urllib.request.urlopen(req, timeout=store.FILE_TIMEOUT) as r:
+                return r.status == 200
+        except urllib.error.HTTPError as e:
+            e.close()
+            return False
+        except (urllib.error.URLError, OSError) as e:
+            raise store.StoreError(f"the approvals hub on {config.hub()} ({self.url}) isn't answering: {e}")
 
     def records(self, waiting=False):
         return self.call("GET", "/records" + ("?waiting=1" if waiting else ""))[1]["records"]
@@ -132,7 +147,12 @@ class Handler(BaseHTTPRequestHandler):
         q = parse_qs(url.query)
         try:
             if method == "GET" and parts == ["health"]:
-                return self._send(200, {"machine": config.machine(), "id_prefix": config.settings()["id_prefix"]})
+                return self._send(200, {"machine": config.machine(), "id_prefix": config.settings()["id_prefix"],
+                                        "files": bool(store.record())})
+            if method == "PUT" and len(parts) == 2 and parts[0] == "files":
+                data = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                kept = store.record() and store.record().put_file(parts[1], data)
+                return self._send(200, {}) if kept else self._send(502, {"error": f"the record didn't keep {parts[1]}"})
             if method == "GET" and parts == ["due"]:
                 recs, machine = store.local_all(), q.get("machine", [""])[0]
                 due, strays = core.to_deliver(recs, machine, store.local_reviewer(), store.local_deputy())
@@ -173,7 +193,8 @@ class Handler(BaseHTTPRequestHandler):
                         recs = [r for r in recs if store.waiting(r)]
                     return self._send(200, {"records": recs})
                 if method == "POST":
-                    return self._send(200, {"record": store.local_create(self._body()["record"])})
+                    body = self._body()
+                    return self._send(200, {"record": store.local_create(body["record"], body.get("media"))})
             if len(parts) == 2 and parts[0] == "records" and RID.match(parts[1]):
                 rid = parts[1]
                 if method == "GET":
@@ -186,7 +207,7 @@ class Handler(BaseHTTPRequestHandler):
                     body = self._body()
                     if body["record"].get("id") != rid:
                         return self._send(400, {"error": "the record's id doesn't match the address"})
-                    rev = store.local_put(body["record"], body.get("rev"))
+                    rev = store.local_put(body["record"], body.get("rev"), body.get("media"))
                     return self._send(200, {"rev": rev}) if rev else self._send(409, {"error": f"{rid} changed"})
                 if method == "DELETE":
                     store.local_delete(rid)

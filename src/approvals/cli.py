@@ -104,10 +104,12 @@ def cmd_read(a):
 
 def _prepare_media(card, version):
     """Upload the pictures privately and publish any videos; store the handles on the version. A video's first
-    frame gets a play mark, and a picture with a `mark` gets an outline round what changed."""
+    frame gets a play mark, and a picture with a `mark` gets an outline round what changed. Returns the card's picture
+    as uploaded, or None."""
+    image = None
     if card.get("image"):
-        path = pictures.with_play_mark(card["image"]) if card.get("video") else card["image"]
-        version["image_file_id"] = slackapi.upload_private_image(path, card["title"])
+        image = pictures.with_play_mark(card["image"]) if card.get("video") else card["image"]
+        version["image_file_id"] = slackapi.upload_private_image(image, card["title"])
     if card.get("video"):
         version["video_url"] = slackapi.share_video(card["video"], card["title"], card.get("video_note") or "A video waiting for approval.")
     videos = {}
@@ -117,6 +119,35 @@ def _prepare_media(card, version):
             videos[key] = url
     if videos:
         version["videos"] = videos
+    return image
+
+
+def _picture_files(card, maps):
+    """(key, path) for every picture the card's thread shows: each journey's map and screens, then the gallery's,
+    each row's and each option's, marked. A carousel picture also comes fitted to the card's frame, keyed ":card".
+    The maps are drawn into folders that maps (an ExitStack) removes."""
+    todo = []
+    entries = journey.entries(card)
+    for e, entry in enumerate(entries):
+        path = journey.draw_map(entry)
+        maps.callback(shutil.rmtree, path.parent)
+        todo.append((f"journey:{e}:map", path))
+    todo.extend((key, path) for path, key in journey.screen_files(entries).items())
+    for key, path, mark in cards.pictures(card):
+        if cards.in_carousel(card, key):
+            todo.append((key + ":card", pictures.card_frame(path, mark)))
+        todo.append((key, pictures.outlined(path, mark) if mark else path))
+    return todo
+
+
+def _media(card, n, image):
+    """Send version n's pictures and videos from this machine to where the cards are kept, as Slack shows them, so
+    the write that puts up the version carries them (store.send_media). image: the picture as uploaded."""
+    files = ([("image", image)] if image else []) + ([("video", card["video"])] if card.get("video") else [])
+    files += cards.gallery_videos(card)
+    with ExitStack() as maps:
+        files += [(key, path) for key, path in _picture_files(card, maps) if not key.endswith(":card")]
+        return store.send_media(n, files)
 
 
 def _publish_journey(rec, n):
@@ -138,17 +169,7 @@ def _share_pictures(rid, n):
     rec = store.load(rid)
     card = rec["versions"][n - 1]["card"]
     with ExitStack() as maps:
-        todo = []
-        entries = journey.entries(card)
-        for e, entry in enumerate(entries):
-            path = journey.draw_map(entry)
-            maps.callback(shutil.rmtree, path.parent)
-            todo.append((f"journey:{e}:map", path))
-        todo.extend((key, path) for path, key in journey.screen_files(entries).items())
-        for key, path, mark in cards.pictures(card):
-            if cards.in_carousel(card, key):
-                todo.append((key + ":card", pictures.card_frame(path, mark)))
-            todo.append((key, pictures.outlined(path, mark) if mark else path))
+        todo = _picture_files(card, maps)
         if not todo:
             return
         what = "The pictures on this card" if n == 1 else f"The pictures on {cards.version_label(n)}"
@@ -251,7 +272,7 @@ def _submit_one(card, a, set_pos, thread=None):
     hours = card.get("deadline_hours") or cards.TYPES[card["type"]]["hours"]
     deadline = store.now() + (timedelta(minutes=a.deadline_minutes) if a.deadline_minutes else timedelta(hours=hours))
     version = {"n": 1, "card": card, "posted_at": store.iso()}
-    _prepare_media(card, version)
+    media = _media(card, 1, _prepare_media(card, version))
     rec = {
         "type": card["type"], "title": card["title"], "agent": who["agent"],
         "created": store.iso(), "deadline": store.iso(deadline), "status": "pending",
@@ -272,7 +293,7 @@ def _submit_one(card, a, set_pos, thread=None):
     bc = basecamp.entries(basecamp.urls(card.get("basecamp")) + (a.basecamp or []))
     if bc:
         rec["basecamp"] = bc
-    rec = store.create(rec)
+    rec = store.create(rec, media)
     reach.refresh(rec, who)
     ts = slackapi.post(cards.card_blocks(rec, 1, "open"), cards.card_text(rec, 1), **config.channel_args(rec))
     rec["thread_ts"] = ts
@@ -334,7 +355,7 @@ def cmd_revise(a):
         _die(f"{a.id} is {rec['status']}; a different proposal is a new card: approvals submit <card.json>.")
     n = len(rec["versions"]) + 1
     version = {"n": n, "card": card, "posted_at": store.iso()}
-    _prepare_media(card, version)
+    media = _media(card, n, _prepare_media(card, version))
     prev = rec["versions"][-1]
 
     def add(r):
@@ -369,7 +390,7 @@ def cmd_revise(a):
         core.tell_deputy(r, f"{r['agent']} posted v{n}" + (f' ("{core.one_line(card["changes"])}")' if card.get("changes") else "")
                             + f". Your call on v{n - 1}, if you made one, doesn't carry to this version. {core.make_your_call(r)}")
         return r
-    rec = store.update(a.id, add)
+    rec = store.update(a.id, add, media)
     # The new version goes at the bottom of the thread, where he reads; an earlier copy there shrinks to a line.
     _publish_journey(rec, n)
     _share_pictures(a.id, n)
@@ -940,6 +961,54 @@ def cmd_listen(a):
     listener.main()
 
 
+PRESS_ACTIONS = ["approve", "decline", "change", "approve-note", "decline-note", "edit", "remove", "hand", "mine",
+                 "notmine", "takeback", "sleep", "wake"]
+NEEDS_WORDS = {"change", "approve-note", "decline-note", "edit"}
+
+
+def cmd_press(a):
+    """A press on a card from the pod dashboard, run on the hub, where the list of what waits on him is kept: the
+    same steps as the same press in Slack (the tool's own refusals, the answer saved in one write, the card and the
+    list redrawn, his words in the thread), with the asker told it came from the pod dashboard. Prints ok, or the
+    refusal in the words Slack shows."""
+    from . import listener
+    if not config.is_hub():
+        _die("approvals press runs on the workspace's hub.")
+    store.ACTOR.set(a.by)
+    core.VIA.set("dashboard")
+    slackapi.POST_AS = None   # as the listener posts
+    L = listener.Listener()
+    rec = store.load(a.id)
+    act, n = a.action, a.version
+    words = sys.stdin.read() if a.words == "-" else a.words or ""
+    if act in NEEDS_WORDS and not words.strip():
+        r, follow_up = "The words can't be empty.", None
+    elif act == "hand":
+        team = config.settings()["team"]
+        key = next((k for k, p in team.items() if p["user"] == a.teammate), None)
+        r, follow_up = L.press(rec, n, f"hand:{key}", a.by) if key else ("gone", None)
+    elif act in ("approve-note", "decline-note"):
+        r, follow_up = L.press(rec, n, act.split("-")[0], a.by, words=words)
+    elif act == "edit" and cards.editable_quote(rec["versions"][-1]["card"]) is None:
+        r, follow_up = "gone", None
+    elif act in ("change", "edit"):
+        r, follow_up = L.submit(rec, n, act, words, a.by, "dashboard:" + store.iso())
+    else:
+        r, follow_up = L.press(rec, n, act, a.by, until=a.until)
+    if r != "ok":
+        print(L.REFUSED.get(r, r))
+        sys.exit(1)
+    if follow_up:
+        follow_up()
+    print("ok")
+
+
+def cmd_team(a):
+    """The team a card can be handed to, as Slack's Hand to menu lists them, for the pod dashboard's Hand to list: one
+    JSON list of {"user", "name"}, in the configuration's order."""
+    print(json.dumps([{"user": p["user"], "name": p["name"]} for p in config.settings()["team"].values()]))
+
+
 def cmd_role(a):
     """What this machine's service does for the workspace: hub, delivery, or none (with why), for the installer."""
     try:
@@ -953,9 +1022,22 @@ def cmd_role(a):
 
 # Commands that post to Slack check first that this machine can, so nothing is saved for a card it can't post.
 POSTS = {"submit", "ask", "revise", "answer", "ack", "done", "withdraw", "record", "status", "note", "review",
-         "deputy", "call", "pictures"}
+         "deputy", "call", "pictures", "press"}
 # Commands that can change what a request's Basecamp steps say.
 CHANGES = {"ask", "revise", "answer", "ack", "done", "withdraw", "record", "status"}
+
+
+def _herdr_name():
+    """The Herdr name of the agent running this command, the name the pod dashboard knows it by, or None."""
+    pane = os.environ.get("HERDR_PANE_ID")
+    if os.environ.get("HERDR_ENV") != "1" or not pane:
+        return None
+    try:
+        result = subprocess.run(["herdr", "agent", "list"], capture_output=True, timeout=10)
+        agents = json.loads(result.stdout)["result"]["agents"]
+    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError):
+        return None
+    return next((agent.get("name") for agent in agents if agent["pane_id"] == pane), None)
 
 
 def main(argv=None):
@@ -1118,6 +1200,19 @@ def main(argv=None):
     s = sub.add_parser("listen", help="run the service (launchd runs this)")
     s.set_defaults(fn=cmd_listen)
 
+    s = sub.add_parser("press", help="press a card's button from the pod dashboard, as the Slack user --by; runs on the hub")
+    s.add_argument("id")
+    s.add_argument("version", type=int)
+    s.add_argument("action", choices=PRESS_ACTIONS)
+    s.add_argument("--by", required=True, help="the Slack user id of the person pressing")
+    s.add_argument("--words", help="his words: the change, the note, or the edited words; - reads them from stdin")
+    s.add_argument("--teammate", help="hand: the Slack user id of the teammate")
+    s.add_argument("--until", help="sleep: when it wakes, an ISO time with its offset")
+    s.set_defaults(fn=cmd_press)
+
+    s = sub.add_parser("team", help="the team a card can be handed to, in Slack's Hand to order, as JSON")
+    s.set_defaults(fn=cmd_team)
+
     s = sub.add_parser("role", help=argparse.SUPPRESS)
     s.set_defaults(fn=cmd_role)
 
@@ -1143,6 +1238,7 @@ def main(argv=None):
         if a.cmd in {"ask", "revise", "answer", "ack", "done", "withdraw", "record", "status", "note", "show", "pictures"}:
             rec = store.load(a.id)
             config.card_target(rec)
+        store.ACTOR.set(_herdr_name())
         a.fn(a)
     except (store.StoreError, config.ConfigError) as e:
         _die(str(e))
