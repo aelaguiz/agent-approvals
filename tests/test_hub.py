@@ -165,11 +165,11 @@ def test_inbox_prints_each_answer_once_when_the_record_changed_meanwhile(hubbox,
     put = hub.Client.put
     raced = []
 
-    def racing_put(self, rec, rev=None):
+    def racing_put(self, rec, rev=None, media=None):
         if not raced:     # the hub's service touches the record between this read and write
             raced.append(1)
             store.update(rid, lambda r: r.__setitem__("last_seen", "9.9"))
-        return put(self, rec, rev)
+        return put(self, rec, rev, media)
     monkeypatch.setattr(hub.Client, "put", racing_put)
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sid-laptop")
     out = io.StringIO()
@@ -279,3 +279,64 @@ def test_peek_counts_on_the_hub_in_one_call_without_handing_answers_out(hubbox, 
         assert capsys.readouterr().out == f"{count}\n"
         assert calls == [("GET", f"/inbox?session={sid}")]
         assert config.REQUESTS.joinpath(rec["id"] + ".json").read_bytes() == before
+
+
+def test_a_cards_pictures_and_videos_go_from_its_machine_through_the_hub_into_the_record(hubbox, monkeypatch, tmp_path):
+    import hashlib
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    files, writes = {}, []
+
+    class Dashboard(BaseHTTPRequestHandler):
+        """The pod dashboard's card routes, as far as this needs: it keeps the files and each card write it is sent."""
+        def do_PUT(self):
+            data = self.rfile.read(int(self.headers["Content-Length"]))
+            if self.path.startswith("/api/cards/files/"):
+                name = self.path.rsplit("/", 1)[1]
+                ok = name.endswith(".mp4") and hashlib.sha256(data).hexdigest() == name.split(".")[0]
+                files.update({name: data} if ok else {})
+                return self.answer(200 if ok else 400, {})
+            body = json.loads(data)
+            writes.append(body)
+            return self.answer(200, {"rev": body["rev"] + 1})
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            writes.append(body)
+            return self.answer(200, {"record": dict(body["record"], id="AP-0001"), "rev": 1})
+
+        def do_GET(self):
+            return self.answer(200, {"record": dict(writes[-1]["record"], id="AP-0001"), "rev": len(writes)})
+
+        def answer(self, code, obj):
+            data = json.dumps(obj).encode()
+            self.send_response(code)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args):
+            pass
+
+    dashboard = ThreadingHTTPServer(("127.0.0.1", 0), Dashboard)
+    threading.Thread(target=dashboard.serve_forever, daemon=True).start()
+    # The hub's handlers run in this same process, which says it is another machine, so they are given the record.
+    record = store.Record(f"http://127.0.0.1:{dashboard.server_address[1]}", "hub-token")
+    monkeypatch.setattr(store, "record", lambda: record)
+    clip, frame = tmp_path / "clip.MP4", tmp_path / "frame.png"
+    clip.write_bytes(b"the clip")
+    frame.write_bytes(b"a frame")
+    try:
+        media = store.send_media(1, [("video", clip), ("gallery:0", frame), ("gallery:1", clip)])
+        rid = store.create(make_rec(SAMPLES["money"]) | {"id": None}, media)["id"]
+        store.update(rid, lambda r: r.update(title="Changed"), store.send_media(2, [("video", clip)]))
+    finally:
+        dashboard.shutdown()
+        dashboard.server_close()
+
+    name = hashlib.sha256(b"the clip").hexdigest() + ".mp4"
+    assert files == {name: b"the clip"}   # the frame the record refused is left off the card, not the card refused
+    assert writes[0]["media"] == [{"version": 1, "key": "video", "address": name},
+                                  {"version": 1, "key": "gallery:1", "address": name}]
+    assert writes[1]["media"] == [{"version": 2, "key": "video", "address": name}] and writes[1]["record"]["title"] == "Changed"

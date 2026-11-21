@@ -11,18 +11,21 @@ import hashlib
 import json
 import marshal
 import os
+import sys
 import tempfile
 import threading
 import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from . import config
 
 STATUSES = {"pending", "question", "revising", "approved", "declined", "expired", "done"}
 OPEN = {"pending", "question", "revising", "expired", "approved"}  # threads still watched for replies
 UPDATE_TRIES = 20
+FILE_TIMEOUT = 300   # a card's video can be 100 MB
 _records_cache = {}
 _records_cache_lock = threading.Lock()
 _fork_cache = {}
@@ -58,9 +61,10 @@ def hub_client():
 
 # ---------- the calls everything uses ----------
 
-def create(rec_without_id):
+def create(rec_without_id, media=None):
+    """media: how the card's pictures and videos were named when sent (send_media), kept with the card."""
     h = hub_client()
-    return h.create(rec_without_id) if h else local_create(rec_without_id)
+    return h.create(rec_without_id, media) if h else local_create(rec_without_id, media)
 
 
 def load(rid):
@@ -76,8 +80,8 @@ def save(rec):
         local_put(rec)
 
 
-def update(rid, fn):
-    """Load, change with fn(rec), save. Returns fn's result."""
+def update(rid, fn, media=None):
+    """Load, change with fn(rec), save. Returns fn's result. media goes with the write, as in create()."""
     h = hub_client()
     if not h and record():
         h = _RecordAsHub()
@@ -90,7 +94,7 @@ def update(rid, fn):
     for _ in range(UPDATE_TRIES):
         rec, rev = h.read(rid)
         result = fn(rec)
-        if h.put(rec, rev):
+        if h.put(rec, rev, media):
             return result
     raise StoreError(f"{rid} kept changing on the hub while this tried to change it; try again")
 
@@ -117,6 +121,33 @@ def waiting_records():
     """Records with a message the agent hasn't been given yet."""
     h = hub_client()
     return h.records(waiting=True) if h else [r for r in local_all() if waiting(r)]
+
+
+def send_media(n, files):
+    """Send version n's pictures and videos, (key, path) on this machine, to where the cards are kept, each file once
+    under its sha256 and extension. Returns how a card's write names them, [{"version", "key", "address"}]: none when
+    the cards are kept where files can't go (no record, or a hub from before files), and without a file it refused."""
+    h = hub_client()
+    if h:
+        if not h.health().get("files"):
+            return []
+        send = h.put_file
+    elif record():
+        send = record().put_file
+    else:
+        return []
+    kept, media = {}, []
+    for key, path in files:
+        path = Path(path).expanduser()
+        data = path.read_bytes()
+        name = hashlib.sha256(data).hexdigest() + path.suffix.lower()
+        if name not in kept:
+            kept[name] = send(name, data)
+            if not kept[name]:
+                print(f"(the record didn't keep {path}; the card shows without it there)", file=sys.stderr)
+        if kept[name]:
+            media.append({"version": n, "key": key, "address": name})
+    return media
 
 
 def delete(rid):
@@ -238,9 +269,10 @@ def new_id():
     return f"{config.settings()['id_prefix']}-{n:04d}"
 
 
-def local_create(rec_without_id):
+def local_create(rec_without_id, media=None):
+    """media is kept only by the record; a hub of files has nowhere to keep it."""
     if record():
-        return record().create(rec_without_id)
+        return record().create(rec_without_id, media)
     with locked():
         rid = new_id()
         rec = dict(rec_without_id, id=rid)
@@ -256,11 +288,11 @@ def local_read(rid):
     return json.loads(data), rev_of(data)
 
 
-def local_put(rec, rev=None):
+def local_put(rec, rev=None, media=None):
     """Write a record. Given the revision it was read at, only if nobody changed it since: returns the new
     revision, or None when it changed."""
     if record():
-        return record().put(rec, rev)
+        return record().put(rec, rev, media)
     with locked():
         if rev is not None:
             try:
@@ -443,8 +475,8 @@ class Record:
         except (urllib.error.URLError, OSError) as e:
             raise StoreError(f"the record ({self.url}) isn't answering: {e}")
 
-    def create(self, rec):
-        return self.call("POST", "/api/cards", {"record": rec})[1]["record"]
+    def create(self, rec, media=None):
+        return self.call("POST", "/api/cards", {"record": rec, "media": media or []})[1]["record"]
 
     def read(self, rid):
         code, body = self.call("GET", f"/api/cards/{rid}")
@@ -452,11 +484,11 @@ class Record:
             raise FileNotFoundError(f"no request {rid}")
         return body["record"], body["rev"]
 
-    def put(self, rec, rev=None):
+    def put(self, rec, rev=None, media=None):
         """The new revision, or None when the card changed since rev. Without rev, written over what is there."""
         while True:
             at = rev if rev is not None else self.read(rec["id"])[1]
-            code, body = self.call("PUT", f"/api/cards/{rec['id']}", {"record": rec, "rev": at})
+            code, body = self.call("PUT", f"/api/cards/{rec['id']}", {"record": rec, "rev": at, "media": media or []})
             if code == 200:
                 return body["rev"]
             if rev is not None:
@@ -477,6 +509,19 @@ class Record:
     def delete(self, rid):
         self.call("DELETE", f"/api/cards/{rid}")
 
+    def put_file(self, name, data):
+        """Keep one picture or video, named by its sha256 and extension; True when the record has it."""
+        req = urllib.request.Request(f"{self.url}/api/cards/files/{name}", data=data, method="PUT",
+                                     headers={"X-Hub-Token": self.token, "Content-Type": "application/octet-stream"})
+        try:
+            with urllib.request.urlopen(req, timeout=FILE_TIMEOUT) as r:
+                return r.status == 200
+        except urllib.error.HTTPError as e:
+            e.close()
+            return False
+        except (urllib.error.URLError, OSError):
+            return False
+
 
 class _RecordAsHub:
     """update() on the hub when the record holds the cards: the same read, change and write-if-unchanged as on any
@@ -485,5 +530,5 @@ class _RecordAsHub:
     def read(self, rid):
         return record().read(rid)
 
-    def put(self, rec, rev):
-        return record().put(rec, rev) is not None
+    def put(self, rec, rev, media=None):
+        return record().put(rec, rev, media) is not None

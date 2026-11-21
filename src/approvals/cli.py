@@ -104,7 +104,9 @@ def cmd_read(a):
 
 def _prepare_media(card, version):
     """Upload the pictures privately and publish any videos; store the handles on the version. A video's first
-    frame gets a play mark, and a picture with a `mark` gets an outline round what changed."""
+    frame gets a play mark, and a picture with a `mark` gets an outline round what changed. Returns the card's picture
+    as uploaded, or None."""
+    path = None
     if card.get("image"):
         path = pictures.with_play_mark(card["image"]) if card.get("video") else card["image"]
         version["image_file_id"] = slackapi.upload_private_image(path, card["title"])
@@ -117,6 +119,35 @@ def _prepare_media(card, version):
             videos[key] = url
     if videos:
         version["videos"] = videos
+    return path
+
+
+def _picture_files(card, maps):
+    """(key, path) for every picture the card's thread shows: each journey's map and screens, then the gallery's,
+    each row's and each option's, marked. A carousel picture also comes fitted to the card's frame, keyed ":card".
+    The maps are drawn into folders that maps (an ExitStack) removes."""
+    todo = []
+    entries = journey.entries(card)
+    for e, entry in enumerate(entries):
+        path = journey.draw_map(entry)
+        maps.callback(shutil.rmtree, path.parent)
+        todo.append((f"journey:{e}:map", path))
+    todo.extend((key, path) for path, key in journey.screen_files(entries).items())
+    for key, path, mark in cards.pictures(card):
+        if cards.in_carousel(card, key):
+            todo.append((key + ":card", pictures.card_frame(path, mark)))
+        todo.append((key, pictures.outlined(path, mark) if mark else path))
+    return todo
+
+
+def _media(card, n, image):
+    """Send version n's pictures and videos from this machine to where the cards are kept, as Slack shows them, so
+    the write that puts up the version carries them (store.send_media). image: the picture as uploaded."""
+    files = ([("image", image)] if image else []) + ([("video", card["video"])] if card.get("video") else [])
+    files += cards.gallery_videos(card)
+    with ExitStack() as maps:
+        files += [(key, path) for key, path in _picture_files(card, maps) if not key.endswith(":card")]
+        return store.send_media(n, files)
 
 
 def _publish_journey(rec, n):
@@ -138,17 +169,7 @@ def _share_pictures(rid, n):
     rec = store.load(rid)
     card = rec["versions"][n - 1]["card"]
     with ExitStack() as maps:
-        todo = []
-        entries = journey.entries(card)
-        for e, entry in enumerate(entries):
-            path = journey.draw_map(entry)
-            maps.callback(shutil.rmtree, path.parent)
-            todo.append((f"journey:{e}:map", path))
-        todo.extend((key, path) for path, key in journey.screen_files(entries).items())
-        for key, path, mark in cards.pictures(card):
-            if cards.in_carousel(card, key):
-                todo.append((key + ":card", pictures.card_frame(path, mark)))
-            todo.append((key, pictures.outlined(path, mark) if mark else path))
+        todo = _picture_files(card, maps)
         if not todo:
             return
         what = "The pictures on this card" if n == 1 else f"The pictures on {cards.version_label(n)}"
@@ -251,7 +272,7 @@ def _submit_one(card, a, set_pos, thread=None):
     hours = card.get("deadline_hours") or cards.TYPES[card["type"]]["hours"]
     deadline = store.now() + (timedelta(minutes=a.deadline_minutes) if a.deadline_minutes else timedelta(hours=hours))
     version = {"n": 1, "card": card, "posted_at": store.iso()}
-    _prepare_media(card, version)
+    media = _media(card, 1, _prepare_media(card, version))
     rec = {
         "type": card["type"], "title": card["title"], "agent": who["agent"],
         "created": store.iso(), "deadline": store.iso(deadline), "status": "pending",
@@ -272,7 +293,7 @@ def _submit_one(card, a, set_pos, thread=None):
     bc = basecamp.entries(basecamp.urls(card.get("basecamp")) + (a.basecamp or []))
     if bc:
         rec["basecamp"] = bc
-    rec = store.create(rec)
+    rec = store.create(rec, media)
     reach.refresh(rec, who)
     ts = slackapi.post(cards.card_blocks(rec, 1, "open"), cards.card_text(rec, 1), **config.channel_args(rec))
     rec["thread_ts"] = ts
@@ -334,7 +355,7 @@ def cmd_revise(a):
         _die(f"{a.id} is {rec['status']}; a different proposal is a new card: approvals submit <card.json>.")
     n = len(rec["versions"]) + 1
     version = {"n": n, "card": card, "posted_at": store.iso()}
-    _prepare_media(card, version)
+    media = _media(card, n, _prepare_media(card, version))
     prev = rec["versions"][-1]
 
     def add(r):
@@ -369,7 +390,7 @@ def cmd_revise(a):
         core.tell_deputy(r, f"{r['agent']} posted v{n}" + (f' ("{core.one_line(card["changes"])}")' if card.get("changes") else "")
                             + f". Your call on v{n - 1}, if you made one, doesn't carry to this version. {core.make_your_call(r)}")
         return r
-    rec = store.update(a.id, add)
+    rec = store.update(a.id, add, media)
     # The new version goes at the bottom of the thread, where he reads; an earlier copy there shrinks to a line.
     _publish_journey(rec, n)
     _share_pictures(a.id, n)
