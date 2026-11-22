@@ -1041,7 +1041,8 @@ def refresh_cards(rec):
     """Make every card message match the record. Raises if Slack fails; callers retry."""
     latest = len(rec["versions"])
     mode = mode_for(rec)
-    slackapi.update(rec["thread_ts"], cards.card_blocks(rec, latest, mode), cards.card_text(rec, latest), **config.channel_args(rec))
+    if rec.get("thread_ts"):   # a card made without a Slack post has no message to redraw (AP-1942, November 21, 2026)
+        slackapi.update(rec["thread_ts"], cards.card_blocks(rec, latest, mode), cards.card_text(rec, latest), **config.channel_args(rec))
     source = rec.get("thread") or {}
     if source.get("small_ts"):
         try:
