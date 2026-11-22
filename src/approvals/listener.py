@@ -432,6 +432,7 @@ class Listener:
     # ----- thread replies -----
 
     def watched(self):
+        """The cards whose threads are watched, the most recently active first."""
         cutoff = store.now() - timedelta(days=WATCH_DAYS)
         out = []
         for rec in store.all_records():
@@ -439,8 +440,8 @@ class Listener:
                 continue
             last = max(datetime.fromisoformat(e["at"]) for e in rec.get("events") or [{"at": rec["created"]}])
             if last >= cutoff:
-                out.append(rec)
-        return out
+                out.append((last, rec))
+        return [rec for last, rec in sorted(out, key=lambda pair: pair[0], reverse=True)]
 
     def poll_once(self):
         recs = {}
@@ -457,7 +458,9 @@ class Listener:
             poked = set(self.poke)
         interval = max(15.0, len(recs) * 60.0 / POLL_BUDGET_PER_MIN)
         due = [ts for ts in recs if ts in poked or self.next_poll.get(ts, 0) <= now]
-        # Message events and due direct messages go ahead of the overdue rotation.
+        # Message events and due direct messages go ahead of the overdue rotation. The sort keeps watched()'s order
+        # among equals, so after a restart, when every thread is due at once, the cards he is talking on are read
+        # first, not last: on November 22, 2026 the newest cards waited up to two hours behind 1,500 older ones.
         due.sort(key=lambda ts: (ts not in poked, recs[ts][1] is None, self.next_poll.get(ts, 0)))
         per_cycle = max(1, POLL_BUDGET_PER_MIN * 5 // 60)   # this loop runs every 5 seconds
         for ts in due[:per_cycle]:
@@ -1057,9 +1060,9 @@ class Listener:
                 log.exception("carrying out the record's answers failed")
 
     def hear(self):
-        """The record's stream of changes: a card changed (an answer may be waiting), a card's thread in Slack changed
-        (it is read now), or a change to no card (who may answer or the deputy may have changed). A stream that is cut
-        comes back from the last change it had."""
+        """The record's stream of changes: a card changed (an answer may be waiting), a line was said in a card's thread
+        in Slack (it is read now), or a change to no card (who may answer or the deputy may have changed). A stream
+        that is cut comes back from the last change it had."""
         after = None
         while not self.stop.is_set():
             try:
@@ -1072,8 +1075,8 @@ class Listener:
                         self.lists_changed()
                     elif change["kind"] == "approval":
                         self.answers_waiting.set()
-                    elif change["kind"] == "thread":
-                        self.thread_changed(change["thing"])
+                        if change.get("what") == "said":
+                            self.card_thread_changed(change["thing"])
                     if self.stop.is_set():
                         return
             except store.StoreError as e:
@@ -1082,14 +1085,16 @@ class Listener:
                 log.exception("hearing the record's changes failed")
             self.stop.wait(1)
 
-    def thread_changed(self, thing):
-        """A Slack thread the record copies changed: a card's own is read now rather than in its turn. The record names
-        a thread "slack:<team>:<channel>:<time>", its Slack address."""
-        address = (store.record().thing(thing).get("thing") or {}).get("read_from") or ""
-        parts = address.split(":")
-        if len(parts) == 4 and parts[0] == "slack":
+    def card_thread_changed(self, rid):
+        """A line was said in a card's Slack thread: the record keeps a card's thread on the card itself, so a new line
+        is a change to the card that says "said". The thread is read now rather than in its turn. Until November 21,
+        2026 the record kept a card's thread as a thread of its own, and when it folded them into their cards this
+        hub, which read a thread at once only on a change to a thread, read his lines in the cards' threads up to two
+        hours late."""
+        rec = store.load(rid)
+        if rec.get("thread_ts"):
             with self.poke_lock:
-                self.poke.add((parts[2], parts[3]))
+                self.poke.add((config.card_target(rec)["channel"], rec["thread_ts"]))
 
     def lists_changed(self):
         """Who may answer is read again; when auto-approval was switched, the morning summary shows it."""

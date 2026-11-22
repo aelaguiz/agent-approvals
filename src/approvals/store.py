@@ -603,10 +603,6 @@ class Record:
             raise StoreError(f"the record ({self.url}) runs a version without corrections; update it first")
         return body["corrections"]
 
-    def thing(self, thing_id):
-        """One thing of the record as the pod dashboard reads it (its "thing" row, with "read_from")."""
-        return self.call("GET", f"/api/thing/{thing_id}")[1]
-
     def changes(self, after=None):
         """The record's stream of changes: (event id, {"thing", "kind", "pod"}) as each is made, starting with
         (the id it starts after, None), and from `after` when given. Ends when the stream is cut."""

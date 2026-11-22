@@ -338,10 +338,37 @@ def test_the_hub_carries_out_what_waits_when_it_starts_and_as_each_card_changes(
     assert store.load(RID)["status"] == "approved"
 
 
-def test_a_change_in_a_cards_thread_reads_it_now(hub, record):
-    record.thing = lambda thing: {"thing": {"read_from": "slack:T1:CTEST:1.1"}}
-    hub.thread_changed("TH-1")
-    assert ("CTEST", "1.1") in hub.poke
+def test_a_line_said_in_a_cards_thread_reads_the_thread_now(hub, record):
+    """The record keeps a card's Slack thread on the card, so a line there is a change to the card that says "said".
+    On November 22, 2026, when the hub read a thread at once only on a change to a thread, five of his lines waited
+    up to two hours for the rotation."""
+    rec = card()
+    events = iter([(10, None), (11, {"thing": RID, "kind": "approval", "pod": None, "what": "new version"}),
+                   (12, {"thing": RID, "kind": "approval", "pod": None, "what": "said"})])
+
+    def stream(after=None):
+        for event_id, change in events:
+            yield event_id, change
+            if event_id == 11:
+                assert not hub.poke   # a change to the card that is no line reads nothing
+        hub.stop.set()
+    record.changes = stream
+    hub.hear()
+    assert hub.poke == {(CHANNEL, rec["thread_ts"])}
+    assert hub.answers_waiting.is_set()
+
+
+def test_after_a_restart_the_most_recently_active_cards_threads_are_read_first(hub, record, slack, monkeypatch):
+    """Every thread is due at once when the hub starts; the cards in conversation go first, not in card-number order."""
+    for minutes, rid in enumerate(("AP-0001", "AP-0002", "AP-0003", "AP-0004", "AP-0005")):
+        card(rid)
+        store.update(rid, lambda r: r["events"].append({"kind": "ack", "at": store.iso(NOW + timedelta(minutes=minutes))}))
+    store.update("AP-0002", lambda r: r["events"].append({"kind": "comment", "at": store.iso(NOW + timedelta(hours=1))}))
+    monkeypatch.setattr(listener, "POLL_BUDGET_PER_MIN", 36)   # three threads a round
+    read = []
+    monkeypatch.setattr(hub, "poll_thread", lambda rec, send=None: read.append(rec["id"]))
+    hub.poll_once()
+    assert read == ["AP-0002", "AP-0005", "AP-0004"]
 
 
 def test_the_summary_shows_the_switch_when_the_record_says_auto_approval_changed(hub, record, monkeypatch, slack):
