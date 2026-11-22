@@ -192,3 +192,45 @@ def test_a_card_too_long_for_a_block_per_fact_keeps_its_facts_together():
     rec = make_rec(card)
     blocks = cards.card_blocks(rec, 1, "open")
     assert len(blocks) <= cards.BLOCKS_MAX and any("*Fact 0:* a line" in json.dumps(b) for b in blocks)
+
+
+def test_a_version_after_his_reply_goes_under_it_as_one_line_not_a_whole_card(tmp_path, slack, monkeypatch):
+    rec = saved()
+    core.take_replies(rec, [("9.0", "make it Japan only")])
+    store.save(rec)
+    deleted = []
+    monkeypatch.setattr(slackapi, "delete", deleted.append)
+    cli.main(["revise", "AP-0001", card_file(tmp_path, changes="Japan only, per your reply")])
+    rec = store.load("AP-0001")
+    assert not any(p.get("broadcast") for p in slack)   # no line in the channel
+    posts = [p["text"] for p in slack if "text" in p]
+    assert posts == ["Tester updated the card (v2): Japan only, per your reply"]   # one line, no copy of the card
+    v2 = rec["versions"][1]
+    assert not v2.get("copy_ts") and not v2.get("line_ts")
+    assert rec["events"][-1]["kind"] == "ack" and rec["events"][-1]["ts"]   # the dashboard shows the line once
+
+
+def test_revise_with_an_answer_puts_the_answer_first_and_the_line_under_it(tmp_path, monkeypatch):
+    saved()
+    posted = []
+    monkeypatch.setattr(slackapi, "post", lambda blocks, text, thread_ts=None, broadcast=False:
+                        posted.append({"blocks": blocks, "text": text, "broadcast": broadcast}) or f"{200 + len(posted)}.0")
+    monkeypatch.setattr(slackapi, "update", lambda ts, blocks, text: None)
+    cli.main(["revise", "AP-0001", card_file(tmp_path, changes="The email offers the move"),
+              "--answer", "Old catalog. All 10 of his lessons came from it."])
+    rec = store.load("AP-0001")
+    assert len(posted) == 1 and not posted[0]["broadcast"]
+    shown = json.dumps(posted[0]["blocks"])
+    assert shown.index("*Old catalog.*") < shown.index("Card updated at the top (v2): The email offers the move")
+    answered = [e for e in rec["events"] if e["kind"] == "answered"]
+    assert answered[-1]["text"].startswith("Old catalog.") and answered[-1]["ts"] == "201.0"
+    assert rec["status"] == "pending" and not rec["versions"][1].get("copy_ts")
+
+
+def test_an_older_copy_points_to_the_top_when_the_new_version_has_no_copy_below():
+    rec = make_rec(dict(SAMPLES["money"]))
+    rec["versions"].append({"n": 2, "card": dict(SAMPLES["money"], changes="a"), "copy_ts": "1.5"})
+    rec["versions"].append({"n": 3, "card": dict(SAMPLES["money"], changes="b")})
+    assert "replaced by v3 at the top" in cards.card_blocks(rec, 2, "replaced")[0]["text"]["text"]
+    rec["versions"][2]["copy_ts"] = "1.6"
+    assert "replaced by v3 below" in cards.card_blocks(rec, 2, "replaced")[0]["text"]["text"]

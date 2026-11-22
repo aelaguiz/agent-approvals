@@ -51,13 +51,14 @@ The card is the first post. Everything about the request stays in its thread:
 - the agent's evidence, one post per item, with any file it names attached so it opens in Slack;
 - the approver's replies, which count as feedback;
 - the agent's questions, marked ❓;
-- each new version as a full card, at the bottom where the approver reads.
+- a new version the agent posts on its own, as a full card at the bottom where the approver reads;
+- a new version that answers a reply (his or a teammate's), as one post under it: the agent's answer when he asked something (`approvals revise --answer`), then a line saying the card at the top changed, with the `changes` line and a link to the card. A whole card there buried the answer he came back for (Amir, November 22, 2026: "I can't get a giant blob as a response because I can't actually find the answer to my ... question in it"). The post is recorded as the agent's answer or acknowledgement with its Slack id, so the pod dashboard shows it once.
 
 When a version is replaced:
 - the first post turns into the newest version, so it can be approved from the channel;
 - the old version is never posted again, and an earlier copy of it in the thread shrinks to one line with a See button, so the thread holds one whole card at a time and what's new is plain. The new card opens with what changed and a See button for the version before it. (Amir, November 10, 2026, when each version re-posted the one before it in full: "I see an accumulating set of copies ... and can't figure out what is new.");
 - older versions' buttons stop working;
-- a one-line post in the channel says the new version is waiting, since the thread may be days old, and the one that announced the version before it is taken down. Questions are sent to the channel the same way.
+- a version posted on its own gets a one-line post in the channel saying it is waiting, since the thread may be days old, and the one that announced the version before it is taken down; a version that answers a reply gets none, since he is in the thread, and an older copy's line says the new version is at the top. Questions are sent to the channel the same way.
 
 Slack drops buttons from a thread reply that is also sent to the channel. That's why the first post carries the newest version, and the channel gets a line pointing to it rather than the card.
 
@@ -217,7 +218,7 @@ Once the current send is delivered on an open card, a hand-off or a teammate's r
 
 **The agent's acknowledgement:**
 - A decision (a yes, a no, a pick, items) tells the agent to acknowledge first with `approvals ack`, in its own words: what it understood and what it's doing now. For example: "Got it: you approved v2. Posting the reply now, then I'll mark it done."
-- A reply or a question in the thread doesn't: the agent's answer (`approvals answer`) or its next version is the acknowledgement, so the approver meets the answer first and no "Got it, I'm checking" post (November 10, 2026: "Please stop sending me the same approvals and just ... talk to me"). Every post of the agent's on the card counts: an answer, a new version, a status line, a question, a withdrawal, done. A separate `ack` is only for a reply that will take more than a few minutes, saying what's coming and when.
+- A reply or a question in the thread doesn't: the agent's answer (`approvals answer`, or `approvals revise --answer` when the answer changes the card) or its next version is the acknowledgement, so the approver meets the answer first and no "Got it, I'm checking" post (November 10, 2026: "Please stop sending me the same approvals and just ... talk to me"). Every post of the agent's on the card counts: an answer, a new version, a status line, a question, a withdrawal, done. A separate `ack` is only for a reply that will take more than a few minutes, saying what's coming and when.
 - `approvals answer` posts the answer with its first sentence in bold and the agent's name in the small line under it. On a card waiting on the agent after a reply, it reopens the same version as pending. An active hand-off stays with the teammate. Other reopened cards count on the approver's list again. On an approved or withdrawn card it posts and changes nothing else.
 - Deadlines need no acknowledgement.
 - An acknowledgement covers every answer on the card that has gone to the agent (typed in, or read from its inbox), not one still waiting its turn. Answers are counted as gone the moment typing starts, since agents often acknowledge before their transcript shows the message.

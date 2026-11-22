@@ -1005,7 +1005,8 @@ def _replaced_blocks(rec, n):
     """A version a later one replaced shrinks to one line, so the thread holds one whole card, the newest, and what's
     new is plain to see. The version as it was opens from its button."""
     blocks = [test_tag()] if rec.get("test") else []
-    line = md(f"{version_label(n)}, replaced by {version_label(len(rec['versions']))} below.")
+    where = "below" if rec["versions"][-1].get("copy_ts") else "at the top"
+    line = md(f"{version_label(n)}, replaced by {version_label(len(rec['versions']))} {where}.")
     line["accessory"] = button(f"See {version_label(n)}", f"{rec['id']}|{n}|see")
     return blocks + [line]
 
@@ -1539,6 +1540,16 @@ def answer_blocks(rec, text, at):
         body = f"*{first.group(1)}*" + body[first.end(1):]
     blocks = [test_tag()] if rec.get("test") else []
     return blocks + [md(body), ctx(f"{esc(rec['agent'])} · answered · {rec['id']} · {when(at)}")]
+
+
+def reply_version_blocks(rec, n, answer, at):
+    """A new version that answers a reply, as one post under it: the answer, when there is one, drawn as an answer is,
+    then one line saying the card at the top now shows this version, with what changed and a link to it."""
+    blocks = answer_blocks(rec, answer, at) if answer else ([test_tag()] if rec.get("test") else [])
+    line = f"🔄 Card updated at the top ({version_label(n)}): {esc(rec['versions'][n - 1]['card']['changes'])}"
+    if rec.get("link"):
+        line += f" · <{rec['link']}|See the card>"
+    return blocks + [ctx(line[:2990])]
 
 
 def note_blocks(rec, name, text, at):

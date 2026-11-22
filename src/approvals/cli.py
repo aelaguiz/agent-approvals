@@ -387,6 +387,43 @@ def cmd_ask(a):
     print(f"Asked in the thread of {a.id}. The answer will arrive as an [Approvals] message.")
 
 
+def _answers_a_reply(rec):
+    """Whether a reply on the card (his, or a teammate's) came after the version on screen went up: a new version
+    then answers it."""
+    since = rec["versions"][-1].get("posted_at") or rec.get("created") or ""
+    return any(e.get("kind") in ("feedback", "answer", "comment") and e.get("at", "") >= since for e in rec.get("events") or [])
+
+
+def _revise_as_reply(rid, n, prev, answer):
+    """A version that answers a reply goes under it as the agent's answer and one line saying the card changed; the
+    card at the top shows the new version. A whole card there buries the answer he came back for (Amir, November 22,
+    2026: "I can't get a giant blob as a response because I can't actually find the answer to my ... question in it")."""
+    rec = store.load(rid)
+    blocks = cards.reply_version_blocks(rec, n, answer, store.now())
+    changes = rec["versions"][n - 1]["card"]["changes"]
+    text = f"{rec['agent']}: {answer}" if answer else f"{rec['agent']} updated the card ({cards.version_label(n)}): {changes}"
+    ts = slackapi.post(blocks, text, thread_ts=rec["thread_ts"], **config.channel_args(rec))
+
+    def fn(r):
+        send = core.conversation_send(r)
+        core.acknowledge(r, answer or text, ts)
+        if answer:
+            store.event(r, "answered", text=answer, ts=ts, back=False)
+        return send
+    send = store.update(rid, fn)
+    core.post_to_teammate(rid, send, text, blocks)
+    _share_pictures(rid, n)
+    core.refresh_and_clear(rid)
+    _video_in_thread(rid, n)
+    if prev.get("line_ts"):   # the channel line announcing the version before is out of date
+        try:
+            slackapi.delete(prev["line_ts"], **config.channel_args(rec))
+        except Exception as e:
+            print(f"(couldn't take down v{prev['n']}'s line in the channel: {e})", file=sys.stderr)
+    said = "your answer and one line saying the card changed are" if answer else "one line saying the card changed is"
+    print(f"{rid} v{n}: {said} in the thread under the reply; the first post now shows v{n}.")
+
+
 def cmd_revise(a):
     card = _load_card(a.card)
     errs = cards.validate(card, revision=True)
@@ -399,6 +436,7 @@ def cmd_revise(a):
     version = {"n": n, "card": card, "posted_at": store.iso()}
     media = _media(card, n, _prepare_media(card, version))
     prev = rec["versions"][-1]
+    reply = bool(a.answer) or _answers_a_reply(rec)
 
     def add(r):
         reach.refresh(r, reach.capture())
@@ -433,8 +471,11 @@ def cmd_revise(a):
                             + f". Your call on v{n - 1}, if you made one, doesn't carry to this version. {core.make_your_call(r)}")
         return r
     rec = store.update(a.id, add, media)
-    # The new version goes at the bottom of the thread, where he reads; an earlier copy there shrinks to a line.
     _publish_journey(rec, n)
+    if reply:
+        _revise_as_reply(a.id, n, prev, a.answer)
+        return
+    # A version posted on its own goes at the bottom of the thread, where he reads; an earlier copy there shrinks to a line.
     _share_pictures(a.id, n)
     rec = store.load(a.id)
     ts_new = slackapi.post(cards.card_blocks(rec, n, core.mode_for(rec)), cards.card_text(rec, n), thread_ts=rec["thread_ts"], **config.channel_args(rec))
@@ -1072,9 +1113,10 @@ def main(argv=None):
     s.add_argument("question")
     s.set_defaults(fn=cmd_ask)
 
-    s = sub.add_parser("revise", help="post the next version in the thread")
+    s = sub.add_parser("revise", help="post the next version; after a reply, it goes under the reply as your answer and one line")
     s.add_argument("id")
     s.add_argument("card")
+    s.add_argument("--answer", help="your answer to his question, verdict first, posted under his reply with the line saying the card changed")
     s.set_defaults(fn=cmd_revise)
 
     s = sub.add_parser("answer", help="answer the approver's question in the thread, verdict first; hands the card back to him without a new version")

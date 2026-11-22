@@ -295,7 +295,7 @@ def msg_replies(rec, kind, texts, question=None, member=None):
                  f'work, say first in one line what is coming and when, with `approvals ack {rid} "<what and when>"`.')
     if kind == "answer":
         return (f'{head(rec)} {name} answered your question ("{one_line(question)}") {said_in()} at {t}: {said}. '
-                f'If it asks for a change, carry on with `approvals revise {rid} <card.json>`. '
+                f'If it asks for a change, carry on with `approvals revise {rid} <card.json>`, adding `--answer "<the verdict, then the fact it rests on>"` if it also asks something. '
                 f'If it approves the card as it stands (a yes, or a detail you asked about settled with no change to the card), '
                 f'record it with `approvals record {rid} --approved --words "<their words>" --where "Slack thread"`, do it, then run `approvals done {rid} "<readback>"`. {one_reply}')
     if kind == "comment":
@@ -303,8 +303,10 @@ def msg_replies(rec, kind, texts, question=None, member=None):
                 f'If it asks something, answer it with `approvals answer {rid} "<the answer, verdict first>"`. '
                 f'If it changes what you do, say so in one line with `approvals ack {rid} "<what changes>"`. No new card unless asked for one.')
     return (f'{head(rec)} {name} replied {said_in()} at {t}: {said}. '
-            f'If it asks a question, answer it with `approvals answer {rid} "<the answer, verdict first>"`: that hands the card back as it stands, with no new version. '
+            f'If it asks a question, answer it with `approvals answer {rid} "<the verdict, then the fact it rests on>"`: that hands the card back as it stands, with no new version. '
             f'If it asks for a change, post the next version with `approvals revise {rid} <card.json>` (say what changed in "changes"). '
+            f'If it asks a question and the answer also changes the card, do both in one: `approvals revise {rid} <card.json> --answer "<the verdict, then the fact it rests on>"`. '
+            f'The answer then goes under his reply with one line saying what changed on the card, so keep the answer out of "changes". '
             f'If you truly cannot go on without one fact, ask it with `approvals ask {rid} "<question>"`. {one_reply} '
             f'If the reply plainly approves the card as it stands, record it with `approvals record {rid} --approved --words "<their words>" --where "Slack thread"`, do it, then run `approvals done {rid} "<readback>"`. '
             f'If it plainly declines, record it with `approvals record {rid} --declined --words "<their words>" --where "Slack thread"` and drop it.')

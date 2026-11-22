@@ -149,6 +149,7 @@ approvals submit card.json --basecamp https://app.basecamp.com/<account>/buckets
 approvals submit card.json --thread 'https://example.slack.com/archives/CEXAMPLE/p1800000000000001'   # the message this card answers
 approvals ask AP-0001 "Mexico at MX$899 or MX$999?"
 approvals revise AP-0001 card-v2.json          # next version, in the same thread
+approvals revise AP-0001 card-v2.json --answer "No. The new look picker dropped the ask; it goes back in this build."   # after his reply: the answer, then one line saying the card changed
 approvals ack AP-0001 "Got it: setting both prices now"   # the agent's own acknowledgement, in the thread
 approvals withdraw AP-0001 "Prices changed; a new card is coming"   # take down a card the agent no longer stands behind
 approvals status AP-0001 "Brazil live; Mexico waiting for Google's review" --next   # keep the card true after the yes
