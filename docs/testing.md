@@ -140,6 +140,17 @@ A test hub must not connect to Slack: a second connection with the workspace's a
 
 ## Results
 
+### November 22, 2026: a card names the thing it decides (about)
+
+Unit tests: 588 of 588. Then on two copies of the record (the 1:39 am backup with every upgrade of the dashboard's `main`, one with the upgrade that refuses a card naming nothing), each with a test hub (`hub.serve()` alone, Slack faked so nothing posted) and `approvals submit` and `revise` run as a second machine, so each card went through the hub to the record:
+
+| What was checked | Result |
+| --- | --- |
+| A card naming a feature, record refusing a card naming nothing | Kept; its page on the dashboard leads with "What it decides" and the feature. |
+| A card naming nothing, same record | Refused on the agent's machine in the record's words, whole: "put_card: a card names the one thing it decides. Add about, …". |
+| A new version naming nothing, and one naming another feature | The first kept the card's feature; the second was refused ("a card about F-101 is a new card"). |
+| A card with `about` and one without, on the record as it was live before that upgrade | Both kept, the same as cards from the previous `main`. |
+
 ### November 21, 2026: a comment typed on the card on the pod dashboard
 
 Unit tests: 585 of 585. Then on a copy of the record (every real card taken out of it, who decides pointed at the test channel), this branch's hub as a test hub (`approvals listen`, never connected), and a TEST card in the test channel:
