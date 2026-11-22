@@ -213,7 +213,7 @@ def test_with_auto_approval_on_the_approve_is_his_yes_and_done_works(monkeypatch
     assert msg["kind"] == "decision" and msg["needs_ack"] and msg["react_ts"] == "1.1"
     assert msg["text"].startswith('[Approvals] AP-0001 v1 "Add $250 to the search ads learning budget": approved for Sam by '
                                   'his deputy, Exec · approver (auto-approval, ')
-    assert ('Why: "Inside the test\'s cap.". It counts as his yes, for exactly what the card describes. First acknowledge'
+    assert ('Why: "Inside the test\'s cap.". Act on it as on his yes, for exactly what the card describes; he has not seen it, so to him it is \'your deputy approved it\', never \'you approved\'. First acknowledge'
             in msg["text"] and "approvals done AP-0001" in msg["text"])
     assert "Sam approved it (auto-approval by his deputy" in to("AP-0001", "reviewer")[0]["text"]
     assert to("AP-0001", "deputy") == []   # its own yes doesn't come back to it
@@ -280,7 +280,7 @@ def test_an_approve_takes_the_pick_the_card_names_and_says_so_to_the_asker_and_o
     assert [e.get("choice") for e in rec["events"] if e["kind"] == "decision"] == ["Build the hand-count panel"]
     [msg] = to("AP-0001")
     assert msg["kind"] == "decision" and msg["needs_ack"]
-    assert ('It counts as his yes, for exactly what the card describes. It took the pick the card names, Build the hand-count panel ("a panel that opens from the hand count"). '
+    assert ('Act on it as on his yes, for exactly what the card describes; he has not seen it, so to him it is \'your deputy approved it\', never \'you approved\'. It took the pick the card names, Build the hand-count panel ("a panel that opens from the hand count"). '
             'First acknowledge' in msg["text"])
     assert "Then do exactly what the card describes for Build the hand-count panel, nothing else, and" in msg["text"] and "approvals done AP-0001" in msg["text"]
     assert to("AP-0001", "deputy") == []   # its own pick doesn't come back to it
@@ -317,7 +317,7 @@ def test_an_approve_takes_a_rows_pick_and_covers_rows_that_need_their_own_yes(mo
     assert r["status"] == "approved" and r["decision"]["where"] == "deputy"
     assert [(a["verdict"], a["where"]) for a in r["answers"].values()] == [("approved", "deputy")] * 3
     [msg] = to("AP-0003")
-    assert "It counts as his yes, for exactly what the card describes. First acknowledge" in msg["text"]
+    assert "Act on it as on his yes, for exactly what the card describes; he has not seen it, so to him it is 'your deputy approved it', never 'you approved'. First acknowledge" in msg["text"]
     assert "AP-0003|1|takeback" in values(cards.card_blocks(r, 1, "final"))
     # His own Approve all still skips rows that need their own yes; only the deputy's yes covers them.
     card("AP-0005", "release")

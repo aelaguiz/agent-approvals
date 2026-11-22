@@ -868,7 +868,8 @@ def msg_auto(rec, by, why):
         took = " " + " ".join(f'On part {j} it took the pick the card names, "{ch}".' for j, ch in rows)
         do = "do exactly what the card describes, with " + ("that pick" if len(rows) == 1 else "those picks")
     return (f'{head(rec)} approved for {who(rec)} by his deputy, {by} (auto-approval, {cards.when(store.now())}). '
-            f'Why: "{one_line(why)}". It counts as his yes, for exactly what the card describes.{took} '
+            f'Why: "{one_line(why)}". Act on it as on his yes, for exactly what the card describes; he has not seen it, '
+            f"so to him it is 'your deputy approved it', never 'you approved'.{took} "
             f'{ack_step(rec, "what you are about to do")} Then {do}, and {done_step(rec)}')
 
 
