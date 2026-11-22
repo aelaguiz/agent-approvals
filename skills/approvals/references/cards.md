@@ -94,7 +94,7 @@ He judges a change to the product by following one user through it with his eyes
 
 What he gets: on the card, a map of each journey, today's path above the changed one, an arrow between screens naming the tap. Slack shows a picture no bigger than 600 by 400 pixels, so the map shows only the journey's shape: how many steps, and where the change is. Under it, See it big opens a page where every screen shows at the full height of his window, today beside the change, and the arrow keys step along the path. The card's thread gets each screen once, full size, in order.
 
-What makes a journey whole is your repository's rule (for Poker Skill, "A fully formed user journey" in psbrain's `pods/procedures.md`). Build that journey, then put it in the card's fields:
+What makes a journey whole is your repository's rule (for Poker Skill, `$user-journey`). Build that journey, then put it in the card's fields:
 
 - **`who`, an entry for each kind of user,** named as he would picture them ("a trial user who cancelled in the store and opens the app again before the trial ends"), so each path reads straight through: the person who receives the invite, the one who says no, the one who skips where the first one watches.
 - **`steps` from the screen where the user really is.** Home, a push, the store's page and the store's own purchase dialog are steps like any other.
