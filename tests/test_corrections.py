@@ -99,3 +99,38 @@ def test_a_machine_reads_the_corrections_through_the_hub(monkeypatch):
 def test_without_a_record_a_card_type_has_no_corrections(monkeypatch):
     monkeypatch.setattr(store, "record", lambda: None)
     assert store.local_corrections("experiment") == []
+
+
+def test_guide_puts_the_open_corrections_with_his_line_before_how_to_write_the_card(monkeypatch, capsys):
+    line = {"card": "AP-0042", "at": "2026-11-20T21:22:43+00:00", "words": "NEVER email a competitor", "by": "Sam"}
+    monkeypatch.setattr(store, "corrections", lambda card_type: [OPEN[0] | {"line": line}, OPEN[1] | {"line": None}])
+    cli.main(["guide", "experiment"])
+    out = printed(capsys.readouterr().out)
+    assert out[:7] == [
+        'Open corrections for experiment cards, left by earlier ones, printed below. A new experiment card names each '
+        'in its JSON: "corrections_seen": ["C-6", "C-9"]',
+        "C-6 Say what the money buys", "  The last two budget cards said how much.", "  Not what for.",
+        "  Sam, Nov 20, 9:22 pm on AP-0042: NEVER email a competitor",
+        "C-9 One decision per card", "  Split a card that asks two things."]
+    assert out[7] == "## experiment" and "## page" not in out and "## budget" not in out
+
+
+def test_guide_still_says_how_to_write_the_card_when_the_corrections_cant_be_read(monkeypatch, capsys):
+    def down(card_type):
+        raise store.StoreError("the approvals hub on hubbox isn't answering")
+    monkeypatch.setattr(store, "corrections", down)
+    cli.main(["guide", "budget"])
+    out = printed(capsys.readouterr().out)
+    assert out[0] == "Cannot read the open corrections for budget cards: the approvals hub on hubbox isn't answering"
+    assert "## budget" in out and "## purchase" not in out
+
+    monkeypatch.setattr(store, "corrections", lambda card_type: [])
+    cli.main(["guide", "account"])
+    out = printed(capsys.readouterr().out)
+    assert out[:2] == ["No open corrections for account cards.", "## account"]
+
+
+def test_guide_refuses_a_type_there_is_no_card_for(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["guide", "tweet"])
+    assert "No card type 'tweet'" in capsys.readouterr().err

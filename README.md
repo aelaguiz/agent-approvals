@@ -141,6 +141,7 @@ One install can serve several Slack workspaces, each with its own bot, default a
 Agents use the skill. To try it by hand:
 
 ```bash
+approvals guide email                          # before writing: the open corrections for email cards, then how to write one
 approvals read card.json                       # have a fresh reader check the card without posting it
 approvals submit card.json --agent "Pricing"   # posts the card, prints AP-0001 and a link
 approvals submit card.json --to lead           # sends it to the workspace's named approver
@@ -202,7 +203,7 @@ The full card opens with a link to the conversation and, when readable and writt
 
 If the app cannot read the conversation, the full card still carries its link. The command says that the thread will not show the card and tells the agent to link it there itself.
 
-A card is JSON. [skills/approvals/references/cards.md](skills/approvals/references/cards.md) describes every field, type and kind, with an example of each.
+A card is JSON. [skills/approvals/references/cards.md](skills/approvals/references/cards.md) describes every field, type and kind, with an example of each; `approvals guide <type>` prints that type's section under its open corrections.
 
 ### Show a user journey
 

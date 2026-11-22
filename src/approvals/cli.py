@@ -68,6 +68,46 @@ def _print_corrections(card_type, open_ones, file):
           f"names each in its JSON: \"corrections_seen\": [{ids}]", file=file)
     for c in open_ones:
         print(f"\n{c['id']} {c['title']}\n  " + c["says"].strip().replace("\n", "\n  "), file=file)
+        line = c.get("line")
+        if line:
+            at = cards.local(datetime.fromisoformat(line["at"]))
+            said = at.strftime("%b ") + str(at.day) + ", " + at.strftime("%I:%M %p").lstrip("0").lower()
+            print(f"  {line['by']}, {said} on {line['card']}: " + line["words"].strip().replace("\n", "\n  "), file=file)
+
+
+# The skill's reference for writing each type of card. The installed command carries its own copy (pyproject.toml);
+# run from a checkout, it reads the skill's.
+_CARDS_GUIDE = [Path(__file__).with_name("cards.md"),
+                Path(__file__).resolve().parents[2] / "skills" / "approvals" / "references" / "cards.md"]
+
+
+def _type_section(card_type):
+    """cards.md's section for one type: its '## <type>' heading to the next '## '."""
+    text = next(p for p in _CARDS_GUIDE if p.exists()).read_text()
+    start = text.index(f"\n## {card_type}\n") + 1
+    end = text.find("\n## ", start)
+    return text[start:end if end != -1 else None].rstrip() + "\n"
+
+
+def cmd_guide(a):
+    """What to read before writing a card of one type: his open corrections for that type first, since they are
+    the judgments earlier cards got wrong, then how to write that type."""
+    if a.type not in cards.TYPES:
+        _die(f"No card type {a.type!r}. The types: {', '.join(cards.TYPES)}")
+    try:
+        open_ones = store.corrections(a.type)
+    except store.StoreError as e:
+        print(f"Cannot read the open corrections for {a.type} cards: {e}\n`approvals read` shows them once the "
+              f"record answers. How to write the card is below.\n")
+    else:
+        if open_ones:
+            _print_corrections(a.type, open_ones, sys.stdout)
+        else:
+            print(f"No open corrections for {a.type} cards.")
+        print()
+    print(_type_section(a.type), end="")
+    print("\nThe fields, and the kinds of card (a journey, a row each, a pick, a batch), are in the skill's "
+          "references/cards.md.")
 
 
 def cmd_read(a):
@@ -1091,6 +1131,10 @@ def _herdr_name():
 def main(argv=None):
     p = argparse.ArgumentParser(prog="approvals", description="Ask for approval as a Slack card; the answer comes back into this session.")
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("guide", help="before writing a card: the open corrections for its type, then how to write it")
+    s.add_argument("type", help="the card's type, such as email or experiment")
+    s.set_defaults(fn=cmd_guide)
 
     s = sub.add_parser("read", help="have a fresh reader check cards before they are posted")
     s.add_argument("card", nargs="+", help="card JSON files")

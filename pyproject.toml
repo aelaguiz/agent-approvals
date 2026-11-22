@@ -21,6 +21,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/approvals"]
 
+# `approvals guide` prints a type's section of the skill's card reference, the same version as the command.
+[tool.hatch.build.targets.wheel.force-include]
+"skills/approvals/references/cards.md" = "approvals/cards.md"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "tests"]
