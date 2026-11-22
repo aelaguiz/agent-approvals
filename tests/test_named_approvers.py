@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from approvals import basecamp, cli, config, core, digest, listener, reach, slackapi, store
+from approvals import cli, config, core, digest, listener, reach, slackapi, store
 from samples import SAMPLES
 from test_cards_store import make_rec
 from test_sets import card_files
@@ -32,7 +32,6 @@ def test_submit_set_targets_named_person_and_rejects_unknown(named, monkeypatch,
     assert len(records) == 2 and all(r["target"] == "alex" for r in records)
     assert all(p[1]["channel_id"] == "CALEX" for p in posts)
     assert all("/CALEX/" in r["link"] for r in records)
-    assert all("Alex" in basecamp.wanted(r)[0] for r in records)
 
 
 def test_click_popup_and_reply_only_count_named_person(named, monkeypatch):

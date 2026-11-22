@@ -90,7 +90,7 @@ def test_each_machine_is_given_only_its_own_sessions_answers(hubbox):
     client = store.hub_client()
     assert [x[0] for x in client.due("laptop")[0]] == [a]
     assert sorted(x[0] for x in client.due("hubbox")[0]) == sorted([b, c])
-    assert client.due("elsewhere") == ([], [], [])
+    assert client.due("elsewhere") == ([], [])
 
 
 def test_the_reviewer_is_kept_on_the_hub_and_hears_on_its_own_machine(hubbox):
@@ -377,7 +377,7 @@ def test_a_card_names_what_it_decides_and_the_records_refusal_reaches_its_machin
     threading.Thread(target=dashboard.serve_forever, daemon=True).start()
     record = store.Record(f"http://127.0.0.1:{dashboard.server_address[1]}", "hub-token")
     monkeypatch.setattr(store, "record", lambda: record)
-    rec = make_rec(SAMPLES["money"]) | {"id": None}
+    rec = make_rec(dict(SAMPLES["money"])) | {"id": None}   # a copy: the about set below must not reach other tests
     try:
         rec["versions"][0]["card"]["about"] = "X-346"
         assert store.create(rec)["id"] == "AP-0001"

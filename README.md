@@ -10,7 +10,7 @@ agent ──approvals submit──▶ card in #approvals ──▶ you: ✅ / �
 
 - **One card per request, shaped to how you'll judge it.** Its type (creative, public reply, budget, purchase, money, player message, price, experiment, store or web page, content, email in your name, account action) says what the action is. Its shape says how you answer: a yes or no; today's screen beside the after, swipeable, with the change outlined; a set of related changes with a yes, a change or a no on each row and Approve all; a pick between options shown side by side; a batch with Pick which; words in your name you can edit before they go. Every card says what it's part of, what a yes covers, and what happens with no answer.
 - **The card keeps going after the yes.** The agent posts each step on it (built, waiting at Apple, live, the first read) until the thing is really out, and a condition only you can clear shows as waiting on you, on the card and in the morning list. These redraw the card in place, without a notification.
-- **The Basecamp card shows it too.** A card can name the Basecamp cards or to-dos its work lives on (`--basecamp <url>`). "Part of:" on the card links to the first, and each Basecamp card keeps one step, written as the agent that asked, saying where the approval stands: waiting on you, your answer and when, "not yet seen by" the agent until it has it, and checked once it's done, withdrawn or expired. Steps notify nobody, so your own answer never comes back to you.
+- **The card names the thing it decides.** "Part of:" gives the initiative and the id of the pod dashboard's thing the card decides (`about`), where your answer lands as your decision. Cards no longer keep a step on a Basecamp card: `--basecamp`, or `"basecamp"` in a card's JSON, is refused with what to name instead. A card made before keeps its Basecamp link on "Part of:" as written, and nothing writes there again.
 - **One thread per request.** Your replies are feedback, and each reaches the agent within seconds as its own message, even mid-task, so a correction is never held back. The agent's questions and its next versions arrive in the same thread, and the first post always shows the newest version with working buttons.
 - **Answers reach the exact session that asked.**
   - A running session gets the answer typed into its terminal pane.
@@ -38,7 +38,6 @@ agent ──approvals submit──▶ card in #approvals ──▶ you: ✅ / �
   - for cards sent to the approver's team, bot scopes `im:write` to open direct messages and `im:history` to read their threads;
   - the bot invited to every approver's channel.
 - To deliver into agent sessions: [Herdr](https://herdr.dev), with agents running in Herdr panes. Without it, answers wait in each agent's `approvals inbox`.
-- For Basecamp steps: the Basecamp command-line tool, `basecamp`, and in each agent's folder (or one above it) a `.basecamp/config.json` whose `default_profile` is that agent's own login. Without one, a card's Basecamp step is skipped.
 
 ## Install
 
@@ -146,7 +145,6 @@ approvals read card.json                       # have a fresh reader check the c
 approvals submit card.json --agent "Pricing"   # posts the card, prints AP-0001 and a link
 approvals submit card.json --to lead           # sends it to the workspace's named approver
 approvals submit a.json b.json c.json --agent "Revenue"   # a set: three cards together, each its own decision, marked "1 of 3"
-approvals submit card.json --basecamp https://app.basecamp.com/<account>/buckets/<project>/card_tables/cards/<card>   # the Basecamp card it serves; repeatable
 approvals submit card.json --thread 'https://example.slack.com/archives/CEXAMPLE/p1800000000000001'   # the message this card answers
 approvals ask AP-0001 "Mexico at MX$899 or MX$999?"
 approvals revise AP-0001 card-v2.json          # next version, in the same thread

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from approvals import basecamp, cards, cli, config, core, digest, listener, reach, router, slackapi, store
+from approvals import cards, cli, config, core, digest, listener, reach, router, slackapi, store
 from kinds import KINDS
 from samples import SAMPLES
 from test_cards_store import make_rec
@@ -218,7 +218,6 @@ def test_with_auto_approval_on_the_approve_is_his_yes_and_done_works(monkeypatch
     assert "Sam approved it (auto-approval by his deputy" in to("AP-0001", "reviewer")[0]["text"]
     assert to("AP-0001", "deputy") == []   # its own yes doesn't come back to it
     assert "approved for Sam; its agent has his yes" in capsys.readouterr().out
-    assert basecamp.wanted(rec)[0].startswith("AP-0001 · auto-approved ")
     final = txt(cards.card_blocks(rec, 1, "final"))
     assert "🤖 Auto-approved: Add $250" in final and "🤖 Approved for you by Exec · approver" in final and "Inside the test's cap." in final
     assert "Approved by Sam" not in final and values(cards.card_blocks(rec, 1, "final")) == ["AP-0001|1|see", "AP-0001|1|takeback"]

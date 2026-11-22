@@ -13,7 +13,7 @@ from contextlib import ExitStack
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import basecamp, cards, config, core, journey, pictures, reach, reader, slackapi, store, transcripts
+from . import cards, config, core, journey, pictures, reach, reader, slackapi, store, transcripts
 
 
 def _load_card(path):
@@ -307,7 +307,7 @@ def cmd_submit(a):
     loaded = [_load_card(p) for p in a.card]
     threads = []
     for i, card in enumerate(loaded, 1):
-        errs = cards.validate(card) + basecamp.problems(basecamp.urls(card.get("basecamp")) + (a.basecamp or []))
+        errs = cards.validate(card) + ([cards.BASECAMP_GONE] if a.basecamp and "basecamp" not in card else [])
         link = getattr(a, "thread", None) or card.get("thread")
         thread = None
         if link is not None:
@@ -372,9 +372,6 @@ def _submit_one(card, a, set_pos, thread=None):
         rec["thread"] = thread
     if set_pos:
         rec["set"] = set_pos
-    bc = basecamp.entries(basecamp.urls(card.get("basecamp")) + (a.basecamp or []))
-    if bc:
-        rec["basecamp"] = bc
     rec = store.create(rec, media)
     reach.refresh(rec, who)
     ts = slackapi.post(cards.card_blocks(rec, 1, "open"), cards.card_text(rec, 1), **config.channel_args(rec))
@@ -400,7 +397,6 @@ def _submit_one(card, a, set_pos, thread=None):
         core.refresh_and_clear(rec["id"])
     _video_in_thread(rec["id"], 1)
     _post_evidence(rec, card.get("evidence"))
-    basecamp.sync(rec["id"])
     print(rec["id"])
     print(link)
     return rec
@@ -1022,8 +1018,6 @@ def cmd_inbox(a):
         theirs = a.all or (same_family and (own or r.get("agent") == me["agent"]))
         if theirs or any(roles.values()):
             taken = store.update(rec["id"], lambda x, own=own, theirs=theirs: take(x, own or a.all, theirs))
-            if taken and rec.get("basecamp"):
-                basecamp.sync(rec["id"])
             for text, react_ts in taken:
                 print(text)
                 shown += 1
@@ -1111,8 +1105,6 @@ def cmd_role(a):
 # Commands that post to Slack check first that this machine can, so nothing is saved for a card it can't post.
 POSTS = {"submit", "ask", "revise", "answer", "ack", "done", "withdraw", "record", "status", "note", "review",
          "deputy", "call", "pictures"}
-# Commands that can change what a request's Basecamp steps say.
-CHANGES = {"ask", "revise", "answer", "ack", "done", "withdraw", "record", "status"}
 
 
 def _herdr_name():
@@ -1149,7 +1141,7 @@ def main(argv=None):
     s.add_argument("--test", action="store_true", help=argparse.SUPPRESS)
     s.add_argument("--deadline-minutes", type=int, help=argparse.SUPPRESS)
     s.add_argument("--basecamp", action="append", metavar="URL",
-                   help="a Basecamp card or to-do this card serves; repeatable. 'Part of:' links to the first, and each card gets a step showing where the approval stands")
+                   help="refused: a card names the pod dashboard's thing it decides in \"about\" instead")
     s.set_defaults(fn=cmd_submit)
 
     s = sub.add_parser("ask", help="ask the approver one question in the request's thread")
@@ -1325,8 +1317,6 @@ def main(argv=None):
         a.fn(a)
     except (store.StoreError, config.ConfigError) as e:
         _die(str(e))
-    if a.cmd in CHANGES:
-        basecamp.sync(a.id)
 
 
 if __name__ == "__main__":

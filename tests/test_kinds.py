@@ -5,7 +5,7 @@ from datetime import timedelta
 
 import pytest
 
-from approvals import basecamp, cards, cli, config, core, digest, listener, slackapi, store
+from approvals import cards, cli, config, core, digest, listener, slackapi, store
 from kinds import KINDS, k
 from samples import SAMPLES
 from test_cards_store import make_rec
@@ -436,7 +436,6 @@ def test_remove_from_the_list_closes_the_card_and_crosses_its_line_off_at_once(s
     card = [p for p in slack if p.get("update") == rec["thread_ts"]][-1]["blocks"]
     assert "🗑️ Removed: Build and test two screens" in txt(card) and "Removed from your list by" in txt(card)
     assert values(card) == ["AP-0001|1|see"]
-    assert basecamp.wanted(rec)[0].startswith("AP-0001 · removed by ")
     run(L.handle_click(press_payload("AP-0001|1|approve")))
     assert slack[-1] == {"ephemeral": "You removed this one from your list, so there's nothing to decide."}
 

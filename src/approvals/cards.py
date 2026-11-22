@@ -110,8 +110,14 @@ def _file(path):
         return False
 
 
+BASECAMP_GONE = ("basecamp: a card no longer keeps a step on a Basecamp card. The pods' work has been in the pod dashboard "
+                 "since November 21 and Basecamp's pod projects are being retired, so nothing would read it there. Take "
+                 "out --basecamp and \"basecamp\", and name the dashboard's thing the card decides in \"about\" (its id; "
+                 "pd open <the Basecamp address> finds the thing carried from that card); Part of names it on the card")
+
+
 def validate(card, revision=False):
-    errs = []
+    errs = [BASECAMP_GONE] if "basecamp" in card else []
     t = card.get("type")
     if t not in TYPES:
         return [f"type must be one of: {', '.join(TYPES)}"]
@@ -851,14 +857,18 @@ def set_pos(rec):
 
 def frame_line(rec, card):
     """What the card belongs to, where it sits in its set, and who sent it. Part of is set in place on the record
-    (`approvals status --part-of`), else the card's own. A card from before the frame line, never given one, has none."""
+    (`approvals status --part-of`), else the card's own, followed by the id of the pod dashboard's thing the card
+    decides (`about`). A card from before the frame line, never given one, has none."""
     pos = set_pos(rec)
-    if not has_frame(rec, card) and not pos and not rec.get("basecamp"):
+    about = card.get("about")
+    if not has_frame(rec, card) and not pos and not rec.get("basecamp") and not about:
         return None
     name = part_of(rec, card)
     bc = (rec.get("basecamp") or [{}])[0].get("url")
-    if bc:   # the work's picture is in Basecamp: one tap from his decision to it
+    if bc:   # a card made while the work's picture was in Basecamp keeps its link as written
         head = [f"Part of: <{bc}|{esc(name or 'the work in Basecamp')}>"]
+    elif about:   # the record's thing his answer lands on, by the id the pod dashboard shows it under
+        head = [f"Part of: {esc(name)} · {esc(about)}" if name else f"Part of: {esc(about)}"]
     else:
         head = [f"Part of: {esc(name)}"] if name else [] if pos else ["Stands alone"]
     return ctx(" · ".join(head + ([pos] if pos else []) + [esc(rec["agent"])]))
