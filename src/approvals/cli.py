@@ -49,6 +49,27 @@ def _suggest_names(name, rid=None, **where):
         print(f'To move this card: approvals status {rid} --part-of "<name>"', file=sys.stderr)
 
 
+def _unnamed_corrections(card, held):
+    """The open corrections for the card's type, when its corrections_seen doesn't name every one of them by id;
+    else none. held keeps each type's, read once from the record per command."""
+    if card.get("type") not in cards.TYPES:
+        return []
+    if card["type"] not in held:
+        held[card["type"]] = store.corrections(card["type"])
+    seen = card.get("corrections_seen")
+    named = {i for i in seen if isinstance(i, str)} if isinstance(seen, list) else set()
+    open_ones = held[card["type"]]
+    return open_ones if any(c["id"] not in named for c in open_ones) else []
+
+
+def _print_corrections(card_type, open_ones, file):
+    ids = ", ".join(f'"{c["id"]}"' for c in open_ones)
+    print(f"Open corrections for {card_type} cards, left by earlier ones, printed below. A new {card_type} card "
+          f"names each in its JSON: \"corrections_seen\": [{ids}]", file=file)
+    for c in open_ones:
+        print(f"\n{c['id']} {c['title']}\n  " + c["says"].strip().replace("\n", "\n  "), file=file)
+
+
 def cmd_read(a):
     loaded = []
     for path in a.card:
@@ -60,6 +81,11 @@ def cmd_read(a):
         except (OSError, UnicodeError, ValueError) as e:
             print(f"{path}: {e}", file=sys.stderr)
             raise SystemExit(2)
+    try:
+        held = {}
+        unnamed = [_unnamed_corrections(card, held) for card in loaded]
+    except store.StoreError as e:
+        _die(f"Cannot read the open corrections: {e}")
     try:
         settings = config.settings()
         briefs = [reader.brief(card, settings) for card in loaded]
@@ -96,6 +122,10 @@ def cmd_read(a):
                     stderr = stderr.decode(errors="replace")
                 tail = "\n".join((output + "\n" + stderr).strip().splitlines()[-20:])
                 print(f"{path}: reader {reason}" + (f"\n{tail}" if tail else ""), file=sys.stderr)
+    for path, card, open_ones in zip(a.card, loaded, unnamed):
+        if open_ones:
+            print(f"\n{path}:" if len(loaded) > 1 else "")
+            _print_corrections(card["type"], open_ones, sys.stdout)
     if failed:
         raise SystemExit(1)
     channel = settings.get("channel")
@@ -255,10 +285,15 @@ def cmd_submit(a):
                 slackapi.read_thread(thread)
             except Exception as e:
                 print(f"The linked thread won't show the card: {core.one_line(e)}; link the approval card there yourself.", file=sys.stderr)
-    posted = [
-        _submit_one(card, a, {"n": i, "of": len(loaded)} if len(loaded) > 1 else None, threads[i - 1])
-        for i, card in enumerate(loaded, 1)
-    ]
+    held = {}
+    unnamed = [_unnamed_corrections(card, held) for card in loaded]
+    posted = []
+    for i, card in enumerate(loaded, 1):
+        posted.append(_submit_one(card, a, {"n": i, "of": len(loaded)} if len(loaded) > 1 else None, threads[i - 1]))
+        if unnamed[i - 1]:
+            print(f"{posted[-1]['id']} named none or not all of its type's open corrections in corrections_seen.",
+                  file=sys.stderr)
+            _print_corrections(card["type"], unnamed[i - 1], sys.stderr)
     for rec in posted:
         _suggest_names(cards.part_of(rec, rec["versions"][-1]["card"]), rec["id"], channel=channel, test=rec["test"])
 
@@ -272,7 +307,11 @@ def _submit_one(card, a, set_pos, thread=None):
              "Run `approvals submit` in your own session, on the machine you run on; every machine has the command.")
     hours = card.get("deadline_hours") or cards.TYPES[card["type"]]["hours"]
     deadline = store.now() + (timedelta(minutes=a.deadline_minutes) if a.deadline_minutes else timedelta(hours=hours))
-    version = {"n": 1, "card": card, "posted_at": store.iso()}
+    # The corrections the agent was shown go with the card, not on it; the record keeps that they were shown to the
+    # agent the version names.
+    card = dict(card)
+    seen = card.pop("corrections_seen", None)
+    version = {"n": 1, "card": card, "posted_at": store.iso(), **({"actor": store.ACTOR.get()} if store.ACTOR.get() else {})}
     media = _media(card, 1, _prepare_media(card, version))
     rec = {
         "type": card["type"], "title": card["title"], "agent": who["agent"],
@@ -281,6 +320,8 @@ def _submit_one(card, a, set_pos, thread=None):
         "last_seen": None, "open_question": None, "decision": None, "done": None,
         "events": [], "outbox": [], "reach": None, "moves": [], "card_dirty": False,
     }
+    if seen is not None:
+        rec["corrections_seen"] = seen
     if getattr(a, "to", None) is not None:
         rec["target"] = a.to
     if thread and thread.get("readable") and "user" in thread:
