@@ -732,3 +732,15 @@ def test_alarm_posts_for_a_card_with_no_slack_thread(monkeypatch):
     L.s["alarm"] = {"channel": "COPS", "wake": ["~/wake"]}
     L.alarm()
     assert len(calls) == 1 and "AP-0001" in calls[0] and "no session" in calls[0]
+
+
+def test_refresh_skips_the_slack_card_when_a_card_has_no_thread(monkeypatch):
+    """AP-1942 had no Slack post; its refresh failed on every pass with Slack's "missing required field: ts"."""
+    updates = []
+    monkeypatch.setattr(core.slackapi, "update", lambda ts, *a, **k: updates.append(ts))
+    rec = make_rec(SAMPLES["money"])
+    rec["thread_ts"] = None
+    rec["card_dirty"] = True
+    store.save(rec)
+    core.refresh_and_clear(rec["id"])
+    assert None not in updates and not store.load(rec["id"])["card_dirty"]
