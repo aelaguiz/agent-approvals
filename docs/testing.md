@@ -140,6 +140,20 @@ A test hub must not connect to Slack: a second connection with the workspace's a
 
 ## Results
 
+### November 22, 2026: a card type's open corrections come with the card's form (corrections_seen)
+
+Unit tests: 593 of 593. Then on two copies of the record (the 1:39 am backup with every upgrade of the dashboard's `main`, one with the upgrade that refuses a new card not naming its type's open corrections), two TEST corrections written for experiment cards on each, a test hub (`hub.serve()` alone, Slack faked so nothing posted) and `approvals read`, `submit` and `revise` run as a second machine under a pod agent's Herdr name:
+
+| What was checked | Result |
+| --- | --- |
+| `approvals read` on an experiment card naming none, or only one, of the two | The reader's read, then both corrections whole under the `corrections_seen` line to add. Naming both: the reader's read alone. |
+| A card naming both, record refusing | Kept; the record keeps each as shown to that agent on that card, and the card itself carries no `corrections_seen`. |
+| A card naming none, or one of two, record refusing | Refused on the agent's machine in the record's words, both corrections whole; nothing posted. |
+| The same, on the record as it was before that upgrade | Kept, as before; `submit` prints both corrections after the card's number. |
+| A budget card (no corrections for its type), either record | Kept, nothing printed. |
+| `about` | A card naming nothing refused, a new version naming another thing refused, a new version naming nothing kept on its thing, as on November 22's `about` results. |
+| A machine on this version asking a hub on the previous one | `read` and `submit` both refuse ("runs a version without corrections; update it first"); so the hub's route went to `main` first, alone, and the commands after the hub ran it. With the hub on that first commit, this version and the previous one both submit as expected. |
+
 ### November 22, 2026: a card names the thing it decides (about)
 
 Unit tests: 588 of 588. Then on two copies of the record (the 1:39 am backup with every upgrade of the dashboard's `main`, one with the upgrade that refuses a card naming nothing), each with a test hub (`hub.serve()` alone, Slack faked so nothing posted) and `approvals submit` and `revise` run as a second machine, so each card went through the hub to the record:
