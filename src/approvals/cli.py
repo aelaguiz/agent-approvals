@@ -49,6 +49,13 @@ def _suggest_names(name, rid=None, **where):
         print(f'To move this card: approvals status {rid} --part-of "<name>"', file=sys.stderr)
 
 
+# A card that names no thing it decides still goes up; its answer then shows only on the card, so the asker is asked
+# here, and again by the pod dashboard (pd mine) until it names one.
+_ABOUT_ASKED = ("{id} names no thing it decides (\"about\"), so the approver's answer on it will show on no feature, "
+                "test or process in the pod dashboard. Name the narrowest thing its yes decides, your pod when nothing "
+                "narrower fits: pd tie <id> {id} (pd search <words> finds the id). pd mine asks until you do.")
+
+
 def _unnamed_corrections(card, held):
     """The open corrections for the card's type, when its corrections_seen doesn't name every one of them by id;
     else none. held keeps each type's, read once from the record per command."""
@@ -334,6 +341,8 @@ def cmd_submit(a):
             print(f"{posted[-1]['id']} named none or not all of its type's open corrections in corrections_seen.",
                   file=sys.stderr)
             _print_corrections(card["type"], unnamed[i - 1], sys.stderr)
+        if not card.get("about"):
+            print(_ABOUT_ASKED.format(id=posted[-1]["id"]), file=sys.stderr)
     for rec in posted:
         _suggest_names(cards.part_of(rec, rec["versions"][-1]["card"]), rec["id"], channel=channel, test=rec["test"])
 

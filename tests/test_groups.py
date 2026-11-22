@@ -326,7 +326,7 @@ def test_read_names_only_when_no_other_card_matches(monkeypatch, tmp_path, capsy
 def test_submit_names_excludes_the_new_card_and_prints_the_move_command(monkeypatch, tmp_path, capsys, slack):
     store.create(card(1, journey=False))
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "fixture")
-    req = {"type": "experiment", "title": "Show a search hint", "part_of": "Search help",
+    req = {"type": "experiment", "title": "Show a search hint", "part_of": "Search help", "about": "X-12",
            "why": "Readers can find the search box.", "facts": [["Place", "Library"]],
            "approves": "The search hint", "does_not_approve": "A new search engine"}
     path = tmp_path / "card.json"

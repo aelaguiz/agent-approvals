@@ -57,3 +57,12 @@ def test_a_card_made_before_keeps_its_basecamp_link_and_nothing_writes_there(pos
     rec = store.load(rid)
     assert f"Part of: <{CARD}|Pay the bills on time>" in json.dumps(cards.card_blocks(rec, 1, "final"))
     assert rec["basecamp"] == [{"url": CARD, "step": "900"}]
+
+
+def test_a_card_naming_no_thing_still_goes_up_and_its_asker_is_asked_for_one(posts, tmp_path, capsys):
+    rid = submit(tmp_path)
+    assert posts and store.load(rid)["status"] == "pending"
+    err = capsys.readouterr().err
+    assert f"{rid} names no thing it decides" in err and f"pd tie <id> {rid}" in err
+    submit(tmp_path, about="T-12")
+    assert "names no thing it decides" not in capsys.readouterr().err
