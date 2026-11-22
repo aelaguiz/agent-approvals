@@ -17,7 +17,7 @@ import threading
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 
 from . import basecamp, config, core, store
 
@@ -128,6 +128,12 @@ class Client:
             raise store.StoreError(f"the approvals hub on {config.hub()} runs a version without /who; update it first")
         return body
 
+    def corrections(self, card_type):
+        code, body = self.call("GET", f"/corrections/{quote(card_type, safe='')}")
+        if code != 200:
+            raise store.StoreError(f"the approvals hub on {config.hub()} runs a version without corrections; update it first")
+        return body["corrections"]
+
     def give(self, answer):
         """An answer for the record to take and the hub to carry out; 'ok' once it is carried out, or Refused."""
         code, body = self.call("POST", "/answers", answer, answers=(422,))
@@ -187,6 +193,8 @@ class Handler(BaseHTTPRequestHandler):
                 data = self.rfile.read(int(self.headers.get("Content-Length") or 0))
                 kept = store.record() and store.record().put_file(parts[1], data)
                 return self._send(200, {}) if kept else self._send(502, {"error": f"the record didn't keep {parts[1]}"})
+            if method == "GET" and len(parts) == 2 and parts[0] == "corrections":
+                return self._send(200, {"corrections": store.local_corrections(unquote(parts[1]))})
             if method == "GET" and parts == ["due"]:
                 recs, machine = store.local_all(), q.get("machine", [""])[0]
                 due, strays = core.to_deliver(recs, machine, store.local_reviewer(), store.local_deputy())
