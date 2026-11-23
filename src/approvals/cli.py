@@ -1317,6 +1317,12 @@ def main(argv=None):
         p.error("fork --same-as needs a fork session id")
     if a.cmd == "inbox" and bool(a.peek) != bool(a.session):
         p.error("inbox --peek requires --session; --session is only for --peek")
+    # Every post in a card's thread is read by the approver. "-" is how submit takes a card from standard input, so an
+    # agent that pipes its line in posts a bare "-" (AP-2081, November 23).
+    if a.cmd in ("answer", "ack") and a.text.strip() in ("", "-"):
+        p.error(f"nothing was posted: {a.cmd} takes your words as its own argument, never from standard input. "
+                f"Pass them quoted, approvals {a.cmd} {a.id} '<your line>', or from a file, "
+                f"approvals {a.cmd} {a.id} \"$(cat FILE)\"")
     if not os.environ.get("APPROVALS_HOME"):   # the services and tests name their folder
         rid = getattr(a, "id", None) or (getattr(a, "only", None) or [None])[0]
         try:

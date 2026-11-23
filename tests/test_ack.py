@@ -112,3 +112,15 @@ def test_a_reply_not_acknowledged_is_asked_again_at_ten_minutes_then_every_thirt
     before = len(rec["outbox"])
     L.ask_again(store.load("AP-0001"))
     assert len(store.load("AP-0001")["outbox"]) == before
+
+
+def test_an_answer_or_ack_of_only_a_dash_or_nothing_is_refused_before_anything_posts(monkeypatch, capsys):
+    import pytest
+    from approvals import cli
+    posted = []
+    monkeypatch.setattr(cli.slackapi, "post", lambda *a, **k: posted.append(a))
+    for cmd, text in (("answer", "-"), ("answer", "  "), ("ack", "-"), ("ack", "")):
+        with pytest.raises(SystemExit):
+            cli.main([cmd, "AP-0001", text])
+        assert f"approvals {cmd} AP-0001 '<your line>'" in capsys.readouterr().err
+    assert posted == []
