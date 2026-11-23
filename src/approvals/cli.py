@@ -55,6 +55,12 @@ _ABOUT_ASKED = ("{id} names no thing it decides (\"about\"), so the approver's a
                 "test or process in the pod dashboard. Name the narrowest thing its yes decides, your pod when nothing "
                 "narrower fits: pd tie <id> {id} (pd search <words> finds the id). pd mine asks until you do.")
 
+# A card that sends our words to someone outside the company moves that person's last word and turn in the pod
+# dashboard's record when it is done (approvals done), for each person it names: its "about", or a person tied to it.
+_PERSON_ASKED = ("{id} sends our words outside the company. Name the person it goes to, so its done moves their last "
+                 "word and turn on People: \"about\": \"PER-…\" on the card when its yes is that word to them, else "
+                 "pd tie PER-… {id} (pd search <name> --kind person finds them; pd person new makes one).")
+
 
 def _unnamed_corrections(card, held):
     """The open corrections for the card's type, when its corrections_seen doesn't name every one of them by id;
@@ -343,6 +349,8 @@ def cmd_submit(a):
             _print_corrections(card["type"], unnamed[i - 1], sys.stderr)
         if not card.get("about"):
             print(_ABOUT_ASKED.format(id=posted[-1]["id"]), file=sys.stderr)
+        if card.get("type") in ("email", "reply") and not str(card.get("about") or "").startswith("PER-"):
+            print(_PERSON_ASKED.format(id=posted[-1]["id"]), file=sys.stderr)
     for rec in posted:
         _suggest_names(cards.part_of(rec, rec["versions"][-1]["card"]), rec["id"], channel=channel, test=rec["test"])
 
