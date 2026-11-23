@@ -21,6 +21,7 @@ Contents: [Fields](#fields) · [What goes on the card](#what-goes-on-the-card-an
 | `deadline_hours`, `yes_label`, `no_label` | Optional overrides. Name buttons for what happens ("Release all 3", "Send as you", "Run the read"). |
 | `part_of` | Required. The initiative the card belongs to, in the approver's words for it, or `null` when it stands alone. Shown under the title. Cards with the same name, word for word, share one page and a button to it; `approvals names` lists the names in use, and a card that comes out of an ask of his takes that ask's name. |
 | `about` | Required. The id of the one thing in the pod dashboard the card decides (`"F-21"`, `"X-346"`, your pod's `"POD-4"` only when nothing narrower fits); his answer becomes his decision on that thing's page. `pd search <words>` finds it. A new version keeps it, so a revision can leave it out; a card about another thing is a new card. |
+| `recipients` | Required on an `email` or `reply` card: whom it goes to, one entry each, `[{"place": "email", "handle": "brantzenpoker@gmail.com"}]`, the handle exactly as the place writes it. When the card is done, the pod dashboard's record moves the person whose route is that handle, and asks you about one it can't find. The places, and what each handle is: `email` (the address alone, for anyone who is not a player); `instagram`, `x`, `youtube`, `tiktok`, `facebook`, `reddit`, `slack` (their handle there, alone: on YouTube the channel's, also for a comment under its video; on Reddit `u/name`, or `r/sub` for a post there; in Slack `#channel`); `contact form` (a site that publishes no address: the form's web address); `support ticket` (a provider's own support desk: the ticket's web address or the page it is filed on); `forum` (the thread's web address); `email thread` (a player who wrote to us by email: the thread's id), `player account` (a player who never did, for a new email to their account's address or a text: their account's id in our app), `google play review`, `app store review` (the review's id), `testers' feedback` (whose note and when, or its link): a player's address and phone never go on a card; `mailing` (one email to many: who, in a few words); `other` (none of these fits: where and whom, in a few words; it moves no one's route, and the record counts it so a place that keeps coming up is added to the list). A refusal says what that place's handle is. A new version keeps it, so a revision can leave it out. A card put up before November 22, 2026 has none, and nothing reads one from its words. |
 | `if_no_answer` | What happens if the deadline passes with no answer ("it stops at 72 hours"). Shown with the deadline in the small line under the buttons and on the notification line; told back to you if it expires. |
 | `journey` | For a change to what users see: the user's path today and the path with the change, screen by screen ([how to build one](#a-change-to-what-users-see-the-journey)). One entry for each kind of user, up to 4: `{"who": "…", "steps": [...]}`, or `"places"` in place of `steps`, with optional `"today"` and `"after"` to name the two paths. A step is `{"today": screen, "after": screen, "then": "what the user does next"}`; a screen is `{"image": "/abs/path.png", "label": "what the user sees", "source": "real or mock, which phone and build", "new": true}`. `"after": "same"` repeats today's screen, and `{"ends": "…"}` says in words where a path stops with no screen. A place is `{"name", "today": screen, "after": screen}`. The card shows each entry as a map with a See it big button; the screens also go in the card's thread, full size, in order. |
 | `gallery` | Pictures that aren't a journey (an ad's frames, a chart, a room's art, an email as designed), each `{"image": "/abs/path.png", "label": "…", "note": "…", "mark": [x, y, w, h], "video": "/abs/clip.mp4"}`. The label says what it is: today or after, real or mock, which phone and build (under 150 characters). `mark` outlines what changed, in the picture's pixels; mark the same place on the today picture so the two line up. `video` adds a Play button (a clip of motion). One picture shows full width; two to ten are a swipeable carousel, each slide zoomed onto its mark (or showing the whole picture) with a Full size button. The pictures also go in the card's thread, full size. |
@@ -191,6 +192,7 @@ Four replies to four people, each with their words and yours. One file per card,
  "why": "This person cancelled their trial the day before they were charged the yearly fee, and has waited 14 days for an answer.",
  "part_of": "Answer people waiting on us about a charge",
  "from": "your company address, in their thread",
+ "recipients": [{"place": "email thread", "handle": "19a8c4f2e07b3d61"}],
  "quotes": [{"label": "Their words", "text": "I cancelled my trial yesterday and was still charged for the year."},
             {"label": "Your reply", "text": "Hi,\n\nSorry this sat so long. …\n\nAmir", "edit": true}],
  "facts": [["Why trial users get charged before they can cancel", "the store takes the first payment about 8 hours before a trial ends, and our reminder gives only the date; fixing the reminder is its own card"]],
@@ -233,6 +235,7 @@ Many asks of one kind. One card; a yes covers all, and he can hold some back.
  "part_of": "Poker creators use Poker Skill",
  "facts": [["From", "your company address. The same email to each, with their name and their own link, every link tested on iPhone and Android"]],
  "items": [["River Rat Poker", "Instagram Reels · follow-up"], ["Two Pair Tom", "YouTube vlog"], "The Grind Podcast (Sam)", "…"],
+ "recipients": [{"place": "email", "handle": "riverratpoker@gmail.com"}, {"place": "email", "handle": "tom@twopairtom.com"}, "…"],
  "quotes": [{"label": "The email", "text": "Hi {name}, …"}],
  "yes_label": "Send all 10", "pick_label": "Send {n}",
  "offer": "You've said yes to all 48 creator messages you've answered this month. Stop asking for first emails to creators with a free year of Plus?",
@@ -298,6 +301,7 @@ The chat as it will look, sent as him, with the words his to edit.
  "why": "They said they'd try it, and their free-year link no longer needs an email, so this gets them in today.",
  "part_of": "Poker creators use Poker Skill",
  "from": "your X account",
+ "recipients": [{"place": "x", "handle": "@riverratpoker"}],
  "quotes": [{"label": "River Rat Poker", "note": "Nov 3, 11:29 AM", "text": "Appreciate you setting that up, I'll take a look and see how it works."},
             {"label": "Your reply", "text": "Good news, no email needed anymore. …\n[their own free-year link]\nNo strings on it.", "edit": true, "hint": "Their link goes where the brackets are."}],
  "facts": [["✅ Their link tested", "App Store on iPhone, Google Play on Android"]], "yes_label": "Send as you",
@@ -369,13 +373,14 @@ An ad, video, image or social post going out. The approver judges it by looking:
 
 Words going out publicly as the approver or the brand: a forum or Reddit reply, a review reply, a comment. The approver judges the reply against what it answers: is it right, does it sound like them, and is mentioning the product appropriate?
 
-- **Must include:** two `quotes`. First, what we're answering, with its link. Second, our exact reply.
+- **Must include:** two `quotes`. First, what we're answering, with its link. Second, our exact reply. And `recipients`: whose post, comment or review it answers, as the place writes it. The places: `email` (the address alone, for anyone who is not a player); `instagram`, `x`, `youtube`, `tiktok`, `facebook`, `reddit`, `slack` (their handle there, alone); `contact form` (a site with no address: the form's web address); `support ticket` (a provider's own support desk: the ticket's or its page's web address); `forum` (the thread's web address); for a player, never their address or phone: `email thread` (one who wrote to us by email: the thread's id), `player account` (one who didn't: their account's id in our app), `google play review`, `app store review` (the review's id), `testers' feedback` (whose note and when); `mailing` (one email to many: who, in a few words); `other` (none fits: where and whom, in a few words).
 - **Good facts:** what's already been said in the thread, what was checked, and why this one needs a yes and isn't covered by a standing rule.
 
 ```json
 {"type": "reply", "title": "Post this reply on r/poker as our founder account",
  "why": "People asking how to stop losing are who we're for, and a useful answer from the founder brings them to us.",
  "part_of": "People who ask how to improve find us",
+ "recipients": [{"place": "reddit", "handle": "u/stuckat12"}],
  "quotes": [{"label": "They asked", "text": "I can't afford coaching. What should I study to stop losing at 1/2?", "link": "https://www.reddit.com/r/poker/comments/abc123/", "link_text": "How to stop losing at 1/2", "note": "3 hours ago · 9 comments"},
             {"label": "We'd reply", "text": "Pick one spot you play often and drill only that for a week..."}],
  "facts": [["Already said", "two people recommended books; nobody suggested practicing decisions"],
@@ -515,13 +520,14 @@ Puzzles, lessons or other content going live to players. The approver judges wha
 
 An email or Slack message sent in the approver's name. The approver judges the exact words and who receives them.
 
-- **Must include:** a `quote` with the exact text, and facts for From and To (plus Subject for email).
+- **Must include:** a `quote` with the exact text, facts for From and To (plus Subject for email), and `recipients`: whom it goes to, exactly as the place writes it. The places: `email` (the address alone, for anyone who is not a player); `instagram`, `x`, `youtube`, `tiktok`, `facebook`, `reddit`, `slack` (their handle there, alone); `contact form` (a site with no address: the form's web address); `support ticket` (a provider's own support desk: the ticket's or its page's web address); `forum` (the thread's web address); for a player, never their address or phone: `email thread` (one who wrote to us by email: the thread's id), `player account` (one who didn't: their account's id in our app), `google play review`, `app store review` (the review's id), `testers' feedback` (whose note and when); `mailing` (one email to many: who, in a few words); `other` (none fits: where and whom, in a few words).
 - **Good facts:** what the message answers, and whether a follow-up is planned.
 
 ```json
 {"type": "email", "title": "Send this email as you to our accountants",
  "why": "We need last year's full record, workpapers included, for this year's books.",
  "part_of": null,
+ "recipients": [{"place": "email", "handle": "records@ouraccountants.example"}],
  "quotes": [{"label": "The email", "text": "Hi,\nCould you send us last year's full record, including the workpapers?\nThanks"}],
  "facts": [["From", "your mailbox"], ["To", "our outside accountants"], ["Subject", "Last year's records"]],
  "approves": "sending this exact email once.", "does_not_approve": "follow-ups."}

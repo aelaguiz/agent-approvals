@@ -59,6 +59,7 @@ Every card needs:
 - `why`, one or two sentences on what the business gets and why now;
 - `part_of`, the initiative it belongs to, or `null`;
 - `about`, the id of the one thing in the pod dashboard it decides;
+- `recipients`, on an `email` or `reply` card: whom it goes to, `[{"place": "email", "handle": "brantzenpoker@gmail.com"}]`, the handle exactly as the place writes it, so its done moves the person whose route it is. A player is an id, never their address: their thread's (`"email thread"`), their account's when they never wrote to us (`"player account"`), or their review's; where no listed place fits, `"other"` says where and whom in a few words. `approvals guide email` lists the places;
 - `thread`, optional: the link of the approver's Slack message this card answers, when it came out of a conversation with him;
 - `facts`, a list of `[label, value]` pairs;
 - `approves` and `does_not_approve`, which mark the edges of the yes.

@@ -35,6 +35,63 @@ NEED_TEXT = {
     "table": "a table of today beside proposed",
 }
 
+# Whom an email or reply card's words go to, set by its asker as a field (`recipients`), so the pod dashboard's record
+# can move the person whose route it is when the card is done without reading a word of the card. Each recipient is
+# what a person's route holds there, {"place", "handle"}: the place is one of these, and it says what its handle is,
+# in the words a refusal gives, with the handle's shape. A player's places hold an id, never their address ("a
+# player's address stays off the card and off the row"), so the record tells a player from anyone else by the place
+# alone. "other" is the one stated place for what no listed place fits: its handle says where and whom in a few words,
+# it never matches a route, and the record counts the cards that use it, so a place that keeps appearing there is
+# added here by a person, never guessed. The places were read against every email and reply card of the 30 days to
+# November 22, 2026 (pod-dashboard design/notes/card-recipient-2.md). A card put up before this field has none, and
+# nothing guesses one from its words (its facts, From line or done line).
+RECIPIENT_TYPES = ("email", "reply")
+_ADDRESS = r"[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+"
+_SHAPES = {
+    "address": re.compile(_ADDRESS),
+    "handle": re.compile(r"[@#]?[^@#\s/][^@\s]*"),
+    "web": re.compile(r"[^@\s]+\.[^@\s]+"),
+    "id": re.compile(r"[^@\s]+"),
+    "words": re.compile(r"(?!.*" + _ADDRESS + r")\S(.*\S)?"),
+}
+_ID = "with no spaces and no @: a player's address and phone stay off the card"
+_SOCIAL = ("handle", "their handle there, alone, with no link or spaces (\"@onecardsteve\"; on YouTube the channel's, "
+                     "for a comment under its video too; on Reddit \"u/stuckat12\", or \"r/poker\" for a post there; in "
+                     "Slack \"#release-discussion\")")
+RECIPIENT_PLACES = {
+    "email": ("address", "the address alone, exactly as written (\"brantzenpoker@gmail.com\"), with no name or <>, for "
+                         "anyone who is not a player (a player is \"email thread\" or \"player account\")"),
+    **{place: _SOCIAL for place in ("instagram", "x", "youtube", "tiktok", "facebook", "reddit", "slack")},
+    "contact form": ("web", "the form's web address (\"torneos.poker/contacto\"), for a site that publishes no address"),
+    "support ticket": ("web", "the ticket's web address, or the support page it is filed on "
+                              "(\"fly.io/dashboard/funcountry/support\"), for a provider's own support desk"),
+    "forum": ("web", "the thread's web address (\"forumserver.twoplustwo.com/69/…/40nl-quads-1865594/\")"),
+    "email thread": ("id", "the thread's id in our mailbox (\"1a2032b7d9e29555\"), for a player who wrote to us by "
+                           "email (one who never did is \"player account\", their account's id in our app), " + _ID),
+    "player account": ("id", "their account's id in our app, for a player who never wrote to us by email (a new email "
+                             "to their account's address, a text to their phone), " + _ID),
+    "google play review": ("id", "the review's id (\"97b1cc82-4380-486a-96e6-b2b3e21a292d\"), " + _ID),
+    "app store review": ("id", "the review's id (\"11982735410\"), " + _ID),
+    "testers' feedback": ("words", "whose note and when, in a few words, or its link (\"Colten's note of Nov 22\"), "
+                                   "with no address"),
+    "mailing": ("words", "who, in a few words, with no address (\"Saturday's payers who turned renewal off\"), for one "
+                         "email to many"),
+    "other": ("words", "where and whom, in a few words, with no email address in it (\"Discord, #poker-help, to its "
+                       "moderators\"), for what none of the other places fits; never a player's address or phone: it "
+                       "moves no one's route, and the record counts it, so a place that keeps coming up is added to these"),
+}
+RECIPIENTS_MAX, HANDLE_MAX = 100, 200
+_EXAMPLE = '[{"place": "email", "handle": "brantzenpoker@gmail.com"}]'
+
+
+def _places_help():
+    """Each place and what its handle is, places that share their words named together."""
+    same = {}
+    for place, (_, words) in RECIPIENT_PLACES.items():
+        same.setdefault(words, []).append(f'"{place}"')
+    return "The places, and what each handle is: " + "; ".join(f"{', '.join(ps)}: {w}" for w, ps in same.items())
+
+
 # Slack's limits: a carousel holds 10 cards; a card's title 150 characters and its body 200; a button 75; a pop-up's
 # text box 3,000; a message 50 blocks.
 # A set is several cards posted together, each its own decision.
@@ -164,11 +221,46 @@ def validate(card, revision=False):
         errs.append("evidence must be text, or a list of text items: notes, links, or file paths")
     if revision and not str(card.get("changes", "")).strip():
         errs.append("changes is required on a new version: say what changed from the last one")
+    errs += _validate_recipients(card)
     errs += _validate_shapes(card)
     if not errs and (n := len(card_blocks(_stub(card), 1, "open"))) > BLOCKS_MAX:
         errs.append(f"too much for one card: it needs {n} Slack blocks and a message holds {BLOCKS_MAX}; "
                     "move detail to evidence, or send it as a set of cards, one decision each")
     return errs
+
+
+def _validate_recipients(card):
+    """An email or reply card says whom it goes to; any card that says so says it in the places' shapes. Each refusal
+    says what to write instead, so the asker fixes the card in one more try."""
+    rs = card.get("recipients")
+    if rs is None:
+        if card.get("type") not in RECIPIENT_TYPES:
+            return []
+        return [f"recipients is required on an {card['type']} card: whom it goes to, one entry for each, {_EXAMPLE}, so "
+                "its done moves the person whose route it is. " + _places_help()]
+    if not isinstance(rs, list) or not rs or len(rs) > RECIPIENTS_MAX:
+        return [f"recipients is a list of 1 to {RECIPIENTS_MAX} entries, one for each place it goes, {_EXAMPLE}; "
+                'one email to many is one entry, {"place": "mailing", "handle": "<who, in a few words>"}']
+    errs = []
+    for i, r in enumerate(rs, 1):
+        if not isinstance(r, dict) or set(r) != {"place", "handle"}:
+            errs.append(f'recipient {i} is {{"place": …, "handle": …}} and nothing else, {_EXAMPLE[1:-1]}')
+        elif r["place"] not in RECIPIENT_PLACES:
+            errs.append(f"recipient {i}'s place {r['place']!r} isn't a listed place; where none fits, it is "
+                        f'"other". ' + _places_help())
+        else:
+            shape, words = RECIPIENT_PLACES[r["place"]]
+            h = r["handle"]
+            if not isinstance(h, str) or len(h) > HANDLE_MAX or not _SHAPES[shape].fullmatch(h):
+                errs.append(f"recipient {i}'s handle on {r['place']} is {words}"
+                            + (f"; up to {HANDLE_MAX} characters, and this one is {len(h)}"
+                               if isinstance(h, str) and len(h) > HANDLE_MAX else ""))
+    return errs
+
+
+def recipients_line(card):
+    """Whom the card goes to, as its asker gave it: each handle and its place."""
+    return ", ".join(f"{r['handle']} ({r['place']})" for r in card.get("recipients") or [])
 
 
 def _validate_shapes(card):
@@ -1038,8 +1130,10 @@ def _body(rec, n, mode, compact=False):
     v = rec["versions"][n - 1]
     card = v["card"]
     blocks = []
-    if card.get("from"):
-        blocks.append(md(f"👤 *From {esc(card['from'])}*"))
+    head = ([f"👤 *From {esc(card['from'])}*"] if card.get("from") else []) + (
+        [f"*To:* {esc(recipients_line(card))}"] if card.get("recipients") else [])
+    if head:
+        blocks.append(md("\n".join(head)))
     for q in card.get("quotes") or []:
         if not q.get("button"):
             blocks.append(quote_block(q))

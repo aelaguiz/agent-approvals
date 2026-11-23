@@ -37,6 +37,7 @@ KINDS = {
     "batch": k(
         type="email", title="Send 10 emails as you, each with a free year of Plus", why="What it gets the business, in one sentence.", part_of="Poker creators use Poker Skill",
         facts=[["From", "your company address; the same email to each, with their name and own link"]],
+        recipients=[{"place": "email", "handle": f"creator{i}@example.com"} for i in range(1, 12)],
         items=[["Creator One", "Instagram Reels · follow-up"], ["Creator Two", "YouTube vlog"], "Creator Three", "Creator Four",
                "Creator Five", "Creator Six", "Creator Seven", "Creator Eight", "Creator Nine", "Creator Ten", "Creator Eleven"],
         quotes=[{"label": "The email", "text": "Hi {name},\nHere's your own link to a free year.", "button": "Read the email"}],
@@ -62,7 +63,7 @@ KINDS = {
                {"title": "Google Play, 100%, live in minutes", "note": "QA tried Play's own build against production", "own_yes": True}]),
     "as_you": k(
         type="email", title="Send this X message as you to a creator", why="What it gets the business, in one sentence.", part_of="Poker creators use Poker Skill",
-        **{"from": "your X account"},
+        **{"from": "your X account"}, recipients=[{"place": "x", "handle": "@creator"}],
         quotes=[{"label": "The creator", "note": "Nov 3, 11:29 AM", "text": "Appreciate you setting that up."},
                 {"label": "Your reply", "text": "Good news, no email needed anymore. [their own free-year link]", "edit": True,
                  "hint": "Their link goes where the brackets are."}],

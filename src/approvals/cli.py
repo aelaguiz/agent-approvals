@@ -56,10 +56,12 @@ _ABOUT_ASKED = ("{id} names no thing it decides (\"about\"), so the approver's a
                 "narrower fits: pd tie <id> {id} (pd search <words> finds the id). pd mine asks until you do.")
 
 # A card that sends our words to someone outside the company moves that person's last word and turn in the pod
-# dashboard's record when it is done (approvals done), for each person it names: its "about", or a person tied to it.
-_PERSON_ASKED = ("{id} sends our words outside the company. Name the person it goes to, so its done moves their last "
-                 "word and turn on People: \"about\": \"PER-…\" on the card when its yes is that word to them, else "
-                 "pd tie PER-… {id} (pd search <name> --kind person finds them; pd person new makes one).")
+# dashboard's record when it is done (approvals done), for each person it names: its "about", a person tied to it, or a
+# person whose route is one of its recipients' handles exactly (never one under "other", which matches no route).
+_PERSON_ASKED = ("{id} goes to {to}. When it is done, the record moves the person whose route is that handle (one under "
+                 "\"other\" matches no route); one we "
+                 "carry under another route, or none, is named on the card: \"about\": \"PER-…\" when its yes is that "
+                 "word to them, else pd tie PER-… {id} (pd search <name> --kind person finds them; pd person new makes one).")
 
 
 def _unnamed_corrections(card, held):
@@ -350,7 +352,7 @@ def cmd_submit(a):
         if not card.get("about"):
             print(_ABOUT_ASKED.format(id=posted[-1]["id"]), file=sys.stderr)
         if card.get("type") in ("email", "reply") and not str(card.get("about") or "").startswith("PER-"):
-            print(_PERSON_ASKED.format(id=posted[-1]["id"]), file=sys.stderr)
+            print(_PERSON_ASKED.format(id=posted[-1]["id"], to=cards.recipients_line(card)), file=sys.stderr)
     for rec in posted:
         _suggest_names(cards.part_of(rec, rec["versions"][-1]["card"]), rec["id"], channel=channel, test=rec["test"])
 
@@ -479,10 +481,12 @@ def _revise_as_reply(rid, n, prev, answer):
 
 def cmd_revise(a):
     card = _load_card(a.card)
+    rec = store.load(a.id)
+    if "recipients" not in card and "recipients" in rec["versions"][-1]["card"]:
+        card["recipients"] = rec["versions"][-1]["card"]["recipients"]   # a new version keeps whom it goes to
     errs = cards.validate(card, revision=True)
     if errs:
         _die("Card refused:\n- " + "\n- ".join(errs))
-    rec = store.load(a.id)
     if rec["status"] in ("declined", "done", "withdrawn"):
         _die(f"{a.id} is {rec['status']}; a different proposal is a new card: approvals submit <card.json>.")
     n = len(rec["versions"]) + 1

@@ -16,7 +16,7 @@ SAMPLES = {
     "reply": s(type="reply", title="Post this reply on r/boardgames as our account",
                quotes=[{"label": "They asked", "text": "What book should I read?", "link": "https://reddit.com/r/x", "link_text": "Best books?"},
                        {"label": "We'd reply", "text": "Pause the video & pick your play first <really>."}],
-               facts=[["Checked", "voice check clean"]]),
+               recipients=[{"place": "reddit", "handle": "u/asker"}], facts=[["Checked", "voice check clean"]]),
     "budget": s(type="budget", title="Add $250 to the search ads learning budget",
                 table={"columns": ["Budget", "Today", "After a yes"], "rows": [["Learning cap", "$450", "$700"]]},
                 facts=[["Ends", "when the cap is spent"]]),
@@ -35,6 +35,7 @@ SAMPLES = {
     "content": s(type="content", title="Put 20 daily puzzles live for next month", facts=[["Tested", "all 20 on staging"]]),
     "email": s(type="email", title="Send this email as you to our accountants",
                quotes=[{"label": "The email", "text": "Hi,\nCould you send last year's full record?\nThanks"}],
+               recipients=[{"place": "email", "handle": "books@accountants.example"}],
                facts=[["From", "you@example.com"], ["To", "the accountants"]]),
     "account": s(type="account", title="Delete a player's account, as they asked", facts=[["Asked", "by email, 3 days ago"]]),
 }
