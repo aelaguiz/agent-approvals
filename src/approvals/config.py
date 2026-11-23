@@ -9,8 +9,8 @@ at `hub_url`. ~/.approvals/machine.json names this machine, for every workspace.
 
 Who decides, the team a card can be handed to and whether the team may answer any card are the hub's: from the pod
 dashboard's record when the hub keeps its cards there (record_url), else from the hub's own settings. Every other
-machine asks the hub for them. Each teammate's quiet and working hours stay in the settings of the machine that sends
-the card to them, under its "team" entry with the same Slack user.
+machine asks the hub for them. Each teammate's hours come with the team: from the record, which keeps each person's
+days, working hours and zone (my_hours), or from a "team" entry's quiet and work in a hub's own settings.
 """
 import hashlib
 import hmac
@@ -46,6 +46,7 @@ REQUIRED = ["bot_token_file", "app_token_file"]
 # Who may answer, as the hub holds them: the record's lists, or the hub's own settings.
 LISTS = ("channel", "approver", "approver_name", "approvers", "team", "team_answers_any")
 LISTS_SECONDS = 15
+HOURS = ("quiet", "work", "days", "zone")   # a teammate's hours, which travel with the team to every machine
 SERVING = False   # this process serves the hub (hub.serve), so it holds the lists, never asks for them
 _lists = {}
 _lists_lock = threading.Lock()
@@ -118,10 +119,8 @@ def settings(home=None):
     if home is None:
         held = lists()
         if held is not None:
-            hours = {p.get("user"): p for p in (s.get("team") or {}).values() if isinstance(p, dict)}
             s.update({k: held[k] for k in LISTS if k != "team"})
-            s["team"] = {key: dict(hours.get(held["team"][key]["user"], {}), **held["team"][key])
-                         for key in held.get("team_order") or held["team"]}
+            s["team"] = {key: held["team"][key] for key in held.get("team_order") or held["team"]}
     if os.environ.get("APPROVALS_CHANNEL"):
         s["channel"] = os.environ["APPROVALS_CHANNEL"]
     return s
@@ -139,9 +138,24 @@ def lists():
     with _lists_lock:
         at, held = _lists.get(key, (None, None))
         if at is None or time.monotonic() - at >= LISTS_SECONDS:
-            held = record.who() if record else hub.Client().who()
+            if record:
+                held = record.who()
+                held["team"] = {k: record_hours(p) for k, p in held["team"].items()}
+            else:
+                held = hub.Client().who()
             _lists[key] = (time.monotonic(), held)
         return held
+
+
+def record_hours(person):
+    """A teammate as the record gives them, with the hours it keeps for that person ("hours": days, from, to, zone;
+    null when it keeps none) as the cards use them: working hours from to to, quiet hours to to from, on those days
+    (ISO, 1 = Monday), in that zone."""
+    person = dict(person)
+    h = person.pop("hours", None)
+    if h:
+        person.update(work=[h["from"], h["to"]], quiet=[h["to"], h["from"]], days=h["days"], zone=h["zone"])
+    return person
 
 
 def forget_lists():

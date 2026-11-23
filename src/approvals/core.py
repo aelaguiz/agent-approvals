@@ -5,6 +5,7 @@ import logging
 import re
 import secrets
 from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from . import cards, config, slackapi, store
 
@@ -611,31 +612,40 @@ def _not_callable(rec, n, since=None):
     return None
 
 
-def send_after(now, quiet):
+WEEKDAYS = [1, 2, 3, 4, 5]   # ISO, 1 = Monday: a teammate's days when the hub's own settings keep their hours
+
+
+def _local(dt, zone):
+    return dt.astimezone(ZoneInfo(zone)) if zone else cards.local(dt)
+
+
+def send_after(now, quiet, days=WEEKDAYS, zone=None):
+    """When a message to a teammate may go: None now, else the end of their quiet hours on their next day, in their
+    zone (the workspace's when none is given)."""
     if not quiet:
         return None
     start, end = (time.fromisoformat(t) for t in quiet)
-    local = cards.local(now)
+    local = _local(now, zone)
     clock = local.time()
     overnight = start > end
     in_quiet = (clock >= start or clock < end) if overnight else start <= clock < end
-    if local.weekday() < 5 and not in_quiet:
+    if local.isoweekday() in days and not in_quiet:
         return None
     day = local.date() + timedelta(days=int(overnight and clock >= start))
-    while day.weekday() >= 5:
+    while day.isoweekday() not in days:
         day += timedelta(days=1)
     return store.iso(datetime.combine(day, end, local.tzinfo))
 
 
-def work_after(start, hours, work):
+def work_after(start, hours, work, days=WEEKDAYS, zone=None):
     opens, closes = (time.fromisoformat(t) for t in work)
     if opens >= closes:
         raise ValueError("work must start before it ends on the same day")
-    local = cards.local(start)
+    local = _local(start, zone)
     left = timedelta(hours=hours)
     while left > timedelta(0):
         end = datetime.combine(local.date(), closes, local.tzinfo)
-        if local.weekday() < 5 and local < end:
+        if local.isoweekday() in days and local < end:
             local = max(local, datetime.combine(local.date(), opens, local.tzinfo))
             if left <= end - local:
                 return local + left
@@ -646,9 +656,10 @@ def work_after(start, hours, work):
 
 def add_hand(rec, n, by, person):
     now = store.now()
-    after = send_after(now, person.get("quiet"))
+    days, zone = person.get("days", WEEKDAYS), person.get("zone")
+    after = send_after(now, person.get("quiet"), days, zone)
     due = work_after(store.parse(after) if after else now, config.settings()["handoff_hours"],
-                     person.get("work", ["09:00", "18:00"]))
+                     person.get("work", ["09:00", "18:00"]), days, zone)
     at, return_at = store.iso(now), store.iso(due)
     send = {"version": n, "name": person["name"], "user": person["user"], "why": "", "at": at,
             "send_after": after, "handed": {"by": by, "at": at}, "return_at": return_at}
@@ -806,7 +817,7 @@ def call(rec, what, why, by, live, also=None, urgent=False):
     store.event(rec, "call", version=n, call=what, why=why, by=by, live=live, **extra)
     if also is not None:
         person = team[also]
-        after = send_after(now, person.get("quiet"))
+        after = send_after(now, person.get("quiet"), person.get("days", WEEKDAYS), person.get("zone"))
         send = {"version": n, "name": person["name"], "user": person["user"], "why": why, "at": store.iso(now)}
         if urgent:
             send["urgent"] = True

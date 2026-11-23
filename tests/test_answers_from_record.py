@@ -85,7 +85,7 @@ class FakeRecord:
         s = config.file_settings()
         return {"channel": s["channel"], "approver": s["approver"], "approver_name": s["approver_name"],
                 "approvers": s.get("approvers") or {}, "team_answers_any": s["team_answers_any"],
-                "team": {k: {"user": p["user"], "name": p["name"]} for k, p in s["team"].items()},
+                "team": {k: {"user": p["user"], "name": p["name"], "hours": p.get("hours")} for k, p in s["team"].items()},
                 "team_order": list(s["team"]), "deputy": self.deputy}
 
     def set_deputy(self, d):
@@ -391,20 +391,36 @@ def test_the_summary_shows_the_switch_when_the_record_says_auto_approval_changed
 
 # ---------- who may answer, and the pop-ups ----------
 
-def test_who_may_answer_comes_from_the_record_and_each_teammates_hours_from_the_settings(record, monkeypatch):
+def test_who_may_answer_and_each_teammates_hours_come_from_the_record(record, monkeypatch):
     s = config.file_settings()
-    s["team"]["riley"]["quiet"] = ["18:00", "05:00"]
+    s["team"]["riley"]["quiet"] = ["18:00", "05:00"]   # this machine's own hours for the same person count for nothing
     config.CONFIG.write_text(json.dumps(s))
+    hours = {"name": "Justin", "days": [1, 2, 3, 4, 5], "from": "09:00:00", "to": "18:00:00", "zone": "America/Chicago",
+             "list_at": "12:00:00", "local_now": "2026-01-12T06:00:00-06:00", "inside": False}
     record.who = lambda: {"channel": "CREC", "approver": "UREC", "approver_name": "Amir", "approvers": {},
-                          "team_answers_any": False, "team": {"joey": {"user": "UTEAM2", "name": "Joey"},
-                                                              "justin": {"user": USER, "name": "Justin"}},
+                          "team_answers_any": False, "team": {"joey": {"user": "UTEAM2", "name": "Joey", "hours": None},
+                                                              "justin": {"user": USER, "name": "Justin", "hours": hours}},
                           "team_order": ["justin", "joey"], "deputy": None}
     config.forget_lists()
     held = config.settings()
     assert (held["channel"], held["approver"], held["approver_name"]) == ("CREC", "UREC", "Amir")
     assert list(held["team"]) == ["justin", "joey"]
-    assert held["team"]["justin"] == {"user": USER, "name": "Justin", "quiet": ["18:00", "05:00"]}
+    assert held["team"]["justin"] == {"user": USER, "name": "Justin", "work": ["09:00:00", "18:00:00"],
+                                      "quiet": ["18:00:00", "09:00:00"], "days": [1, 2, 3, 4, 5],
+                                      "zone": "America/Chicago"}
     assert held["team"]["joey"] == {"user": "UTEAM2", "name": "Joey"}
+
+
+def test_a_hand_off_waits_by_the_teammates_hours_in_the_record(hub, record, team):
+    # Riley works Tuesday to Saturday, 10 to 4 in New York; it is Monday 7 am there.
+    team["team"]["riley"]["hours"] = {"days": [2, 3, 4, 5, 6], "from": "10:00", "to": "16:00", "zone": "America/New_York"}
+    config.CONFIG.write_text(json.dumps(team))
+    config.forget_lists()
+    card()
+    carried(hub, record, "hand:riley")
+    _, send = latest()
+    assert send["send_after"] == "2026-01-13T10:00:00-05:00"
+    assert send["return_at"] == "2026-01-13T13:00:00-05:00"
 
 
 def test_each_version_is_kept_with_every_pop_up_its_buttons_open(hub, record):

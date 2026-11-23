@@ -180,7 +180,7 @@ class Handler(BaseHTTPRequestHandler):
                                         "files": bool(store.record()), "record": bool(store.record())})
             if method == "GET" and parts == ["who"]:
                 held = config.settings()
-                team = {key: {"user": p["user"], "name": p["name"]} for key, p in held["team"].items()}
+                team = {key: {k: p[k] for k in ("user", "name") + config.HOURS if k in p} for key, p in held["team"].items()}
                 return self._send(200, {**{k: held[k] for k in config.LISTS}, "team": team, "team_order": list(team)})
             if method == "POST" and parts == ["answers"]:
                 if not self.server.carrier:

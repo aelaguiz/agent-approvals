@@ -389,3 +389,14 @@ def test_a_card_names_what_it_decides_and_the_records_refusal_reaches_its_machin
         dashboard.server_close()
     assert writes[0]["record"]["versions"][0]["card"]["about"] == "X-346"
     assert str(refused.value) == refusal
+
+
+def test_each_teammates_hours_travel_with_the_team_to_every_machine(hubbox):
+    s = json.loads(config.CONFIG.read_text())
+    s["team"] = {"riley": {"user": "UTEAM1", "name": "Riley", "quiet": ["18:00", "09:00"], "work": ["09:00", "18:00"],
+                           "days": [1, 2, 3, 4, 5], "zone": "America/Chicago"},
+                 "morgan": {"user": "UTEAM2", "name": "Morgan"}}
+    s.setdefault("approvers", {})
+    config.CONFIG.write_text(json.dumps(s))
+    team = hub.Client().who()["team"]
+    assert team["riley"] == s["team"]["riley"] and team["morgan"] == s["team"]["morgan"]

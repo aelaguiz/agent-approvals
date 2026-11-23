@@ -156,6 +156,13 @@ def test_a_quiet_window_holds_messages_until_weekday_working_hours(at, due):
     assert core.send_after(now, ["18:00", "05:00"]) == (f"2026-01-{due}:00+00:00" if due else None)
 
 
+def test_a_teammate_whose_days_hold_saturday_gets_messages_then_in_their_own_zone():
+    saturday = store.parse("2026-01-17T15:00:00+00:00")   # 10 am in New York, 9 am in Chicago
+    assert core.send_after(saturday, ["18:00", "10:00"], [1, 2, 3, 4, 5, 6], "America/New_York") is None
+    assert core.send_after(saturday, ["18:00", "10:00"], [1, 2, 3, 4, 5, 6], "America/Chicago") == "2026-01-17T10:00:00-06:00"
+    assert core.send_after(saturday, ["18:00", "10:00"], [1, 2, 3, 4, 5], "America/New_York") == "2026-01-19T10:00:00-05:00"
+
+
 def test_a_teammate_without_a_quiet_window_gets_messages_on_saturday():
     assert core.send_after(store.parse("2026-01-17T11:00:00+00:00"), None) is None
 

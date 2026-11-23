@@ -3,7 +3,7 @@
   "approver": "U0XXXXXXXXX",
   "approver_name": "Sam",
   "team": {
-    "riley": {"user": "UTEAM1", "name": "Riley", "quiet": ["18:00", "05:00"], "work": ["09:00", "18:00"]}
+    "riley": {"user": "UTEAM1", "name": "Riley"}
   },
   "team_answers_any": false,
   "handoff_hours": 3,
