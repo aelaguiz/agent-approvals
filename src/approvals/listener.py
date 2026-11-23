@@ -735,8 +735,14 @@ class Listener:
         """A reply typed into the agent's session and not acknowledged is typed in again ACK_MINUTES after it landed,
         then every ASK_AGAIN_MINUTES, until the agent posts on the card (which acknowledges everything it was sent) or
         the card is withdrawn or done. One waiting for an agent that isn't running is never delivered, so never asked
-        again: it waits for the agent, as answers do."""
-        if rec["status"] in ("withdrawn", "done"):
+        again: it waits for the agent, as answers do.
+
+        Where the pod dashboard's record keeps the cards, the record asks instead, by the rule it holds for every
+        person's line (its said_to, pod-dashboard db/parts/92_card_lines.md): the asker is asked until it posts a line
+        of its own on the card, whether or not the card was withdrawn, done or revised, and one this hub held for a
+        session that isn't running is typed by the record into the asker by its name. So the hub asks nothing again
+        there, and the two never ask the same reply twice."""
+        if store.record() or rec["status"] in ("withdrawn", "done"):
             return
         now = store.now()
         due = {i["ref"] for i in rec.get("outbox", []) if i.get("asks_again") and i.get("delivered_at")

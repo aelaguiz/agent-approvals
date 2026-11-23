@@ -87,3 +87,28 @@ def test_inbox_gives_each_answer_to_one_session(monkeypatch, capsys):
     assert "approved it" in capsys.readouterr().out
     item = store.load("AP-0001")["outbox"][0]
     assert item["delivered_via"] == "inbox" and item["claimed_by"] == "today" and item["delivered_at"]
+
+
+def test_a_reply_not_acknowledged_is_asked_again_at_ten_minutes_then_every_thirty():
+    """Where the hub keeps its cards in its own files; where the pod dashboard's record keeps them, the record asks."""
+    rec = rec_with("feedback")
+    rec["outbox"][0]["delivered_at"] = store.iso(store.now() - timedelta(minutes=11))
+    store.save(rec)
+    L = listener.Listener.__new__(listener.Listener)
+    L.ask_again(store.load("AP-0001"))
+    L.ask_again(store.load("AP-0001"))
+    rec = store.load("AP-0001")
+    asked = rec["outbox"][-1]
+    assert asked["kind"] == "again" and not asked["needs_ack"] and "make it shorter" in asked["text"]
+    assert len(rec["outbox"][0]["asked_again"]) == 1
+    rec["outbox"][0]["asked_again"] = [store.iso(store.now() - timedelta(minutes=31))]
+    store.save(rec)
+    L.ask_again(store.load("AP-0001"))
+    assert len(store.load("AP-0001")["outbox"][0]["asked_again"]) == 2
+    rec = store.load("AP-0001")
+    core.mark_acked(rec)
+    rec["outbox"][0]["asked_again"] = [store.iso(store.now() - timedelta(minutes=31))]
+    store.save(rec)
+    before = len(rec["outbox"])
+    L.ask_again(store.load("AP-0001"))
+    assert len(store.load("AP-0001")["outbox"]) == before

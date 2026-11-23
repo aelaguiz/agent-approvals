@@ -582,27 +582,16 @@ def test_slack_refusing_the_post_refuses_the_comment_in_slacks_words(hub, record
     assert record.rows[0]["refused"] == "not_in_channel" and store.load(RID)["status"] == "pending"
 
 
-def test_a_reply_not_acknowledged_is_asked_again_at_ten_minutes_then_every_thirty(hub, record, slack, monkeypatch):
+def test_where_the_record_keeps_the_cards_the_hub_asks_nothing_again(hub, record, slack, monkeypatch):
+    """The record asks the asker again by its own rule (pod-dashboard db/parts/92_card_lines.md), so the hub doesn't."""
     card()
     posting(slack, monkeypatch)
     carried(hub, record, "comment", words="give me a table by game mode")
-    deliver_reply(minutes_ago=11)
-    hub.ask_again(store.load(RID))
+    deliver_reply(minutes_ago=41)
+    before = len(store.load(RID)["outbox"])
     hub.ask_again(store.load(RID))
     rec = store.load(RID)
-    asked = rec["outbox"][-1]
-    assert asked["kind"] == "again" and not asked["needs_ack"] and not asked.get("to")
-    assert "Asked again" in asked["text"] and "give me a table by game mode" in asked["text"]
-    assert len(reply_item(rec)["asked_again"]) == 1
-    half_hour_ago = [store.iso(store.now() - timedelta(minutes=31))]
-    store.update(RID, lambda r: reply_item(r).update(asked_again=half_hour_ago))
-    hub.ask_again(store.load(RID))
-    assert len(reply_item(store.load(RID))["asked_again"]) == 2
-    store.update(RID, core.mark_acked)
-    before = len(store.load(RID)["outbox"])
-    store.update(RID, lambda r: reply_item(r).update(asked_again=half_hour_ago))
-    hub.ask_again(store.load(RID))
-    assert len(store.load(RID)["outbox"]) == before
+    assert len(rec["outbox"]) == before and "asked_again" not in reply_item(rec)
 
 
 def test_recording_his_answer_acknowledges_what_was_sent(hub, record, slack, monkeypatch):
