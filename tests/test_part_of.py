@@ -13,6 +13,9 @@ CARD = "https://app.basecamp.com/1000001/buckets/111/card_tables/cards/222"
 
 @pytest.fixture
 def posts(monkeypatch):
+    # submit refuses a shell that is no agent's session, so these tests are the session they post from: they pass
+    # in a plain shell as in an agent's, and what submit refuses stays as it is.
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sid-part-of")
     posted = []
     monkeypatch.setattr(slackapi, "post", lambda blocks, text, thread_ts=None, broadcast=False:
                         posted.append(blocks) or f"{100 + len(posted)}.0")
