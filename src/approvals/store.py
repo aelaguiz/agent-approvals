@@ -631,6 +631,14 @@ class Record:
     def delete(self, rid):
         self.call("DELETE", f"/api/cards/{rid}")
 
+    def picture(self, name):
+        """One picture in the record's picture store, by its name there (a comment's, from the pod dashboard)."""
+        try:
+            with urllib.request.urlopen(f"{self.url}/pictures/{name}", timeout=FILE_TIMEOUT) as r:
+                return r.read()
+        except (urllib.error.URLError, OSError) as e:
+            raise StoreError(f"the record ({self.url}) didn't give picture {name}: {e}")
+
     def put_file(self, name, data):
         """Keep one picture or video, named by its sha256 and extension; True when the record has it."""
         req = urllib.request.Request(f"{self.url}/api/cards/files/{name}", data=data, method="PUT",

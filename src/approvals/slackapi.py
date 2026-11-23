@@ -196,6 +196,12 @@ def upload_private_image(path, title):
     return r["file"]["id"]
 
 
+def upload_private_picture(data, name, title):
+    """A picture's bytes uploaded without sharing anywhere; a post shows it through an image block. Its file id."""
+    r = client().files_upload_v2(file=data, filename=name, title=title[:200])
+    return r["file"]["id"]
+
+
 def upload_pictures_to_thread(items, thread_ts, comment, channel_id=None):
     """Post pictures in a thread, in one message: items are (path, title). Slack shows a picture inside a carousel
     card only once it's shared where the card is, so a card's pictures go in its thread, full size, which is also

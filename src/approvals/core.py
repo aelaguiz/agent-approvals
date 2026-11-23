@@ -961,8 +961,9 @@ def add_status(rec, text, kind="done", part=None, headline=None, frame=UNSET):
                 **({"frame": frame} if frame is not UNSET else {}))
 
 
-def take_replies(rec, replies, react_ts=None, by=None):
-    """replies: [(ts, text)] from one person who can answer, oldest first."""
+def take_replies(rec, replies, react_ts=None, by=None, pictures=()):
+    """replies: [(ts, text)] from one person who can answer, oldest first; pictures, the addresses of the pictures
+    that came with them (a comment typed on the pod dashboard), given to the asker with them."""
     texts = [t for _, t in replies]
     last_ts = react_ts or replies[-1][0]
     if rec["status"] in CLOSED:
@@ -987,7 +988,10 @@ def take_replies(rec, replies, react_ts=None, by=None):
         rec["open_question"] = None
     if cards.also_on(rec, n):
         rec["card_dirty"] = True
-    enqueue(rec, kind, msg_replies(rec, kind, texts, q, member), react_ts=last_ts, member=member, by=by)
+    message = msg_replies(rec, kind, texts, q, member)
+    if pictures:
+        message += f" With it, {len(pictures)} picture{'s' if len(pictures) > 1 else ''} of his: {' '.join(pictures)}"
+    enqueue(rec, kind, message, react_ts=last_ts, member=member, by=by)
     said = " / ".join(f'"{one_line(x)}"' for x in texts)
     tell_reviewer(rec, f"{name} replied in the thread: {said}.")
     tell_deputy(rec, f"{name} replied in the thread" + (" after the decision" if member and kind == "comment"

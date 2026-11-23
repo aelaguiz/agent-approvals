@@ -91,6 +91,11 @@ class FakeRecord:
     def set_deputy(self, d):
         self.deputy = d
 
+    url = "http://record.test"
+
+    def picture(self, name):
+        return b"picture " + name.encode()
+
 
 @pytest.fixture
 def record(team, slack, monkeypatch):
@@ -467,6 +472,40 @@ def test_a_comment_is_posted_in_the_thread_and_reaches_the_asker_as_his_reply(hu
     [said] = asker_texts()
     assert "replied on the pod dashboard" in said and "why does this need a backend change?" in said
     assert record.rows[0]["carried"]
+
+
+def test_a_comments_pictures_are_posted_under_his_words_and_given_to_the_asker(hub, record, slack, monkeypatch):
+    """The pod dashboard's comment with pictures (its rule 18.12): each fetched from the record by its name, sent as
+    the hub's own file, shown in the same post under his words; the asker gets each one's address with his reply. A
+    comment of pictures alone has no quote."""
+    card()
+    png, jpg = "a" * 64 + ".png", "b" * 64 + ".jpg"
+    uploads, posts = [], []
+    monkeypatch.setattr(slackapi, "upload_private_picture",
+                        lambda data, name, title: uploads.append((data, name, title)) or f"F{len(uploads)}")
+
+    def post(blocks, text, thread_ts=None, **kw):
+        posts.append((thread_ts, text, blocks))
+        return f"9.{len(posts)}"
+    monkeypatch.setattr(slackapi, "post", post)
+    assert carried(hub, record, "comment", words="this screen", detail={"pictures": [png, jpg]}) is None
+    assert uploads == [(b"picture " + png.encode(), png, "Picture 1"), (b"picture " + jpg.encode(), jpg, "Picture 2")]
+    text = "💬 Sam replied on the card:\n> this screen"
+    assert posts == [("1.1", text, [{"type": "section", "text": {"type": "mrkdwn", "text": text}},
+                                    {"type": "image", "slack_file": {"id": "F1"}, "alt_text": "Picture 1"},
+                                    {"type": "image", "slack_file": {"id": "F2"}, "alt_text": "Picture 2"}])]
+    reply = store.load(RID)["events"][-1]
+    assert (reply["ts"], reply["text"], reply["answer"]) == ("9.1", "this screen", 1)
+    [said] = asker_texts()
+    assert f"With it, 2 pictures of his: http://record.test/pictures/{png} http://record.test/pictures/{jpg}" in said
+    assert carried(hub, record, "comment", words="", detail={"pictures": [png]}) is None
+    assert posts[-1][1] == "💬 Sam replied on the card:" and len(posts[-1][2]) == 2
+
+
+def test_long_words_go_in_sections_slack_takes_whole():
+    text = "\n".join(["a" * 2000, "b" * 2000, "c" * 7000])
+    parts = listener.sections(text)
+    assert all(len(part) <= 2900 for part in parts) and "".join(parts).replace("\n", "") == text.replace("\n", "")
 
 
 def test_a_comment_on_a_decided_card_changes_nothing_about_it(hub, record, slack, monkeypatch):

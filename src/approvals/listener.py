@@ -91,6 +91,24 @@ def reply_text(msg):
     return t[len("[test reply]"):].strip() if t.startswith("[test reply]") else t
 
 
+
+def sections(text, most=2900):
+    """Words in pieces Slack takes as one section each, split between lines; a line longer than that, within it."""
+    parts, part = [], ""
+    for line in text.split("\n"):
+        while len(line) > most:
+            if part:
+                parts.append(part)
+                part = ""
+            parts.append(line[:most])
+            line = line[most:]
+        if part and len(part) + 1 + len(line) > most:
+            parts.append(part)
+            part = line
+        else:
+            part = part + "\n" + line if part else line
+    return [*parts, part] if part else parts
+
 class Listener:
     def __init__(self):
         self.s = config.require()
@@ -907,7 +925,8 @@ class Listener:
         try:
             if via in ("slack", "dashboard"):
                 if what == "comment":
-                    r, follow_up = self.comment(rec, user, words or "", a["id"])
+                    r, follow_up = self.comment(rec, user, words or "", a["id"],
+                                                (a.get("detail") or {}).get("pictures") or [])
                 elif what in ("change", "edit", "items") or what.endswith(":change"):
                     r, follow_up = self.submit(rec, n, what, words or "", user, f"answer:{a['id']}", a.get("items"))
                 else:
@@ -958,22 +977,34 @@ class Listener:
                 log.warning("telling %s that answer %s was refused failed: %s", user, a["id"], e)
         return refused
 
-    def comment(self, rec, user, words, answer_id):
+    def comment(self, rec, user, words, answer_id, pictures=()):
         """A comment typed on the pod dashboard, which is to the asker his reply in the card's thread: posted in the
         thread first, as the line the hub posts for a note from the dashboard, and that post's Slack id is the reply's,
         so 📨 lands on it and the dashboard shows the line once. Then it is a reply like any other, by the card's state.
-        Slack refusing the post refuses the comment, in Slack's words."""
+        Slack refusing the post refuses the comment, in Slack's words.
+
+        His pictures (the pod dashboard's picture store names, up to 10; its rule 18.12) are fetched from the record,
+        sent to Slack as the hub's own files, and shown in the same post under his words; the asker is given each one's
+        address in the record with his reply."""
         rid = rec["id"]
         name = core.answerer(rec, {"by": user, "version": len(rec["versions"])})
-        text = f"💬 {cards.esc(name)} replied on the card:\n{cards.quoted(words)}"
+        text = f"💬 {cards.esc(name)} replied on the card:" + (f"\n{cards.quoted(words)}" if words else "")
         try:
-            ts = slackapi.note(rec["thread_ts"], text, **config.channel_args(rec))
+            if pictures:
+                files = [slackapi.upload_private_picture(store.record().picture(picture), picture, f"Picture {n}")
+                         for n, picture in enumerate(pictures, 1)]
+                blocks = [cards.md(part) for part in sections(text)] + [
+                    cards.picture(file, f"Picture {n}") for n, file in enumerate(files, 1)]
+                ts = slackapi.post(blocks, text, thread_ts=rec["thread_ts"], **config.channel_args(rec))
+            else:
+                ts = slackapi.note(rec["thread_ts"], text, **config.channel_args(rec))
         except Exception as e:
             return (getattr(e, "response", None) or {}).get("error") or str(e), None
+        addresses = [f"{store.record().url}/pictures/{picture}" for picture in pictures]
 
         def apply(r):
             dm = core.conversation_send(r) if user == config.card_target(r)["approver"] else None
-            return core.take_replies(r, [(ts, words)], by=user), dm
+            return core.take_replies(r, [(ts, words)], by=user, pictures=addresses), dm
         kind, dm = store.update(rid, apply)
         log.info("%s: comment from %s on the pod dashboard -> %s", rid, name, kind)
 
