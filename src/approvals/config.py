@@ -27,7 +27,7 @@ ROOT = Path.home() / ".approvals"
 
 def use(home):
     """Point the tool at one Slack workspace's folder: its settings, records and log."""
-    global HOME, REQUESTS, LOGS, LOCK, COUNTER, CONFIG, REVIEWER, DEPUTY, FORKS
+    global HOME, REQUESTS, LOGS, LOCK, COUNTER, CONFIG, REVIEWER, DEPUTY, FORKS, COMMENT_POSTS
     HOME = Path(home)
     REQUESTS = HOME / "requests"
     LOGS = HOME / "logs"
@@ -37,6 +37,7 @@ def use(home):
     REVIEWER = HOME / "reviewer.json"
     DEPUTY = HOME / "deputy.json"
     FORKS = HOME / "forks.json"
+    COMMENT_POSTS = HOME / "comment_posts.json"   # a dashboard comment posted in Slack and not yet written (store)
 
 
 use(os.environ.get("APPROVALS_HOME", ROOT))

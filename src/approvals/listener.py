@@ -981,7 +981,10 @@ class Listener:
         """A comment typed on the pod dashboard, which is to the asker his reply in the card's thread: posted in the
         thread first, as the line the hub posts for a note from the dashboard, and that post's Slack id is the reply's,
         so 📨 lands on it and the dashboard shows the line once. Then it is a reply like any other, by the card's state.
-        Slack refusing the post refuses the comment, in Slack's words.
+        Slack refusing the post refuses the comment, in Slack's words. Posted once: the post's id is kept in the hub's
+        own folder until the write that carries the comment out lands (store.comment_post), so a pass whose write
+        couldn't be made, the record down or the hub restarted between the two, writes it on a later pass with that
+        same post and posts nothing again.
 
         His pictures (the pod dashboard's picture store names, up to 10; its rule 18.12) are fetched from the record,
         sent to Slack as the hub's own files, and shown in the same post under his words; the asker is given each one's
@@ -989,23 +992,31 @@ class Listener:
         rid = rec["id"]
         name = core.answerer(rec, {"by": user, "version": len(rec["versions"])})
         text = f"💬 {cards.esc(name)} replied on the card:" + (f"\n{cards.quoted(words)}" if words else "")
-        try:
-            if pictures:
-                files = [slackapi.upload_private_picture(store.record().picture(picture), picture, f"Picture {n}")
-                         for n, picture in enumerate(pictures, 1)]
-                blocks = [cards.md(part) for part in sections(text)] + [
-                    cards.picture(file, f"Picture {n}") for n, file in enumerate(files, 1)]
-                ts = slackapi.post(blocks, text, thread_ts=rec["thread_ts"], **config.channel_args(rec))
-            else:
-                ts = slackapi.note(rec["thread_ts"], text, **config.channel_args(rec))
-        except Exception as e:
-            return (getattr(e, "response", None) or {}).get("error") or str(e), None
+        ts = store.comment_post(answer_id)
+        if ts is None:
+            try:
+                if pictures:
+                    files = [slackapi.upload_private_picture(store.record().picture(picture), picture, f"Picture {n}")
+                             for n, picture in enumerate(pictures, 1)]
+                    blocks = [cards.md(part) for part in sections(text)] + [
+                        cards.picture(file, f"Picture {n}") for n, file in enumerate(files, 1)]
+                    ts = slackapi.post(blocks, text, thread_ts=rec["thread_ts"], **config.channel_args(rec))
+                else:
+                    ts = slackapi.note(rec["thread_ts"], text, **config.channel_args(rec))
+            except Exception as e:
+                return (getattr(e, "response", None) or {}).get("error") or str(e), None
+            store.keep_comment_post(answer_id, ts)
         addresses = [f"{store.record().url}/pictures/{picture}" for picture in pictures]
 
         def apply(r):
             dm = core.conversation_send(r) if user == config.card_target(r)["approver"] else None
             return core.take_replies(r, [(ts, words)], by=user, pictures=addresses), dm
-        kind, dm = store.update(rid, apply)
+        try:
+            kind, dm = store.update(rid, apply)
+        except store.Refused:   # the record refused the write: the answer is refused, and no pass comes back to it
+            store.forget_comment_post(answer_id)
+            raise
+        store.forget_comment_post(answer_id)
         log.info("%s: comment from %s on the pod dashboard -> %s", rid, name, kind)
 
         def follow_up():

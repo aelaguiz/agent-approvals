@@ -508,6 +508,64 @@ def test_long_words_go_in_sections_slack_takes_whole():
     assert all(len(part) <= 2900 for part in parts) and "".join(parts).replace("\n", "") == text.replace("\n", "")
 
 
+class HubKilled(BaseException):
+    """The hub's process ending mid-pass (a restart): nothing in the hub catches it, and nothing in its memory lives on."""
+
+
+def comment_write_fails_once(record, monkeypatch, failure):
+    """The record's write fails once, between the comment's post and its write, then works."""
+    put = record.put
+
+    def fails(rec, rev=None, media=None):
+        monkeypatch.setattr(record, "put", put)
+        raise failure
+    monkeypatch.setattr(record, "put", fails)
+
+
+def test_a_comment_whose_write_fails_after_its_post_is_posted_once_and_written_on_the_next_pass(hub, record, slack,
+                                                                                               monkeypatch):
+    card()
+    posting(slack, monkeypatch)
+    comment_write_fails_once(record, monkeypatch, store.StoreError("the pod dashboard didn't answer"))
+    aid = taken(record, "comment", words="why does this need a backend change?")
+    with pytest.raises(store.StoreError):
+        hub.carry_waiting()
+    assert len(slack.notes) == 1 and not record.rows[0].get("carried") and store.comment_post(aid) == "9.1"
+    hub.carry_waiting()
+    assert len(slack.notes) == 1 and hub.outcomes[aid] is None and record.rows[0]["carried"]
+    assert store.load(RID)["events"][-1]["ts"] == "9.1" and store.comment_post(aid) is None
+
+
+def test_a_comment_whose_hub_restarts_between_its_post_and_its_write_is_posted_once(record, slack, monkeypatch):
+    card()
+    png = "a" * 64 + ".png"
+    uploads, posts = [], []
+    monkeypatch.setattr(slackapi, "upload_private_picture",
+                        lambda data, name, title: uploads.append(name) or f"F{len(uploads)}")
+    monkeypatch.setattr(slackapi, "post", lambda blocks, text, thread_ts=None, **kw: posts.append(text) or f"9.{len(posts)}")
+    comment_write_fails_once(record, monkeypatch, HubKilled())
+    aid = taken(record, "comment", words="this screen", detail={"pictures": [png]})
+    with pytest.raises(HubKilled):
+        listener.Listener().carry_waiting()
+    assert len(posts) == 1 and not record.rows[0].get("carried")
+    restarted = listener.Listener()   # a new process: nothing of the first one's memory
+    restarted.later = lambda follow_up: follow_up()
+    restarted.carry_waiting()
+    assert len(posts) == 1 and uploads == [png] and restarted.outcomes[aid] is None and record.rows[0]["carried"]
+    reply = store.load(RID)["events"][-1]
+    assert (reply["ts"], reply["text"], reply["answer"]) == ("9.1", "this screen", aid)
+    assert store.comment_post(aid) is None
+
+
+def test_a_comment_whose_write_the_record_refuses_keeps_no_post_for_later(hub, record, slack, monkeypatch):
+    card()
+    posting(slack, monkeypatch)
+    comment_write_fails_once(record, monkeypatch, store.Refused("put_card: refused"))
+    aid = taken(record, "comment", words="hello")
+    hub.carry_waiting()
+    assert hub.outcomes[aid] == "put_card: refused" and record.rows[0]["refused"] and store.comment_post(aid) is None
+
+
 def test_a_comment_on_a_decided_card_changes_nothing_about_it(hub, record, slack, monkeypatch):
     card()
     carried(hub, record, "approve")

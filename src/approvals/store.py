@@ -457,6 +457,26 @@ def local_add_fork(fork, same_as=None):
         return families[fork]
 
 
+# A comment typed on the pod dashboard is posted in the card's Slack thread, then written to the record with that post's
+# id. The id is kept here, in the hub's own folder, from the post until the write lands, so a pass that can't make the
+# write (the record down, the hub restarted between the two) makes it on a later pass with the same post, and posts
+# nothing again. Answer id -> the post's Slack id.
+def comment_post(answer_id):
+    return (_read_role(config.COMMENT_POSTS) or {}).get(str(answer_id))
+
+
+def keep_comment_post(answer_id, ts):
+    with locked():
+        _write_role(config.COMMENT_POSTS, {**(_read_role(config.COMMENT_POSTS) or {}), str(answer_id): ts})
+
+
+def forget_comment_post(answer_id):
+    with locked():
+        posts = _read_role(config.COMMENT_POSTS) or {}
+        if posts.pop(str(answer_id), None) is not None:
+            _write_role(config.COMMENT_POSTS, posts or None)
+
+
 def local_inbox_count(session_id):
     """Count undelivered answers for a recorded session id without handing any out."""
     families = local_forks()
