@@ -231,7 +231,7 @@ def test_closed_codex_resumes_fresh_with_identity_model_effort_and_records_move(
     assert res.status == "delivered"
     ran = fake.resumes()[0][-1]
     assert 'PATH="$HOME/.local/share/agent-identity/bin:$PATH"' in ran
-    assert "BASECAMP_PROFILE=demo-eng" in ran
+    assert "BASECAMP_PROFILE=demo-eng" not in ran
     assert "APPROVALS_FROM='Demo Eng'" in ran
     assert "GIT_AUTHOR_NAME='Demo Eng (agent)'" in ran
     assert f"aim codex resume-fresh {SID_A} -- -m gpt-6.2-sol -c 'model_reasoning_effort=\"xhigh\"'" in ran
@@ -299,7 +299,7 @@ def test_closed_agy_resumes_with_identity_model_effort_and_enter_trust(monkeypat
     res = router.deliver(reach_rec, "reply (ref r4)", "r4", run=wrapped, sleep=lambda _: None, clock=iter(range(1000)).__next__)
     assert res.status == "delivered"
     ran = [c[-1] for c in fake.calls if c[:2] == ["pane", "run"] and "agy --conversation" in c[-1]][0]
-    assert "BASECAMP_PROFILE=demo-lead" in ran
+    assert "BASECAMP_PROFILE=demo-lead" not in ran
     assert "APPROVALS_FROM='Demo Lead'" in ran
     assert f"agy --conversation {SID_A} --model gemini-4-neon --effort xhigh --dangerously-skip-permissions" in ran
     assert ["pane", "send-keys", "w1:p9", "Enter"] in fake.calls

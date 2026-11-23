@@ -322,7 +322,7 @@ def cmd_submit(a):
     loaded = [_load_card(p) for p in a.card]
     threads = []
     for i, card in enumerate(loaded, 1):
-        errs = cards.validate(card) + ([cards.BASECAMP_GONE] if a.basecamp and "basecamp" not in card else [])
+        errs = cards.validate(card)
         link = getattr(a, "thread", None) or card.get("thread")
         thread = None
         if link is not None:
@@ -1161,8 +1161,6 @@ def main(argv=None):
     s.add_argument("--agent", help="your agent name, as the approver knows it (e.g. Monetization)")
     s.add_argument("--test", action="store_true", help=argparse.SUPPRESS)
     s.add_argument("--deadline-minutes", type=int, help=argparse.SUPPRESS)
-    s.add_argument("--basecamp", action="append", metavar="URL",
-                   help="refused: a card names the pod dashboard's thing it decides in \"about\" instead")
     s.set_defaults(fn=cmd_submit)
 
     s = sub.add_parser("ask", help="ask the approver one question in the request's thread")
