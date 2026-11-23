@@ -120,3 +120,33 @@ def test_a_refusal_shows_what_to_write_instead(recipients):
     c = card("email", recipients=recipients) if recipients is not None else card("email")
     errs = cards.validate(c)
     assert errs and any('"place": "email", "handle": "brantzenpoker@gmail.com"' in e or '"other"' in e for e in errs), errs
+
+
+# ---------- where his words go, on the card's one line ----------
+
+def test_every_place_says_where_on_the_cards_line():
+    assert set(cards.PLACE_LABELS) == set(cards.RECIPIENT_PLACES)
+
+
+def rec_of(c):
+    return {"id": "AP-0001", "agent": "Social lead", "status": "pending", "versions": [{"n": 1, "card": c}]}
+
+
+def test_a_message_on_x_filed_as_an_email_says_on_x_not_email_on_its_line():
+    """AP-2251: an email card whose yes sends a message on X read ✉️ on his phone. Its line now says where from its
+    recipients' place; a card naming none keeps its type's emoji."""
+    on_x = card("email", title="Point El Riviera to Analysis", recipients=[{"place": "x", "handle": "@ElRivieraPoker"}])
+    assert cards.card_text(rec_of(on_x), 1).startswith("💬 On X · Social lead: Point El Riviera to Analysis")
+    old = card("email", title="An email from before")
+    assert cards.card_text(rec_of(old), 1).startswith("✉️ Social lead: An email from before")
+    review = card("reply", title="Thank a reviewer", recipients=[{"place": "app store review", "handle": "11982735410"}])
+    assert cards.card_text(rec_of(review), 1).startswith("⭐ On the App Store · Social lead:")
+
+
+def test_a_card_to_several_places_names_each_once_under_one_mark():
+    same = card("email", recipients=[{"place": "email", "handle": "a@b.co"}, {"place": "email", "handle": "c@d.co"},
+                                     {"place": "email thread", "handle": "1a2032b7d9e29555"}])
+    assert cards.kind_mark(same) == "✉️ Email · Email to a player ·"
+    mixed = card("reply", recipients=[{"place": "instagram", "handle": "@a"}, {"place": "forum", "handle": "x.co/t"},
+                                      {"place": "email", "handle": "a@b.co"}])
+    assert cards.kind_mark(mixed) == "💬 On Instagram · On a forum · Email ·"

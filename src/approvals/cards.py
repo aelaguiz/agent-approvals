@@ -81,6 +81,31 @@ RECIPIENT_PLACES = {
                        "moves no one's route, and the record counts it, so a place that keeps coming up is added to these"),
 }
 RECIPIENTS_MAX, HANDLE_MAX = 100, 200
+# Where a card that names recipients sends his words, as its notification line and the daily list say it in place of
+# its type's emoji: each place's mark and words. A type's emoji names one channel (✉️ for every `email` card), and an
+# asker files a message as him on X as an email card, since no type fits it: AP-2251 read ✉️ for a message on X. The
+# place is the asker's own field, so the line says where from that, and a card naming none keeps its type's emoji.
+# The pod dashboard's tag uses the same words (its approval_tabs.toml, recipient_place).
+PLACE_LABELS = {
+    "email": ("✉️", "Email"),
+    "email thread": ("✉️", "Email to a player"),
+    "player account": ("💬", "To a player's account"),
+    "mailing": ("✉️", "Mailing"),
+    "instagram": ("💬", "On Instagram"),
+    "x": ("💬", "On X"),
+    "youtube": ("💬", "On YouTube"),
+    "tiktok": ("💬", "On TikTok"),
+    "facebook": ("💬", "On Facebook"),
+    "reddit": ("💬", "On Reddit"),
+    "slack": ("💬", "In Slack"),
+    "contact form": ("📝", "Through a site's form"),
+    "support ticket": ("🎫", "Support ticket"),
+    "forum": ("💬", "On a forum"),
+    "google play review": ("⭐", "On Google Play"),
+    "app store review": ("⭐", "On the App Store"),
+    "testers' feedback": ("💬", "In testers' feedback"),
+    "other": ("💬", "Somewhere else"),
+}
 _EXAMPLE = '[{"place": "email", "handle": "brantzenpoker@gmail.com"}]'
 
 
@@ -256,6 +281,16 @@ def _validate_recipients(card):
                             + (f"; up to {HANDLE_MAX} characters, and this one is {len(h)}"
                                if isinstance(h, str) and len(h) > HANDLE_MAX else ""))
     return errs
+
+
+def kind_mark(card):
+    """What a card's one line starts with: where its words go, by its recipients' places (each once, the mark they
+    share or 💬 where they differ, then their words; a place not listed as written), else its type's emoji."""
+    labels = [PLACE_LABELS.get(p, ("💬", p)) for p in dict.fromkeys(r["place"] for r in card.get("recipients") or [])]
+    if not labels:
+        return TYPES[card["type"]]["emoji"]
+    marks = {mark for mark, _ in labels}
+    return f"{marks.pop() if len(marks) == 1 else '💬'} {' · '.join(words for _, words in labels)} ·"
 
 
 def recipients_line(card):
@@ -1674,7 +1709,7 @@ def question_blocks(rec, question):
 def card_text(rec, n):
     """The message's own text: the one line an iPhone notification shows."""
     card = rec["versions"][n - 1]["card"]
-    text = f"{TYPES[card['type']]['emoji']} {rec['agent']}: {card['title']}" + (f" ({version_label(n)})" if n > 1 else "")
+    text = f"{kind_mark(card)} {rec['agent']}: {card['title']}" + (f" ({version_label(n)})" if n > 1 else "")
     if set_pos(rec):
         text += f" · {set_pos(rec)}"
     if card.get("parts") and (left := len(open_rows(rec, card))) and rec.get("status") not in ("withdrawn", "done"):

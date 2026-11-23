@@ -159,7 +159,7 @@ def _row_buttons(base, j, p, named):
 def _line(rec, day, detail=None, team=False):
     """The card, linked, then one gray line; a card waiting on the approver's answer gets its buttons under them. A
     card no longer waiting is struck through."""
-    emoji = cards.TYPES[rec["versions"][-1]["card"]["type"]]["emoji"]
+    emoji = cards.kind_mark(rec["versions"][-1]["card"])
     link = f"<{slackapi.message_url(rec['thread_ts'], **config.channel_args(rec))}|{rec['id']}>"
     if team and cards.handed(rec):
         send = cards.also_on(rec, len(rec["versions"]))

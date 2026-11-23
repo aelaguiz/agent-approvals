@@ -309,3 +309,17 @@ def test_a_list_that_fills_its_room_exactly_still_fits_with_its_headline(slack):
     digest.tick(MON_8AM)
     blocks, _ = posted[0]
     assert len(blocks) <= 50 and "more. Answer some" in text_of(blocks)
+
+
+def test_a_cards_line_says_where_its_words_go_from_its_recipients(slack):
+    """AP-2251: an email card whose yes sends a message on X is listed under 💬 On X, not ✉️; one naming no recipients
+    keeps its type's emoji."""
+    posted, _ = slack
+    on_x = card(1, type="email")
+    on_x["versions"][0]["card"]["recipients"] = [{"place": "x", "handle": "@ElRivieraPoker"}]
+    store.save(on_x)
+    card(2, type="email")
+    digest.tick(MON_8AM)
+    lines = text_of(posted[0][0])
+    assert "💬 On X · <" in lines and "|AP-0001>" in lines.split("💬 On X · ")[1].split("\n")[0]
+    assert "✉️ <" in lines and "|AP-0002>" in lines.split("✉️ ")[1].split("\n")[0]
