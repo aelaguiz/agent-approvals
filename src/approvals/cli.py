@@ -53,7 +53,7 @@ def _suggest_names(name, rid=None, **where):
 # here, and again by the pod dashboard (pd mine) until it names one.
 _ABOUT_ASKED = ("{id} names no thing it decides (\"about\"), so the approver's answer on it will show on no feature, "
                 "test or process in the pod dashboard. Name the narrowest thing its yes decides, your pod when nothing "
-                "narrower fits: pd tie <id> {id} (pd search <words> finds the id). pd mine asks until you do.")
+                "narrower fits: pd tie <id> {id} (pd search <its name> finds the id). pd mine asks until you do.")
 
 # A card that sends our words to someone outside the company moves that person's last word and turn in the pod
 # dashboard's record when it is done (approvals done), for each person it names: its "about", a person tied to it, or a
