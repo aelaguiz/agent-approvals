@@ -506,15 +506,24 @@ def test_the_same_agents_newest_other_session_is_where_it_runs_now():
     assert core.successor(old, [old] + others[3:]) is None
 
 
-def test_a_name_joins_two_sessions_only_as_far_as_who_gave_it_can_be_trusted():
+SEAT = {"pod_command": "/Users/sam/work/pod", "herdr_session": "pods", "pod": "social", "copy": "instagram"}
+
+
+def test_a_pod_member_is_its_tab_and_anyone_else_is_known_by_a_name_only_from_its_folder():
     at, later = "2026-11-13T03:43:16+00:00", "2026-11-15T04:06:00+00:00"
     work = MEMBER + "/work/2026-11-11-a-job"
-    # A member raises a card from a work folder; its launcher's name is the member's wherever a command runs
-    card = make_rec(SAMPLES["money"], reach=seen_as("s-old", "mini-1", at, cwd=work))
-    typed = make_rec(SAMPLES["money"], id="AP-0002", reach=seen_as("s-new", "m3-max", later))
-    by_launcher = make_rec(SAMPLES["money"], id="AP-0003", reach=seen_as("s-new", "m3-max", later, named_by_launcher=True))
-    assert core.successor(card, [card, typed]) is None                # the same typed name from another folder: not enough
-    assert core.successor(card, [card, by_launcher])["session_id"] == "s-new"
+    # A member raises a card from a work folder; the session in its tab later, on any machine, is the member
+    card = make_rec(SAMPLES["money"], reach=seen_as("s-old", "mini-1", at, cwd=work, seat=SEAT))
+    in_its_tab = make_rec(SAMPLES["money"], id="AP-0002", reach=seen_as("s-new", "m3-max", later, seat=dict(SEAT, pod_command="/x/pod")))
+    # The same launcher's name, in its folder: a chat opened there, or the role's second copy, in a tab of its own
+    chat = make_rec(SAMPLES["money"], id="AP-0003", reach=seen_as("s-chat", "mini-1", later))
+    copy_2 = make_rec(SAMPLES["money"], id="AP-0004", reach=seen_as("s-two", "mini-1", later, seat=dict(SEAT, copy="instagram-2")))
+    assert core.successor(card, [card, chat, copy_2]) is None
+    assert core.successor(card, [card, chat, copy_2, in_its_tab])["session_id"] == "s-new"
+    # Another agent's name counts only from the same folder, and never joins a pod member's session
+    typed = make_rec(SAMPLES["money"], reach=seen_as("s-old", "mini-1", at, cwd=work))
+    elsewhere = make_rec(SAMPLES["money"], id="AP-0002", reach=seen_as("s-new", "m3-max", later))
+    assert core.successor(typed, [typed, elsewhere, in_its_tab]) is None
     # A name nobody gave is the folder's own, which every session that runs a command there shares
     root = "/Users/sam/work"
     unnamed = make_rec(SAMPLES["money"], reach=seen_as("s-old", "mini-1", at, agent="work", cwd=root))

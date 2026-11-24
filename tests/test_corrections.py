@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from approvals import cli, hub, reader, store
+from approvals import cli, hub, pods, reader, store
 from test_kinds import slack  # noqa: F401
 
 OPEN = [{"id": "C-6", "title": "Say what the money buys", "says": "The last two budget cards said how much.\nNot what for."},
@@ -61,7 +61,7 @@ def test_read_says_so_before_any_reader_when_the_corrections_cant_be_read(monkey
 
 def test_submit_sends_the_corrections_named_with_the_card_and_who_put_it_up(held, monkeypatch, tmp_path, capsys, slack):
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "fixture")
-    monkeypatch.setattr(cli, "_herdr_name", lambda: "product-bots")
+    monkeypatch.setattr(pods, "here", lambda: {"pod": "product", "copy": "bots"})
     path = tmp_path / "card.json"
     path.write_text(json.dumps(CARD | {"corrections_seen": ["C-6", "C-9"]}))
     cli.main(["submit", str(path)])

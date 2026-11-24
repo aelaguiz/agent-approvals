@@ -16,7 +16,7 @@ def test_capture_detects_antigravity_and_keeps_claude_codex_order(monkeypatch):
     monkeypatch.setenv("ANTIGRAVITY_CONVERSATION_ID", SID_A)
     monkeypatch.setenv("APPROVALS_FROM", "Team Lead")
     got = reach.capture()
-    assert (got["runtime"], got["session_id"], got["agent"], got["named_by_launcher"]) == ("agy", SID_A, "Team Lead", True)
+    assert (got["runtime"], got["session_id"], got["agent"]) == ("agy", SID_A, "Team Lead")
 
     monkeypatch.setenv("CODEX_THREAD_ID", SID_B)
     assert reach.capture()["runtime"] == "codex"

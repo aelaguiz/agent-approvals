@@ -702,8 +702,9 @@ def test_each_role_is_delivered_its_own_messages_and_takes_only_its_own_from_the
     L.deliver_one("AP-0001", dep)
     rec = store.load("AP-0001")
     assert typed == ["sid-dep"] and rec["reach"]["session_id"] == "sid-a" and rec["moves"] == []
+    assert store.deputy()["reach"]["session_id"] == "sid-dep-2"   # the role went with its agent's new session
     store.update("AP-0001", lambda r: r["outbox"][2].update(delivered_at=None))
-    for sid, has, hasnt in (("sid-dep", "Sam declined it", "which you review"), ("sid-cfo", "which you review", "First acknowledge"),
+    for sid, has, hasnt in (("sid-dep-2", "Sam declined it", "which you review"), ("sid-cfo", "which you review", "First acknowledge"),
                             ("sid-a", "First acknowledge", "which you review")):
         as_session(monkeypatch, sid, agent={"sid-a": "Tester"}.get(sid, "x"))
         cli.cmd_inbox(SimpleNamespace(agent=None, all=False))

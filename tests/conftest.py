@@ -21,11 +21,12 @@ def tmp_home(tmp_path, monkeypatch):
     monkeypatch.delenv("APPROVALS_TEST_APPROVER", raising=False)
     monkeypatch.delenv("APPROVALS_TEST", raising=False)
     monkeypatch.delenv("APPROVALS_FROM", raising=False)   # a pod member's own name would name every test's asker
+    monkeypatch.delenv("HERDR_PANE_ID", raising=False)    # nor ask the real ./pod which pod member's tab this is
     monkeypatch.setenv("APPROVALS_MACHINE", "testbox")
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-made-up")
     from approvals import config
     importlib.reload(config)
-    for mod in ("store", "cards", "core", "reach", "router", "listener", "hub"):
+    for mod in ("store", "cards", "pods", "core", "reach", "router", "listener", "hub"):
         importlib.reload(importlib.import_module(f"approvals.{mod}"))
     from approvals import router, slackapi
     from slack_sdk import WebClient

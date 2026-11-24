@@ -788,10 +788,14 @@ class Listener:
         res = router.deliver(reach, item["text"], ref, request_id=rid, resume=False, confirm=False)
         log.info("%s %s%s: %s (%s); saving took %.1fs, typing %.1fs", rid, ref, f" ({to})" if to else "", res.status,
                  res.reason, saved - start, time.monotonic() - saved)
-        if res.status == "waiting" and not to and self.follow(rec, ref):
+        if res.status == "waiting" and not to and self.follow(dict(rec, reach={**reach, **res.reach}), ref):
             return
         sid = res.reach.get("session_id")
         if to:
+            now = {"reviewer": store.reviewer, "deputy": store.deputy}[to]()
+            if sid and sid != reach.get("session_id") and now and now["reach"].get("session_id") == reach.get("session_id"):
+                # The role's member runs in a new session in its tab now, so the role is that session's.
+                {"reviewer": store.set_reviewer, "deputy": store.set_deputy}[to](dict(now, reach={**reach, **res.reach}))
             res.reach, res.moves = {}, []   # where the reviewer or the deputy is moves nothing of the asker's
         self.record(rid, ref, res)
         if res.status == "sent":

@@ -13,7 +13,7 @@ from contextlib import ExitStack
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import cards, config, core, journey, pictures, reach, reader, slackapi, store, transcripts
+from . import cards, config, core, journey, pictures, pods, reach, reader, slackapi, store, transcripts
 
 
 def _load_card(path):
@@ -763,7 +763,7 @@ def cmd_note(a):
     the approver may answer before it lands."""
     rv = store.reviewer()
     me = reach.capture()
-    if not rv or not me["session_id"] or me["session_id"] != rv["reach"].get("session_id"):
+    if not rv or not me["session_id"] or not _holds(rv, me, store.set_reviewer):
         _die("Only the reviewer's own session can post a note" + (f", and that is {rv['reach']['agent']}'s session. If this "
              f"session has taken over its work, run `approvals review --types {','.join(rv['types'])}` here first." if rv else
              "; no session reviews cards now."))
@@ -831,7 +831,7 @@ def cmd_call(a):
     shown on the card either way; an approve is his yes only when auto-approval is on."""
     d = store.deputy()
     me = reach.capture()
-    if not d or not me["session_id"] or me["session_id"] != d["reach"].get("session_id"):
+    if not d or not me["session_id"] or not _holds(d, me, store.set_deputy):
         _die("Only the deputy's own session can make a call" + (f", and that is {d['reach']['agent']}'s session. If this "
              f"session has taken over its work, run `approvals deputy --agent \"{d['reach']['agent']}\"` here first." if d else
              "; nobody is the deputy now."))
@@ -1008,8 +1008,8 @@ def cmd_inbox(a):
         return
     me = reach.capture(a.agent)
     shown = 0
-    roles = {to: bool(role and me.get("session_id")) and me["session_id"] == role["reach"].get("session_id")
-             for to, role in (("reviewer", store.reviewer()), ("deputy", store.deputy()))}
+    roles = {to: bool(role and me.get("session_id")) and _holds(role, me, put)
+             for to, role, put in (("reviewer", store.reviewer(), store.set_reviewer), ("deputy", store.deputy(), store.set_deputy))}
 
     def take(rec, own, theirs):
         """The answers taken; printed once the record is saved, since a change can be made more than once. The
@@ -1032,11 +1032,12 @@ def cmd_inbox(a):
     for rec in store.waiting_records():
         r = rec.get("reach") or {}
         same_family = store.same_family(r.get("session_id"), me.get("session_id"))
-        own = bool(me.get("session_id")) and same_family and me["session_id"] in [r.get("session_id"), *r.get("earlier_ids", [])]
+        own = bool(me.get("session_id")) and same_family and (me["session_id"] in [r.get("session_id"), *r.get("earlier_ids", [])]
+                                                             or reach.is_agent(r, me))
         waiting = any(not i.get("delivered_at") and not i.get("seen_by_agent") for i in rec.get("outbox", []))
         if not own and waiting and me.get("session_id") and me.get("runtime") == r.get("runtime") and me.get("cwd") == r.get("cwd"):
             own = transcripts.is_copy(r.get("runtime"), r.get("session_id"), me["session_id"], rec["id"])   # it continues the asker
-        theirs = a.all or (same_family and (own or r.get("agent") == me["agent"]))
+        theirs = a.all or (same_family and (own or not (r.get("seat") or me.get("seat")) and r.get("agent") == me["agent"]))
         if theirs or any(roles.values()):
             taken = store.update(rec["id"], lambda x, own=own, theirs=theirs: take(x, own or a.all, theirs))
             for text, react_ts in taken:
@@ -1128,21 +1129,19 @@ POSTS = {"submit", "ask", "revise", "answer", "ack", "done", "withdraw", "record
          "deputy", "call", "pictures"}
 
 
-def _herdr_name():
-    """The Herdr name of the agent running this command, the name the pod dashboard knows it by, or None."""
-    pane = os.environ.get("HERDR_PANE_ID")
-    if os.environ.get("HERDR_ENV") != "1" or not pane:
-        return None
-    try:
-        result = subprocess.run(["herdr", "agent", "list"], capture_output=True, timeout=10)
-        agents = json.loads(result.stdout)["result"]["agents"]
-    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError):
-        return None
-    return next((agent.get("name") for agent in agents if agent["pane_id"] == pane), None)
+def _holds(role, me, put):
+    """True when session `me` holds the reviewer's or deputy's role: it is the role's session, or the pod member the
+    role was taken by, running in its tab now, which then takes the role over."""
+    if me["session_id"] == role["reach"].get("session_id"):
+        return True
+    if not reach.is_agent(role["reach"], me):
+        return False
+    put(dict(role, reach=dict(me, agent=role["reach"].get("agent"))))
+    return True
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(prog="approvals", description="Ask for approval as a Slack card; the answer comes back into this session.")
+    p = argparse.ArgumentParser(prog="approvals", description="Ask for approval as a Slack card; the answer comes back to you: into this session, or for a pod member, into whatever session runs in its tab.")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("guide", help="before writing a card: the open corrections for its type, then how to write it")
@@ -1234,12 +1233,12 @@ def main(argv=None):
     s.add_argument("--same-as", help="an earlier session id of this fork")
     s.set_defaults(fn=cmd_fork)
 
-    s = sub.add_parser("repoint", help="send the answers of every open request asked from session OLD to session NEW, which has taken over its work (a pod restore runs this)")
+    s = sub.add_parser("repoint", help="send the answers of every open request asked from session OLD to session NEW, which has taken over its work; a pod member needs none, its tab decides")
     s.add_argument("old")
     s.add_argument("new")
     s.set_defaults(fn=cmd_repoint)
 
-    s = sub.add_parser("review", help="make this session the one reviewer of every card of some types; again from a new session moves it there")
+    s = sub.add_parser("review", help="make this session the one reviewer of every card of some types; again from a new session moves it there (a pod member's stays with its tab)")
     s.add_argument("--types", help="comma-separated card types, e.g. budget,purchase,money")
     s.add_argument("--agent", help="your name, as the approver knows you (e.g. CFO)")
     s.add_argument("--off", action="store_true", help="nobody reviews")
@@ -1251,7 +1250,7 @@ def main(argv=None):
     s.set_defaults(fn=cmd_note)
 
     s = sub.add_parser("deputy", help="make this session the deputy, which hears every card and makes its own call on each; "
-                                      "again from a new session moves it there; alone, says who is")
+                                      "again from a new session moves it there (a pod member's stays with its tab); alone, says who is")
     g = s.add_mutually_exclusive_group()
     g.add_argument("--agent", help="your name, as the approver knows you (e.g. Executive pod · approver)")
     g.add_argument("--off", action="store_true", help="nobody is the deputy")
@@ -1338,7 +1337,7 @@ def main(argv=None):
         if a.cmd in {"ask", "revise", "answer", "ack", "done", "withdraw", "record", "status", "note", "show", "pictures"}:
             rec = store.load(a.id)
             config.card_target(rec)
-        store.ACTOR.set(_herdr_name())
+        store.ACTOR.set(pods.name(pods.here()))   # who acts, as the pod dashboard knows it: a pod member, by its tab
         a.fn(a)
     except (store.StoreError, config.ConfigError) as e:
         _die(str(e))

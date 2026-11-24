@@ -1,4 +1,5 @@
-"""Getting a message into the agent session that asked, resuming it through AI Manager when it's closed."""
+"""Getting a message into the agent that asked: a pod member in its tab, any other session where it runs, resuming
+that session through AI Manager when it's closed and the caller asks for that."""
 import json
 import os
 import shlex
@@ -6,7 +7,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 
-from . import config, store, transcripts
+from . import config, pods, store, transcripts
 
 CONFIRM_SECONDS = 90
 READY_SECONDS = 180
@@ -280,6 +281,8 @@ def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sl
             popen=None, resume=True, confirm=True, needle=None):
     """Type `text` into the session that asked. With resume=False a session that isn't running is left alone:
     the answer waits for it. Approvals answers that way; agent-email resumes, so its replies reach a closed session.
+    A pod member is never resumed or started: whatever session runs in its tab now is the member (pods.py) and gets
+    it, and with nothing running there it waits, since a session started anywhere else would be a second copy of it.
     With confirm=False it returns "sent" once the text is typed, and the caller watches the transcript itself.
     When `needle` is set, transcript confirmation looks for that string instead of approvals' `(ref <ref>)` form."""
     runtime, sid = reach.get("runtime"), reach.get("session_id")
@@ -294,7 +297,25 @@ def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sl
 
     moves = []
     updates = {}
-    live = live_askers(reach, request_id, run=run)
+    seat = pods.of(reach)
+    if seat:
+        try:
+            tab = pods.now(seat)
+        except pods.Unreadable as e:
+            return Result("retry", f"couldn't read who runs in its tab: {e}")
+        if not tab:
+            return Result("waiting", "nothing is running in its tab", reach={"seat": seat})
+        found, pane = tab
+        hs = seat.get("herdr_session") or reach.get("herdr_session") or config.settings()["default_herdr_session"]
+        found = found or session_in_pane(Herdr(hs, run=run), pane, runtime)
+        if not found:
+            return Result("retry", "couldn't read which session runs in its tab")
+        if not store.same_family(sid, found):
+            return Result("waiting", "its tab holds a session of another fork family", reach={"seat": seat})
+        updates["seat"] = seat
+        live = [(found, hs, pane)]
+    else:
+        live = live_askers(reach, request_id, run=run)
     working = [x for x in live if not transcripts.stopped_for_usage(runtime, x[0])]
     found, hs, pane = working[0] if working else (None, None, None)
     if found and found != sid:
@@ -309,9 +330,9 @@ def deliver(reach, text, ref, request_id=None, run=subprocess.run, sleep=time.sl
             return Result("retry", STOPPED, moves=moves)
         h.send(pane, text)
         if pane != reach.get("herdr_pane") or hs != reach.get("herdr_session"):
-            updates = {"herdr_session": hs, "herdr_pane": pane, "herdr_workspace": pane.split(":")[0], "herdr_tab": None}
+            updates.update(herdr_session=hs, herdr_pane=pane, herdr_workspace=pane.split(":")[0], herdr_tab=None)
     else:
-        if not resume:
+        if not resume or seat:
             if live:   # running, but stopped at its usage limit
                 return Result("retry", STOPPED, moves=moves)
             return Result("waiting", "its session isn't running", moves=moves)
