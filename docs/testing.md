@@ -8,6 +8,8 @@
 - 20 processes submitting at once and getting distinct numbers;
 - the first button press winning, and old versions refusing;
 - replies sorted into feedback, an answer or a comment, including replies on declined and withdrawn cards;
+- a decline tells the agent to drop the proposal and check where the approver stands before promising a different proposal as a card;
+- revisions, with or without `--answer`, refuse a missing, blank, non-string or over-400-character `answers` field without posting. Valid versions keep `answers` in the card JSON for the cold reader, off the Slack card;
 - routing decisions with fake `herdr` and `aim`: live pane, focused pane (sent straight away), a closed session left alone with its answer waiting (and resumed only when a caller asks, as agent-email does), moved session, a different session in the pane, an already delivered message, another machine, this machine under a changed name;
 - sessions stopped at their usage limit: the answer goes to a session continuing the work, nothing is typed into the stopped one or into the usage-limit menu, and a resume that lands on that menu closes its pane;
 - continuations and moved copies against real transcript files, including copies whose session ids were rewritten;

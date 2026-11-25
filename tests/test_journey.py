@@ -210,7 +210,7 @@ print(f'URL: https://example.com/journey/{n}')
 
     monkeypatch.setattr(slackapi, "upload_pictures_to_thread", upload_after_publishing)
     cli.main(["submit", str(path)])
-    path.write_text(json.dumps(dict(card, changes="Clearer screen labels.")))
+    path.write_text(json.dumps(dict(card, changes="Clearer screen labels.", answers="correction: The Library screen was labeled Home.")))
     cli.main(["revise", "AP-0001", str(path)])
     rec = store.load("AP-0001")
     keys = ["journey:0:map", "journey:1:map", "journey:0:0:today", "journey:0:1:after", "journey:0:2:after", "gallery:0"]

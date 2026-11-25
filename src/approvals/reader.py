@@ -19,6 +19,7 @@ def card_text(c):
     L.append(cards.stands_line(c.get("stands")))
     if c.get("thread"): L.append("(opens with his own Slack message that it answers)")
     if c.get("why"): L.append(f"WHY: {c['why']}")
+    if c.get("answers"): L.append(f"ANSWERS: {c['answers']}")
     if c.get("changes"): L.append(f"WHAT CHANGED IN THIS VERSION: {c['changes']}")
     for f in c.get("facts") or []:
         if isinstance(f, (list, tuple)) and len(f) >= 2: L.append(f"{f[0]}: {lines(f[1])}")

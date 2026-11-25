@@ -112,7 +112,7 @@ def test_the_deputy_hears_each_card_posted_and_each_new_version(monkeypatch, sla
         'where you can look at them, then `approvals call AP-0001 --approve --why "<why>"` or `approvals call AP-0001 --his --why "<why>"`.')
     assert item["kind"] == "deputy" and not item["needs_ack"] and to("AP-0001") == []
     assert claim in item["text"]
-    revised = dict(SAMPLES["budget"], changes="Cut to $200")
+    revised = dict(SAMPLES["budget"], changes="Cut to $200", answers='"Keep it to $200."')
     del revised["stands"]
     path.write_text(json.dumps(revised))
     cli.main(["revise", "AP-0001", str(path)])

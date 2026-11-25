@@ -207,6 +207,8 @@ A card is JSON. [skills/approvals/references/cards.md](skills/approvals/referenc
 
 Every first version needs `stands`: the whole it is a piece of, the approver's latest words and open conversation on it, and his state. A missing or malformed field asks the sender to find out where he stands; `still-shaping` refuses the card before posting. Only `yes-to-the-whole` shows a **Your yes:** line on the card. Revisions can leave `stands` out and show the first version's claim. The reader and deputy both see the sender's claim; the reader also judges whether the card should exist yet.
 
+Every `approvals revise`, including `--answer`, needs `answers` in the new card JSON. Quote the approver's reply that asked for the change, as in `"answers": "\"Did the new look picker drop the ask?\""`, or start with `correction:` and name the fact on the card that was wrong. The field must be a non-empty string of at most 400 characters. It's saved with the version and shown to the cold reader. Only `changes` is shown on the card.
+
 ### Show a user journey
 
 Use `journey` to show today and the proposed change, screen by screen. Give one entry or a list of up to four, one per kind of user. Each entry needs `who` (up to 200 characters) and can name its paths with `today` and `after` (up to 40 characters each). They default to “Today” and “With the change”.

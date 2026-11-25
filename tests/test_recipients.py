@@ -98,11 +98,11 @@ def test_the_card_he_reads_says_whom_it_goes_to_and_the_asker_is_told_what_its_d
 def test_a_new_version_keeps_whom_it_goes_to_unless_it_names_others(posts, tmp_path):
     rid = submit(tmp_path, card("reply", recipients=CREATOR))
     p = tmp_path / "v2.json"
-    p.write_text(json.dumps(card("reply", changes="Shorter, per your note")))
+    p.write_text(json.dumps(card("reply", changes="Shorter, per your note", answers='"Shorten the reply."')))
     cli.main(["revise", rid, str(p)])
     assert store.load(rid)["versions"][1]["card"]["recipients"] == CREATOR
     other = [{"place": "instagram", "handle": "@allanlanchester"}]
-    p.write_text(json.dumps(card("reply", changes="To Allan instead", recipients=other)))
+    p.write_text(json.dumps(card("reply", changes="To Allan instead", answers="correction: The recipient was Allan.", recipients=other)))
     cli.main(["revise", rid, str(p)])
     assert store.load(rid)["versions"][2]["card"]["recipients"] == other
 

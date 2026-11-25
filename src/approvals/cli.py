@@ -479,8 +479,17 @@ def _revise_as_reply(rid, n, prev, answer):
     print(f"{rid} v{n}: {said} in the thread under the reply; the first post now shows v{n}.")
 
 
+_REVISE_ANSWERS_REQUIRED = """Not posted yet. A new version of a card he is reading says what it answers, in an `answers` field: either his reply that asked for this change, quoted, or "correction:" and the fact on the card that was wrong. Add it, then run this again.
+
+  If this version adds to or changes what you are asking (more money, another split, another piece stacked on it), it is a new ask, and a new ask is never a new version: it waits for his answer on this card, or goes to the agent he is working it through with.
+  If his reply reopened the design or the plan (other options, another journey, "hold on", "work it out with someone"), he isn't deciding yet: post no version, do the work, and bring it back once, whole, where he is working it through."""
+
+
 def cmd_revise(a):
     card = _load_card(a.card)
+    answers = card.get("answers")
+    if not isinstance(answers, str) or not answers.strip() or len(answers) > 400:
+        _die(_REVISE_ANSWERS_REQUIRED)
     rec = store.load(a.id)
     if "recipients" not in card and "recipients" in rec["versions"][-1]["card"]:
         card["recipients"] = rec["versions"][-1]["card"]["recipients"]   # a new version keeps whom it goes to

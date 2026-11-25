@@ -208,7 +208,9 @@ def msg_decision(rec, verdict, where, choice=None, items=None, edited=None, memb
                 f'Then do exactly what the card describes, and {done_step(rec)}')
     if verdict == "declined":
         return (f'{head(rec)} {name} declined it ({where}, {t}). {ack_step(rec, "that you are dropping it")} '
-                f'Then drop this proposal and don\'t send it again. If what it was for still matters, a different proposal is a new card.')
+                "Then drop this proposal and don't send it again. If what it was for still matters, the next proposal is a "
+                "different one, and whether it reaches him as a card depends on where he stands on the thing it belongs to: "
+                "find that out before you promise him one.")
     said = f' The card said that with no answer, {c["if_no_answer"]}: do that.' if c.get("if_no_answer") else ""
     return f'{head(rec)} No answer by the deadline, so it is not approved.{said} Don\'t resubmit or send a reminder; a reply in the thread would reopen it.'
 

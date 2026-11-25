@@ -41,3 +41,6 @@ SAMPLES = {
                facts=[["From", "you@example.com"], ["To", "the accountants"]]),
     "account": s(type="account", title="Delete a player's account, as they asked", facts=[["Asked", "by email, 3 days ago"]]),
 }
+
+MONEY_REVISION = dict(SAMPLES["money"], title="Move $2,000 from savings to operating",
+                      changes="Corrected the amount to $2,000.", answers="correction: The amount on the card was $20,000, not $2,000.")

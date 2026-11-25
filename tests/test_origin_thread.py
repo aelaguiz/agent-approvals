@@ -343,7 +343,7 @@ def test_cli_thread_posts_take_current_callers_sender(tmp_path, monkeypatch):
     cli.main(["answer", "AP-0001", "This one."])
     cli.main(["ack", "AP-0001", "Checking."])
     cli.main(["status", "AP-0001", "Need your input", "--on-you"])
-    path.write_text(json.dumps(dict(SAMPLES["money"], changes="Adjusted")))
+    path.write_text(json.dumps(dict(SAMPLES["money"], changes="Adjusted", answers='"This one."')))
     cli.main(["revise", "AP-0001", str(path)])
     assert len(calls) >= 7
     assert all(c.get("username") == SENDER["name"] and c.get("icon_url") == SENDER["icon_url"] for c in calls)

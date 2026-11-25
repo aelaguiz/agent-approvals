@@ -85,7 +85,7 @@ def reply(ts, words, user=USER):
 
 def revise(tmp_path, rid=RID):
     path = tmp_path / "card.json"
-    path.write_text(json.dumps(dict(SAMPLES["budget"], changes="Lower the cap.")))
+    path.write_text(json.dumps(dict(SAMPLES["budget"], changes="Lower the cap.", answers='"Lower the cap."')))
     cli.main(["revise", rid, str(path)])
 
 

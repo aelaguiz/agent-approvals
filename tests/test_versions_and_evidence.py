@@ -5,7 +5,7 @@ from datetime import timedelta
 import pytest
 
 from approvals import cards, cli, core, listener, slackapi, store
-from samples import SAMPLES
+from samples import MONEY_REVISION, SAMPLES
 from test_cards_store import make_rec
 
 
@@ -49,15 +49,32 @@ def test_a_decline_tells_the_agent_to_drop_the_proposal_not_the_goal():
     rec = saved()
     core.decide(rec, 1, "declined", "UAPPROVER")
     text = rec["outbox"][-1]["text"]
-    assert "drop this proposal" in text and "a different proposal is a new card" in text
+    assert ("Then drop this proposal and don't send it again. If what it was for still matters, the next proposal is a "
+            "different one, and whether it reaches him as a card depends on where he stands on the thing it belongs to: "
+            "find that out before you promise him one.") in text
+
+
+@pytest.mark.parametrize("fields", [{}, {"answers": ""}, {"answers": " "}, {"answers": 42}, {"answers": "x" * 401}])
+@pytest.mark.parametrize("reply", [[], ["--answer", "Here's my answer."]])
+def test_every_revision_needs_answers_before_posting(tmp_path, slack, capsys, fields, reply):
+    rec = saved()
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["revise", "AP-0001", card_file(tmp_path, changes="Corrected the amount.", **fields), *reply])
+    assert exc.value.code == 1
+    assert capsys.readouterr().err == cli._REVISE_ANSWERS_REQUIRED + "\n"
+    assert not slack and store.load("AP-0001")["versions"] == rec["versions"]
 
 
 def test_a_new_version_after_an_approval_can_be_approved(tmp_path, slack):
     rec = saved()
     core.decide(rec, 1, "approved", "UAPPROVER")
     store.save(rec)
-    cli.main(["revise", "AP-0001", card_file(tmp_path, changes="the version you pick")])
+    cli.main(["revise", "AP-0001", card_file(tmp_path, **MONEY_REVISION)])
     rec = store.load("AP-0001")
+    answers = MONEY_REVISION["answers"]
+    assert rec["versions"][1]["card"]["answers"] == answers
+    assert "answers" not in rec["versions"][0]["card"]
+    assert answers not in json.dumps(cards.card_blocks(rec, 2, "open"))
     assert rec["status"] == "pending" and rec["decision"] is None and rec["versions"][0]["decision"]["verdict"] == "approved"
     assert core.mode_for(rec) == "open"
     assert core.decide(rec, 2, "approved", "UAPPROVER") == "ok"
@@ -70,9 +87,9 @@ def test_a_third_version_takes_down_the_second_ones_line_in_the_channel(tmp_path
     saved()
     deleted = []
     monkeypatch.setattr(slackapi, "delete", deleted.append)
-    cli.main(["revise", "AP-0001", card_file(tmp_path, changes="first change")])
+    cli.main(["revise", "AP-0001", card_file(tmp_path, changes="first change", answers='"Make the amount clearer."')])
     line_v2 = store.load("AP-0001")["versions"][1]["line_ts"]
-    cli.main(["revise", "AP-0001", card_file(tmp_path, changes="second change")])
+    cli.main(["revise", "AP-0001", card_file(tmp_path, changes="second change", answers='"Show where it goes."')])
     assert deleted == [line_v2]
 
 
@@ -87,12 +104,13 @@ def test_a_replaced_version_shrinks_to_a_line_that_opens_it_and_the_new_one_link
     assert not any(b.get("accessory") for b in cards.card_blocks(rec, 2, "view"))
 
 
-def test_a_declined_card_gets_a_new_card_not_a_new_version(tmp_path, slack):
+def test_a_declined_card_cannot_be_revised(tmp_path, slack, capsys):
     rec = saved()
     core.decide(rec, 1, "declined", "UAPPROVER")
     store.save(rec)
     with pytest.raises(SystemExit):
-        cli.main(["revise", "AP-0001", card_file(tmp_path, changes="x")])
+        cli.main(["revise", "AP-0001", card_file(tmp_path, **MONEY_REVISION)])
+    assert "AP-0001 is declined" in capsys.readouterr().err and not slack
 
 
 def test_withdrawing_takes_the_buttons_away_and_presses_say_why(slack):
@@ -200,7 +218,7 @@ def test_a_version_after_his_reply_goes_under_it_as_one_line_not_a_whole_card(tm
     store.save(rec)
     deleted = []
     monkeypatch.setattr(slackapi, "delete", deleted.append)
-    cli.main(["revise", "AP-0001", card_file(tmp_path, changes="Japan only, per your reply")])
+    cli.main(["revise", "AP-0001", card_file(tmp_path, changes="Japan only, per your reply", answers='"make it Japan only"')])
     rec = store.load("AP-0001")
     assert not any(p.get("broadcast") for p in slack)   # no line in the channel
     posts = [p["text"] for p in slack if "text" in p]
@@ -216,12 +234,14 @@ def test_revise_with_an_answer_puts_the_answer_first_and_the_line_under_it(tmp_p
     monkeypatch.setattr(slackapi, "post", lambda blocks, text, thread_ts=None, broadcast=False:
                         posted.append({"blocks": blocks, "text": text, "broadcast": broadcast}) or f"{200 + len(posted)}.0")
     monkeypatch.setattr(slackapi, "update", lambda ts, blocks, text: None)
-    cli.main(["revise", "AP-0001", card_file(tmp_path, changes="The email offers the move"),
+    answers = '"Were those lessons in the old catalog? Offer to move them."'
+    cli.main(["revise", "AP-0001", card_file(tmp_path, changes="The email offers the move", answers=answers),
               "--answer", "Old catalog. All 10 of his lessons came from it."])
     rec = store.load("AP-0001")
     assert len(posted) == 1 and not posted[0]["broadcast"]
     shown = json.dumps(posted[0]["blocks"])
     assert shown.index("*Old catalog.*") < shown.index("Card updated at the top (v2): The email offers the move")
+    assert rec["versions"][1]["card"]["answers"] == answers and "Were those lessons" not in shown
     answered = [e for e in rec["events"] if e["kind"] == "answered"]
     assert answered[-1]["text"].startswith("Old catalog.") and answered[-1]["ts"] == "201.0"
     assert rec["status"] == "pending" and not rec["versions"][1].get("copy_ts")

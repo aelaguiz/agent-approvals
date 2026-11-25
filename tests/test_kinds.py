@@ -182,6 +182,7 @@ def test_a_change_on_a_row_goes_back_to_the_agent_and_the_others_keep_their_answ
     v2 = json.loads(json.dumps(KINDS["set"]))
     v2["parts"][2]["title"] = "The paywall stops promising \"no ads\" · version 2"
     v2["changes"] = "Row 3 has new words, after your note"
+    v2["answers"] = '"Change the words on the paywall."'
     p = tmp_path / "v2.json"
     p.write_text(json.dumps(v2))
     cli.main(["revise", "AP-0001", str(p)])

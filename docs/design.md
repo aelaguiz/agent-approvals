@@ -54,6 +54,8 @@ The card is the first post. Everything about the request stays in its thread:
 - a new version the agent posts on its own, as a full card at the bottom where the approver reads;
 - a new version that answers a reply (his or a teammate's), as one post under it: the agent's answer when he asked something (`approvals revise --answer`), then a line saying the card at the top changed, with the `changes` line and a link to the card. A whole card there buried the answer he came back for (Amir, November 22, 2026: "I can't get a giant blob as a response because I can't actually find the answer to my ... question in it"). The post is recorded as the agent's answer or acknowledgement with its Slack id, so the pod dashboard shows it once.
 
+Every new version, including one with `--answer`, requires an `answers` string of 1 to 400 characters that isn't blank. It quotes the approver's reply asking for the change or starts with `correction:` and names the wrong fact. An invalid field stops the revision before posting. The version's card JSON keeps it for the cold reader's `ANSWERS:` line. Slack shows `changes`, not `answers`.
+
 When a version is replaced:
 - the first post turns into the newest version, so it can be approved from the channel;
 - the old version is never posted again, and an earlier copy of it in the thread shrinks to one line with a See button, so the thread holds one whole card at a time and what's new is plain. The new card opens with what changed and a See button for the version before it. (Amir, November 10, 2026, when each version re-posted the one before it in full: "I see an accumulating set of copies ... and can't figure out what is new.");
@@ -62,12 +64,13 @@ When a version is replaced:
 
 Slack drops buttons from a thread reply that is also sent to the channel. That's why the first post carries the newest version, and the channel gets a line pointing to it rather than the card.
 
-A decision belongs to the version it was made on. A new version after a yes reopens the request with working buttons, and the record keeps the yes on the old version. A declined request takes no new versions; a different proposal is a new card. A question the agent asks on an approved card (`approvals ask`) leaves it `revising` once he answers, since the answer may change what the yes covers. When it doesn't ("sure, schedule it whenever" after the agent asked which hour to use once the approved one passed), the agent records the answer with `approvals record --approved`, which stands as his new decision on the same version, and `done` works again; a second button press on that version still counts once. On a card with rows whose rows were all decided, the same record (for the card, or for one row with `--part`) settles the card from its rows again. An answer asking for a change gets a new version.
+A decision belongs to the version it was made on. A new version after a yes reopens the request with working buttons, and the record keeps the yes on the old version. A declined request takes no new versions. Whether a different proposal should become a card depends on where the approver stands on the thing it belongs to. A question the agent asks on an approved card (`approvals ask`) leaves it `revising` once he answers, since the answer may change what the yes covers. When it doesn't ("sure, schedule it whenever" after the agent asked which hour to use once the approved one passed), the agent records the answer with `approvals record --approved`, which stands as his new decision on the same version, and `done` works again; a second button press on that version still counts once. On a card with rows whose rows were all decided, the same record (for the card, or for one row with `--part`) settles the card from its rows again. An answer asking for a change gets a new version.
 
 An agent that no longer stands behind a card runs `approvals withdraw`: the card shows "Withdrawn" with its reason, the buttons go away, and a press says the agent withdrew it.
 
 When the approver decides:
 - the card shows ✅ or ❌ with their name and the time, and the buttons go away;
+- a decline tells the agent to drop the proposal and not send it again. "If what it was for still matters, the next proposal is a different one, and whether it reaches him as a card depends on where he stands on the thing it belongs to: find that out before you promise him one." A teammate's decline uses the same message.
 - the agent adds "Done" and what it checked when it finishes.
 
 ## The card's shape, and its answers
