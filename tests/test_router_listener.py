@@ -626,6 +626,10 @@ def test_overdue_answers_and_exclusions(monkeypatch):
     assert (second["id"], second["outbox"][0]["ref"]) in core.held([first, second])
     assert core.overdue([first, second], now) == []
 
+    core.enqueue(second, "decision", "and this")   # a second answer on the held card waits behind the first
+    second["outbox"][1]["created"] = store.iso(now - timedelta(seconds=60))
+    assert core.overdue([first, second], now) == []
+
 
 def test_alarm_posts_and_wakes_once_and_skips_test_cards(monkeypatch):
     from datetime import timedelta

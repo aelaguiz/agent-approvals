@@ -1214,10 +1214,15 @@ def overdue(records, now):
     hold = held(records)
     out = []
     for rec in records:
+        # Several answers on one card go one at a time behind its next message, so while that one is held for the
+        # agent to catch up, the ones queued behind it are held too (AP-2677's six decisions, November 25).
+        head = next_item(rec)
+        paced = bool(head) and (rec["id"], head["ref"]) in hold
         for item in rec.get("outbox", []):
             if (item.get("to") or item.get("delivered_at") or item.get("seen_by_agent") or item.get("acked_at")
                     or item.get("waiting_for_agent") or item.get("alarmed_at")
                     or (rec["id"], item["ref"]) in hold
+                    or (paced and not item.get("inbox_only"))
                     or now - store.parse(item["created"]) < timedelta(seconds=ALARM_SECONDS)):
                 continue
             error = item.get("last_error")
