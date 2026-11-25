@@ -12,6 +12,7 @@ from test_kinds import slack  # noqa: F401
 OPEN = [{"id": "C-6", "title": "Say what the money buys", "says": "The last two budget cards said how much.\nNot what for."},
         {"id": "C-9", "title": "One decision per card", "says": "Split a card that asks two things."}]
 CARD = {"type": "experiment", "title": "Show a search hint", "part_of": None,
+        "stands": {"whole": "Search hint", "his_latest": "No earlier words or open discussion; checked today with Product.", "state": "new-to-him"},
         "why": "Readers can find the search box.", "facts": [["Place", "Library"]],
         "approves": "The search hint", "does_not_approve": "A new search engine"}
 

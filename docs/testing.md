@@ -4,6 +4,7 @@
 
 `make test` runs the unit tests without external network access; hub tests use a temporary localhost server. They cover:
 - every card type rendering, required fields, escaping;
+- where the approver stands: missing and malformed claims get the same question, a claim that he is still shaping the whole refuses a first version, single-card and set submits post nothing when refused, revisions can omit the field and keep the first version's yes, only a yes to the whole appears on the card, and the reader and deputy receive the claim;
 - 20 processes submitting at once and getting distinct numbers;
 - the first button press winning, and old versions refusing;
 - replies sorted into feedback, an answer or a comment, including replies on declined and withdrawn cards;

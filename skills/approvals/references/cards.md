@@ -1,6 +1,6 @@
 # Cards
 
-Two things shape a card. Its **type** says what the action is: read the section for your type below for what the approver judges and what the card must include. Its **kind** is how he'll judge it and answer it: a yes or no, a journey, a row each, a pick, a batch. The kinds are combinations of the fields below and work with any type. The examples show the shape; your facts come from your own work.
+Two things shape a card. Its **type** says what the action is: read the section for your type below for what the approver judges and what the card must include. Its **kind** is how he'll judge it and answer it: a yes or no, a journey, a row each, a pick, a batch. The kinds are combinations of the fields below and work with any type. The examples show the shape; your facts come from your own work. The `stands` claims and quoted words in these examples are illustrative, not records of the approver's decisions.
 
 Contents: [Fields](#fields) · [What goes on the card](#what-goes-on-the-card-and-what-goes-in-the-thread) · [Kinds](#kinds-how-he-judges-it-and-answers-it) · [creative](#creative) · [reply](#reply) · [budget](#budget) · [purchase](#purchase) · [money](#money) · [player_message](#player_message) · [price](#price) · [experiment](#experiment) · [page](#page) · [content](#content) · [email](#email) · [account](#account)
 
@@ -20,6 +20,7 @@ Contents: [Fields](#fields) · [What goes on the card](#what-goes-on-the-card-an
 | `changes` | Required on a revision: what changed on the card from the version he saw, in the approver's terms ("Japan dropped, per your reply"). It opens the new card, and after his reply it is the line under your answer, so it is how he learns what is new. An answer to his question goes in `--answer`, not here. |
 | `deadline_hours`, `yes_label`, `no_label` | Optional overrides. Name buttons for what happens ("Release all 3", "Send as you", "Run the read"). |
 | `part_of` | Required. The initiative the card belongs to, in the approver's words for it, or `null` when it stands alone. Shown under the title. Cards with the same name, word for word, share one page and a button to it; `approvals names` lists the names in use, and a card that comes out of an ask of his takes that ask's name. |
+| `stands` | Required on the first version. `{"whole": "…", "his_latest": "…", "state": "…"}`. `whole` names the feature, plan, test or idea this is part of, or `"nothing larger"` (1 to 160 characters). `his_latest` quotes his latest words on the whole, with when and where, any open card, deck or thread, and who is working it through with him (1 to 600 characters). `state` is `not-on-his-mind`, `new-to-him`, `yes-to-the-whole`, or `still-shaping`. The last refuses a first version; only `yes-to-the-whole` shows **Your yes:** and his latest words on the card. The reader and deputy see the claim in all cases. A revision can omit it and show the first version's claim. |
 | `about` | Required. The id of the one thing in the pod dashboard the card decides (`"F-21"`, `"X-346"`, your pod's `"POD-4"` only when nothing narrower fits); his answer becomes his decision on that thing's page. `pd search <its name>` finds it. A new version keeps it, so a revision can leave it out; a card about another thing is a new card. |
 | `recipients` | Required on an `email` or `reply` card: whom it goes to, one entry each, `[{"place": "email", "handle": "brantzenpoker@gmail.com"}]`, the handle exactly as the place writes it. When the card is done, the pod dashboard's record moves the person whose route is that handle, and asks you about one it can't find. The places, and what each handle is: `email` (the address alone, for anyone who is not a player); `instagram`, `x`, `youtube`, `tiktok`, `facebook`, `reddit`, `slack` (their handle there, alone: on YouTube the channel's, also for a comment under its video; on Reddit `u/name`, or `r/sub` for a post there; in Slack `#channel`); `contact form` (a site that publishes no address: the form's web address); `support ticket` (a provider's own support desk: the ticket's web address or the page it is filed on); `forum` (the thread's web address); `email thread` (a player who wrote to us by email: the thread's id), `player account` (a player who never did, for a new email to their account's address or a text: their account's id in our app), `google play review`, `app store review` (the review's id), `testers' feedback` (whose note and when, or its link): a player's address and phone never go on a card; `mailing` (one email to many: who, in a few words); `other` (none of these fits: where and whom, in a few words; it moves no one's route, and the record counts it so a place that keeps coming up is added to the list). A refusal says what that place's handle is. A new version keeps it, so a revision can leave it out. A card put up before November 22, 2026 has none, and nothing reads one from its words. |
 | `if_no_answer` | What happens if the deadline passes with no answer ("it stops at 72 hours"). Shown with the deadline in the small line under the buttons and on the notification line; told back to you if it expires. |
@@ -113,6 +114,7 @@ The journey is as long as the change, and that settles its shape.
 {"type": "player_message", "title": "Offer the monthly plan to trial users who cancelled the yearly one",
  "why": "Trial users who cancel name the price. This offers the month to those who already cancelled the year, so it can't pull yearly payers down.",
  "part_of": "More trials end in a payment",
+ "stands": {"whole": "Offer the month to cancelled yearly trial users", "his_latest": "\"Yes to that journey; offer the month to people who already cancelled.\" Monday in the design deck with Product; discussion closed.", "state": "yes-to-the-whole"},
  "journey": [{
    "who": "A trial user who cancelled the yearly plan in Google Play and opens the app again before the trial ends",
    "after": "With the message",
@@ -166,6 +168,7 @@ Several changes toward one initiative, ready around the same time, each decided 
 {"type": "content", "title": "Payers keep using what they paid for: 4 changes",
  "why": "Payers who use Plus in their first two weeks keep paying, and each of these is a place they stall or are told something untrue.",
  "part_of": "Payers keep using what they paid for (your ask, 7:21 am)",
+ "stands": {"whole": "Four changes that keep payers using Plus", "his_latest": "\"Put the four changes together on one card for me.\" Monday in chat with Product; no other open discussion.", "state": "not-on-his-mind"},
  "facts": [["Done looks like", "payers active in more of their first two weeks, read against the 30% held back"]],
  "links": [["Open the deck", "https://docs.google.com/presentation/d/…"]], "change_label": "Change",
  "parts": [
@@ -191,6 +194,7 @@ Four replies to four people, each with their words and yours. One file per card,
 {"type": "email", "title": "Reply to a yearly charge after a cancelled trial",
  "why": "This person cancelled their trial the day before they were charged the yearly fee, and has waited 14 days for an answer.",
  "part_of": "Answer people waiting on us about a charge",
+ "stands": {"whole": "Answer people waiting on us about a charge", "his_latest": "No words on this reply; checked today with Support, no open card, deck or thread on it.", "state": "not-on-his-mind"},
  "from": "your company address, in their thread",
  "recipients": [{"place": "email thread", "handle": "19a8c4f2e07b3d61"}],
  "quotes": [{"label": "Their words", "text": "I cancelled my trial yesterday and was still charged for the year."},
@@ -212,6 +216,7 @@ Money where the call turns on reads. Lead with what the reads found, put the clo
 {"type": "budget", "title": "Keep training the run past 72 hours, for a policy with fewer holes?",
  "why": "The read decides whether more training is worth about $200 a day: it measures how many of the AI's untrained spots more days would close.",
  "part_of": "Five players, trained in a week",
+ "stands": {"whole": "Five players, trained in a week", "his_latest": "\"Yes, train the five-player policy.\" Monday in chat with Research; no open design discussion.", "state": "yes-to-the-whole"},
  "if_no_answer": "it stops at 72 hours.",
  "sections": [{"title": "What the reads found", "lines": [
    ["✅ Strength", "about as fast as plain training (0.96 to 1.27 times)"],
@@ -233,6 +238,7 @@ Many asks of one kind. One card; a yes covers all, and he can hold some back.
 {"type": "email", "title": "Send 10 emails as you, each with a free year of Plus",
  "why": "Creators who play Poker Skill on camera bring their audiences, and a free year is the cheapest way to get them playing it.",
  "part_of": "Poker creators use Poker Skill",
+ "stands": {"whole": "Free-year offers to poker creators", "his_latest": "\"Yes to offering creators a free year.\" Monday in chat with Partnerships; no open discussion about the plan.", "state": "yes-to-the-whole"},
  "facts": [["From", "your company address. The same email to each, with their name and their own link, every link tested on iPhone and Android"]],
  "items": [["River Rat Poker", "Instagram Reels · follow-up"], ["Two Pair Tom", "YouTube vlog"], "The Grind Podcast (Sam)", "…"],
  "recipients": [{"place": "email", "handle": "riverratpoker@gmail.com"}, {"place": "email", "handle": "tom@twopairtom.com"}, "…"],
@@ -250,6 +256,7 @@ An ad, a Short, a Reel, a post. He judges the whole thing as people will see it,
 {"type": "creative", "title": "Run a new ad: \"You're not unlucky. You were never taught why.\"",
  "why": "We need a second ad that brings paying iPhone users, and this one competes with the newscast ad for that slot.",
  "part_of": "A second ad that brings paying iOS users",
+ "stands": {"whole": "The iOS creative test", "his_latest": "No words on this ad; checked today with Growth, no open design conversation.", "state": "not-on-his-mind"},
  "video": "/abs/ad.mp4", "image": "/abs/ad-first-frame.png",
  "facts": [["To read it", "about $10. It's a finalist at 0.5 or more installs per dollar"],
            ["🟠 Still open", "nobody has listened to it yet"], ["Competing with", "the newscast, for the second finalist place"]],
@@ -264,6 +271,7 @@ A push, an email, an in-app message: the words as they land, the designed render
 {"type": "player_message", "title": "Tell people on a year of Plus when their iPhone trial's charge fails",
  "why": "People whose charge fails lose Plus without knowing why, and telling them keeps the ones who meant to pay.",
  "part_of": "Payers keep using what they paid for",
+ "stands": {"whole": "Messages for failed trial charges", "his_latest": "\"Yes, tell users when their trial charge fails, by email and push.\" Monday in chat with Revenue; discussion closed.", "state": "yes-to-the-whole"},
  "quotes": [{"label": "The push, on their lock screen", "text": "Your trial's charge didn't go through\nYour year of Plus is still on. …"}],
  "gallery": [{"image": "/abs/email-iphone-width.png", "label": "The email, as designed · real render at iPhone width"}],
  "facts": [["Who gets it", "anyone on a year of Plus whose iPhone trial charge failed in the last 60 days"],
@@ -279,6 +287,7 @@ It asks only to ship, and says so: everything on it is built and tested. What pl
 {"type": "content", "title": "Ship 2.1.65: your move shows the moment you tap",
  "why": "It puts today's coaching and fixes in players' hands. Everything on this card is built, merged and tested: a yes ships it, and nothing here asks to build anything.",
  "part_of": null,
+ "stands": {"whole": "nothing larger", "his_latest": "No words or open discussion on this release; checked today with Engineering.", "state": "not-on-his-mind"},
  "sections": [
    {"title": "What players get", "lines": [
      ["Everyone, when the server deploys", "the evening Missions push stops reaching players who already finished"],
@@ -300,6 +309,7 @@ The chat as it will look, sent as him, with the words his to edit.
 {"type": "email", "title": "Send this X message as you to River Rat Poker",
  "why": "They said they'd try it, and their free-year link no longer needs an email, so this gets them in today.",
  "part_of": "Poker creators use Poker Skill",
+ "stands": {"whole": "Poker creators use Poker Skill", "his_latest": "No words or open discussion on this follow-up; checked today with Partnerships.", "state": "not-on-his-mind"},
  "from": "your X account",
  "recipients": [{"place": "x", "handle": "@riverratpoker"}],
  "quotes": [{"label": "River Rat Poker", "note": "Nov 3, 11:29 AM", "text": "Appreciate you setting that up, I'll take a look and see how it works."},
@@ -318,6 +328,7 @@ Two or three designs or wordings. Each option as a picture with a button saying 
 {"type": "content", "title": "Pick how users see the hand they just played",
  "why": "How the last hand opens decides whether players look back at it between hands, which is where the coaching sticks.",
  "part_of": "Coaching at the table feels smooth",
+ "stands": {"whole": "How the last hand opens at the table", "his_latest": "\"Put both options on one card so I can pick.\" Monday in chat with Design; that chat has no unanswered question.", "state": "not-on-his-mind"},
  "options": [{"name": "Build the hand-count panel", "title": "a panel that opens from the hand count", "image": "/abs/panel.png"},
              {"name": "Build the rail of past hands", "title": "a rail of past hands beside the table", "image": "/abs/rail.png"}],
  "pick": "Build the hand-count panel", "no_label": "Neither", "links": [["Play both at real speed", "https://…"]],
@@ -335,6 +346,7 @@ Only where your repository's rules send a build decision to a card that links it
 {"type": "experiment", "title": "Build and test two screens on the onboarding paywall",
  "why": "The test decides which paywall new users see: if the test half brings more payers by day 8, it goes to everyone; if not, today's stays.",
  "part_of": "More new users pay when they first see Plus",
+ "stands": {"whole": "Test two onboarding paywall screens", "his_latest": "No earlier words, cards, decks or threads on this test; checked today with Revenue.", "state": "new-to-him"},
  "journey": [{"who": "A new user who has just answered onboarding's last question", "after": "The test half",
    "steps": [
      {"today": {"image": "/abs/last-question.png", "label": "Onboarding's last question", "source": "Real · iPhone, 2.1.65"}, "after": "same", "then": "Taps Continue"},
@@ -361,6 +373,7 @@ An ad, video, image or social post going out. The approver judges it by looking:
 {"type": "creative", "title": "Run this video ad in the spring creative test",
  "why": "The spring test decides which ads we put money behind, and this one tries a promise we haven't run: learning in five minutes a day.",
  "part_of": "Ads that bring paying users",
+ "stands": {"whole": "Spring creative test", "his_latest": "\"Yes to the spring creative test at $50 a day.\" Monday in chat with Growth; no open conversation on the test.", "state": "yes-to-the-whole"},
  "video": "/abs/path/ad-v3.mp4", "image": "/abs/path/ad-v3-thumb.png",
  "facts": [["Ad", "\"Learn the game in five minutes a day\" · 21 seconds · 9:16"],
            ["Runs on", "Instagram Reels and Stories · US only"],
@@ -380,6 +393,7 @@ Words going out publicly as the approver or the brand: a forum or Reddit reply, 
 {"type": "reply", "title": "Post this reply on r/poker as our founder account",
  "why": "People asking how to stop losing are who we're for, and a useful answer from the founder brings them to us.",
  "part_of": "People who ask how to improve find us",
+ "stands": {"whole": "nothing larger", "his_latest": "No words or open discussion on this reply; checked today with Community.", "state": "not-on-his-mind"},
  "recipients": [{"place": "reddit", "handle": "u/stuckat12"}],
  "quotes": [{"label": "They asked", "text": "I can't afford coaching. What should I study to stop losing at 1/2?", "link": "https://www.reddit.com/r/poker/comments/abc123/", "link_text": "How to stop losing at 1/2", "note": "3 hours ago · 9 comments"},
             {"label": "We'd reply", "text": "Pick one spot you play often and drill only that for a week..."}],
@@ -400,6 +414,7 @@ Spend on ads or tests. The approver judges how much, for how long, what it buys 
 {"type": "budget", "title": "Add $250 to the search ads learning budget",
  "why": "The learning budget is nearly spent, and the new ad tests it pays for are how search ads get to paying for themselves.",
  "part_of": "Search ads that pay for themselves",
+ "stands": {"whole": "Search ads learning test", "his_latest": "\"Yes to running the search ads learning test.\" Monday in chat with Growth; no unresolved discussion on the test.", "state": "yes-to-the-whole"},
  "table": {"columns": ["Budget", "Today", "After a yes"],
            "rows": [["Learning cap", "$450", "$700"], ["Spent so far", "$431", "$431"], ["Stop early if cost per trial is over", "not set", "$20"]]},
  "facts": [["What it buys", "about two more weeks of new ad tests at today's pace"]],
@@ -417,6 +432,7 @@ Buying a tool, subscription, credits, domains or a paid listing. The approver ju
 {"type": "purchase", "title": "Buy 3 domains that point to our site: $45",
  "why": "People who guess our address land on someone else's site today; these send them to ours.",
  "part_of": null,
+ "stands": {"whole": "nothing larger", "his_latest": "No earlier words or open discussion on these domains; checked today with Marketing.", "state": "new-to-him"},
  "facts": [["Cost", "$45 one time; $45 a year to renew"], ["What they do", "each redirects to our main site"], ["Card", "the company card for web costs"]],
  "approves": "these 3 domains, up to $45.", "does_not_approve": "other domains or premium names."}
 ```
@@ -432,6 +448,7 @@ Moving money, running payroll, paying or refusing a bill. The approver judges th
 {"type": "money", "title": "Move $20,000 from savings to operating",
  "why": "Payroll on the 15th, about $18,000, would leave operating short without it.",
  "part_of": null,
+ "stands": {"whole": "nothing larger", "his_latest": "No words or open discussion on this transfer; checked today with Finance.", "state": "not-on-his-mind"},
  "facts": [["From", "savings"], ["To", "operating, which bills and payroll come out of"], ["Next out of operating", "payroll on the 15th, about $18,000"]],
  "approves": "this one transfer.", "does_not_approve": "any later transfer."}
 ```
@@ -447,6 +464,7 @@ A push, email, in-app message or survey that reaches players or customers. The a
 {"type": "player_message", "title": "Add a first-year offer to the trial-ending message",
  "why": "People who cancel their trial almost never come back at full price, and this tests whether the price is why.",
  "part_of": "More trial users keep Plus",
+ "stands": {"whole": "First-year offer in the trial-ending message", "his_latest": "No earlier words, cards, decks or threads on this offer; checked today with Revenue.", "state": "new-to-him"},
  "quotes": [{"label": "What they'd see (push, the day before the trial ends)", "text": "Your trial ends Thursday. Keep it: your first year at 40% off."}],
  "facts": [["Who gets it", "people who cancelled their trial · about 40 a week"], ["Today", "the same message at full price; 0 of 300 renewed"]],
  "approves": "this offer in this message, in English.", "does_not_approve": "other languages or other offers."}
@@ -463,6 +481,7 @@ Prices, offers, discounts, or the words on a paywall. The approver judges each c
 {"type": "price", "title": "Lower the yearly price in Brazil and Mexico",
  "why": "Today's yearly price is above what local competitors charge, which costs us payers in both countries.",
  "part_of": "Prices that fit each country",
+ "stands": {"whole": "Yearly prices in Brazil and Mexico", "his_latest": "No earlier words, cards, decks or threads on these two prices; checked today with Pricing.", "state": "new-to-him"},
  "table": {"columns": ["Country", "Yearly today", "Yearly new"], "rows": [["Brazil", "R$399.90", "R$219.90"], ["Mexico", "MX$1,299", "MX$899"]]},
  "facts": [["Brings", "about 2 more payers a month; money about level"]],
  "approves": "these two countries at these prices, on both stores.", "does_not_approve": "other countries or the free trial."}
@@ -481,6 +500,7 @@ Where your repository has its own layout for experiment cards, write the card th
 {"type": "experiment", "title": "Keep version 2.5 users in the home screen test, 50/50",
  "why": "Without this, version 2.5's users leave the home screen test when it ships, and its read loses them.",
  "part_of": "A home screen that brings users back",
+ "stands": {"whole": "The home screen test", "his_latest": "\"Yes to the home screen test, half of users each.\" Monday in chat with Product; no open design discussion.", "state": "yes-to-the-whole"},
  "facts": [["Testing", "the new home screen against today's, half of users each"], ["The problem", "2.5 isn't on the test's version list, so its users leave the test when it ships"]],
  "approves": "adding 2.5 to the test at 50%.", "does_not_approve": "releasing 2.5 to the stores."}
 ```
@@ -496,6 +516,7 @@ A store listing, website page, directory listing or public profile. The approver
 {"type": "page", "title": "Test a new store listing title",
  "why": "Hold'em searches convert twice as well as our other terms, so a title that says Hold'em should bring more installs per visit.",
  "part_of": "More store visitors install",
+ "stands": {"whole": "Store listing title test", "his_latest": "No earlier words, cards, decks or threads on this test; checked today with Growth.", "state": "new-to-him"},
  "table": {"columns": ["Where", "Today", "Proposed"], "rows": [["Store title", "Example - Learn", "Example - Play Hold'em"]]},
  "facts": [["When", "as soon as approved"]],
  "approves": "this title.", "does_not_approve": "the description or keywords."}
@@ -512,6 +533,7 @@ Puzzles, lessons or other content going live to players. The approver judges wha
 {"type": "content", "title": "Put 20 daily puzzles live for next month",
  "why": "These keep the Daily going for the first 20 days of next month.",
  "part_of": "A daily puzzle worth coming back for",
+ "stands": {"whole": "Daily puzzles for next month", "his_latest": "No words or open discussion on this scheduled content release; checked today with Content.", "state": "not-on-his-mind"},
  "facts": [["What", "20 daily puzzles, one a day, the 1st to the 20th"], ["Tested", "all 20 played on staging"]],
  "approves": "these 20 puzzles on these dates.", "does_not_approve": "changes to existing puzzles."}
 ```
@@ -527,6 +549,7 @@ An email or Slack message sent in the approver's name. The approver judges the e
 {"type": "email", "title": "Send this email as you to our accountants",
  "why": "We need last year's full record, workpapers included, for this year's books.",
  "part_of": null,
+ "stands": {"whole": "nothing larger", "his_latest": "No words or open discussion on this email; checked today with Finance.", "state": "not-on-his-mind"},
  "recipients": [{"place": "email", "handle": "records@ouraccountants.example"}],
  "quotes": [{"label": "The email", "text": "Hi,\nCould you send us last year's full record, including the workpapers?\nThanks"}],
  "facts": [["From", "your mailbox"], ["To", "our outside accountants"], ["Subject", "Last year's records"]],
@@ -544,6 +567,7 @@ Deleting an account, removing someone's access, or cutting a seat. The approver 
 {"type": "account", "title": "Delete a player's account, as they asked",
  "why": "The player asked us to delete it, and we owe them that.",
  "part_of": null,
+ "stands": {"whole": "nothing larger", "his_latest": "No words or open discussion on this account deletion; checked today with Support.", "state": "not-on-his-mind"},
  "facts": [["Asked", "by email, 3 days ago"], ["Checked", "the request came from the account's own address"], ["What goes", "sign-in and all progress. This can't be undone."]],
  "approves": "deleting this one account and confirming by email.", "does_not_approve": "refunds or other accounts."}
 ```

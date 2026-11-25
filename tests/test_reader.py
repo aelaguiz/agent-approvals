@@ -15,6 +15,7 @@ def test_card_drawing_keeps_the_words_and_table_whole():
     cell = "value " * 300
     card = {
         "type": "price", "title": "Choose a price", "why": "People can buy it.",
+        "stands": {"state": "still-shaping", "whole": "New pricing", "his_latest": '"What about Mexico?" today in chat with Pricing.'},
         "facts": [["Markets", ["US", "UK"]]],
         "quotes": [{"label": "Customer", "text": quote, "note": "Exact"}],
         "table": {"columns": ["Today", "Proposed"], "rows": [["old", cell]]},
@@ -25,6 +26,8 @@ def test_card_drawing_keeps_the_words_and_table_whole():
         "approves": "Change the price", "does_not_approve": "Other prices",
     }
     text = reader.card_text(card)
+    assert ('WHERE HE STANDS (the sender\'s claim): still-shaping; whole: New pricing; '
+            'his latest: "What about Mexico?" today in chat with Pricing.') in text
     for part in ("Markets:   - US\n  - UK", f"SHOWN WORD FOR WORD (Customer):\n{quote}",
                  f"TABLE: Today | Proposed\n  old | {cell}", "CHOICE BUTTON: Lower the price (the writer's pick)\n  (line above the buttons: to $59.99 in the US)",
                  "ROW 1: First (Test)", f"SHOWN WORD FOR WORD (Reply):\n{quote}",
@@ -42,6 +45,7 @@ def test_brief_selects_heading_and_includes_optional_knowledge(tmp_path):
     assert "Ignore" not in brief and "Not included" not in brief
     assert "What he already knows, so never count it: poker and software. He does not know" in brief
     assert brief.endswith(reader.ASK_TEXT)
+    assert 'SHOULD THIS CARD EXIST YET: <yes, or "no: " and why, judged only from the sender\'s claim' in brief
     settings["reader_rules"] = str(path)
     assert "# Other\nIgnore" in reader.brief({}, settings)
 

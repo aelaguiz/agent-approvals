@@ -81,6 +81,23 @@ def test_a_set_with_one_bad_card_posts_none(tmp_path, posting, capsys):
     assert "Card 2 of 3" in capsys.readouterr().err and posting == [] and store.all_records() == []
 
 
+@pytest.mark.parametrize("n", [1, 3])
+@pytest.mark.parametrize("state", [None, "still-shaping"])
+def test_submit_refuses_unready_stands_before_posting_any_card(tmp_path, posting, capsys, n, state):
+    paths = card_files(tmp_path, n)
+    path = tmp_path / f"c{n}.json"
+    card = json.loads(path.read_text())
+    if state is None:
+        del card["stands"]
+    else:
+        card["stands"] = dict(card["stands"], whole="A plan", state=state)
+    path.write_text(json.dumps(card))
+    with pytest.raises(SystemExit):
+        cli.main(["submit", *paths])
+    assert (cards.STANDS_QUESTION if state is None else "No card: he is still shaping A plan.") in capsys.readouterr().err
+    assert posting == [] and store.all_records() == []
+
+
 def test_one_card_alone_shows_no_place_in_a_set(tmp_path, posting):
     cli.main(["submit", *card_files(tmp_path, 1)])
     rec = store.all_records()[0]

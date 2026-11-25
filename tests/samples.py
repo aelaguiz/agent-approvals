@@ -3,6 +3,8 @@ from pathlib import Path
 
 SCREEN = str(Path(__file__).parent / "screen.png")   # a small picture that exists
 BASE = {"approves": "this exact thing.", "does_not_approve": "anything else.", "part_of": None,
+        "stands": {"whole": "nothing larger", "his_latest": "No words or open discussion on this action; checked with the owner today.",
+                   "state": "not-on-his-mind"},
         "why": "It moves the number this initiative is for, and waiting costs a day."}
 
 

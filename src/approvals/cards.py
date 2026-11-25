@@ -181,8 +181,25 @@ def gallery_videos(card):
 
 # ---------- validation ----------
 
+STANDS_QUESTION = """Not posted yet. A new card says where the approver stands on what it is a piece of, in a `stands` field with three parts. Add it to the card, then run this again.
+
+  whole: the feature, plan, test or idea this card is a piece of, in his name for it (or "nothing larger").
+  his_latest: his most recent words on that whole, quoted, with when and where he said them; any card, deck or thread on it that is open with him; and which agent is in it with him (the one who told you to card this may be that agent). Look now, however sure you are: the thing in the record, the cards on it, and that agent, asked this minute.
+  state: one of four.
+    not-on-his-mind: a post, a fix to something live, a release, a step in a plan he approved, or the card he just asked for. Post it.
+    new-to-him: he has never met the whole, and he can judge all of it from this card in seconds. Post it. If he would look at it and reshape it, it is a deck, not a card.
+    yes-to-the-whole: he said so about the whole, in words you can quote. A go on a goal is not a yes to a design he hasn't seen. His words about another ask are not about this one. Post it, and open the card with that yes. A card that turns a built thing on shows the built thing itself; when it is too big to judge from a card (a tab, a flow, a page he said he would walk), he walks it first.
+    still-shaping: a card on it he answered with a question, a change or "hold on"; a deck he hasn't answered; a thread where he is talking it through. No card. Take this piece to the agent he is shaping it with, take back any card you promised, tell whoever asked you to card it, and say which other cards of yours on the same plan are still open with him."""
+
+
 def _text(v, limit=None):
     return isinstance(v, str) and v.strip() and (limit is None or len(v) <= limit)
+
+
+def _valid_stands(stands):
+    return (isinstance(stands, dict) and set(stands) == {"whole", "his_latest", "state"}
+            and _text(stands["whole"], 160) and _text(stands["his_latest"], 600)
+            and stands["state"] in ("not-on-his-mind", "new-to-him", "yes-to-the-whole", "still-shaping"))
 
 
 def _file(path):
@@ -209,6 +226,13 @@ def validate(card, revision=False):
     if "part_of" not in card or not (card["part_of"] is None or _text(card["part_of"], 120)):
         errs.append("part_of is required: the initiative this card belongs to, in the approver's words "
                     "(\"Payers keep using what they paid for\"), or null if it stands alone")
+    if not revision:
+        stands = card.get("stands")
+        if not _valid_stands(stands):
+            errs.append(STANDS_QUESTION)
+        elif stands["state"] == "still-shaping":
+            errs.append(f"No card: he is still shaping {stands['whole']}. Take this piece to the agent he is shaping it with, "
+                        "take back any card you promised, and tell whoever asked you to card it.")
     facts = card.get("facts") or []
     if not facts or not all(isinstance(f, (list, tuple)) and len(f) == 2 and str(f[0]).strip() and str(f[1]).strip() for f in facts):
         errs.append("facts must be a list of [label, value] pairs, at least one")
@@ -888,6 +912,8 @@ def _card_blocks(rec, n, mode, compact=False, origin=True, deputy=True):
     frame = frame_line(rec, card)
     if frame:
         blocks.append(frame)
+    if yes := yes_line(rec, card):
+        blocks.append(yes)
     if mode == "handed":
         name = esc(send["name"])
         at = when(datetime.fromisoformat(send["at"]))
@@ -964,6 +990,22 @@ def has_frame(rec, card):
 
 def part_of(rec, card):
     return rec.get("frame", card.get("part_of"))
+
+
+def stands_for(rec, card):
+    return card.get("stands", rec["versions"][0]["card"].get("stands"))
+
+
+def stands_line(stands):
+    stands = stands if isinstance(stands, dict) else {}
+    return (f"WHERE HE STANDS (the sender's claim): {stands.get('state', 'not supplied')}; "
+            f"whole: {stands.get('whole', 'not supplied')}; his latest: {stands.get('his_latest', 'not supplied')}")
+
+
+def yes_line(rec, card):
+    stands = stands_for(rec, card)
+    if _valid_stands(stands) and stands["state"] == "yes-to-the-whole":
+        return ctx(_small_trim(f"Your yes: {esc(stands['his_latest'])}"))
 
 
 def name_key(name):
@@ -1423,6 +1465,8 @@ def _final_blocks(rec, n):
     frame = frame_line(rec, card)
     if frame:
         blocks.append(frame)
+    if yes := yes_line(rec, card):
+        blocks.append(yes)
     blocks += origin_blocks(rec, include_quote=False)
     blocks += _timeline_blocks(rec, card)
     if card.get("offer") and _verdict(rec) == "approved":

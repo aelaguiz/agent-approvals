@@ -484,7 +484,7 @@ def cmd_revise(a):
     rec = store.load(a.id)
     if "recipients" not in card and "recipients" in rec["versions"][-1]["card"]:
         card["recipients"] = rec["versions"][-1]["card"]["recipients"]   # a new version keeps whom it goes to
-    errs = cards.validate(card, revision=True)
+    errs = cards.validate(dict(card, stands=cards.stands_for(rec, card)), revision=True)
     if errs:
         _die("Card refused:\n- " + "\n- ".join(errs))
     if rec["status"] in ("declined", "done", "withdrawn"):

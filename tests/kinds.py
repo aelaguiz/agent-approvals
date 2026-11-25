@@ -1,7 +1,7 @@
 """One made-up card per kind of ask, shaped like the real ones the kinds were designed from."""
-from samples import SCREEN
+from samples import BASE as SAMPLE_BASE, SCREEN
 
-BASE = {"approves": "this exact thing.", "does_not_approve": "anything else."}
+BASE = {"approves": "this exact thing.", "does_not_approve": "anything else.", "stands": SAMPLE_BASE["stands"]}
 
 
 def k(**kw):

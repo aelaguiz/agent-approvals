@@ -42,6 +42,60 @@ def test_missing_fields_are_named():
     assert any("changes" in e for e in cards.validate(SAMPLES["money"], revision=True))
 
 
+@pytest.mark.parametrize("stands", [None, "yes", {}, {"whole": "nothing larger"},
+    dict(SAMPLES["money"]["stands"], whole=""), dict(SAMPLES["money"]["stands"], whole="x" * 161),
+    dict(SAMPLES["money"]["stands"], his_latest=" "), dict(SAMPLES["money"]["stands"], his_latest="x" * 601),
+    dict(SAMPLES["money"]["stands"], his_latest=3), dict(SAMPLES["money"]["stands"], state=[]),
+    dict(SAMPLES["money"]["stands"], state="approved"), dict(SAMPLES["money"]["stands"], extra="x")])
+def test_malformed_stands_gets_only_the_question_on_a_first_version(stands):
+    card = dict(SAMPLES["money"], stands=stands)
+    assert cards.validate(card) == [cards.STANDS_QUESTION]
+    assert cards.validate(dict(card, changes="Updated the number"), revision=True) == []
+
+
+def test_missing_stands_gets_the_question_but_a_revision_can_omit_it():
+    card = dict(SAMPLES["money"])
+    del card["stands"]
+    assert cards.validate(card) == [cards.STANDS_QUESTION]
+    assert cards.validate(dict(card, changes="Updated the number"), revision=True) == []
+
+
+def test_still_shaping_refuses_the_first_version_not_a_revision():
+    card = dict(SAMPLES["money"], stands={"whole": "The new home screen", "his_latest": '"Hold on", today in chat with Design.',
+                                        "state": "still-shaping"})
+    assert cards.validate(card) == ["No card: he is still shaping The new home screen. Take this piece to the agent he is shaping it with, "
+                                    "take back any card you promised, and tell whoever asked you to card it."]
+    assert cards.validate(dict(card, changes="Updated the number"), revision=True) == []
+
+
+@pytest.mark.parametrize("state", ["not-on-his-mind", "new-to-him", "yes-to-the-whole", "still-shaping"])
+def test_only_a_yes_to_the_whole_is_shown_near_part_of(state):
+    stands = {"whole": "x" * 160, "his_latest": '"Yes to this" on Monday in chat with Design.', "state": state}
+    card = dict(SAMPLES["money"], part_of="A plan", stands=stands)
+    if state != "still-shaping":
+        assert cards.validate(card) == []
+    rec = make_rec(card)
+    for mode in ("open", "final", "view"):
+        blocks = cards.card_blocks(rec, 1, mode)
+        if state == "yes-to-the-whole":
+            assert blocks[2] == cards.ctx(f"Your yes: {stands['his_latest']}")
+        else:
+            assert "Your yes:" not in json.dumps(blocks)
+
+
+def test_revision_without_stands_shows_the_first_versions_yes_and_trims_it():
+    first = dict(SAMPLES["money"], stands={"whole": "A plan", "his_latest": "&" * 600, "state": "yes-to-the-whole"})
+    rec = make_rec(first)
+    revised = dict(first, stands=dict(first["stands"], his_latest="A later yes"), changes="Updated the number")
+    omitted = dict(revised)
+    del omitted["stands"]
+    rec["versions"] += [{"n": 2, "card": revised}, {"n": 3, "card": omitted}]
+    blocks = cards.card_blocks(rec, 3, "open")
+    expected = blocks[2]["elements"][0]["text"]
+    assert expected.startswith("Your yes: &amp;") and len(expected) <= 1900 and expected.endswith("…")
+    assert cards.card_blocks(rec, 2, "view")[2] == cards.ctx("Your yes: A later yes")
+
+
 def test_special_characters_are_escaped():
     rec = make_rec(SAMPLES["reply"])
     text = json.dumps(cards.card_blocks(rec, 1, "open"))

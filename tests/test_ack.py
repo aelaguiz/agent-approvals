@@ -23,6 +23,8 @@ def test_a_decision_is_acknowledged_first_and_a_reply_is_answered_once():
     assert "First acknowledge it in the thread" in text and text.index("approvals ack") < text.index("approvals done")
     text = rec_with("feedback")["outbox"][-1]["text"]
     assert "approvals answer AP-0001" in text and "approvals revise AP-0001" in text
+    assert "If it reopens the design or the plan" in text and "post no new version" in text
+    assert "If it changes only what is on the card (a label, a number, a word), post the next version" in text
     assert "Your reply is your acknowledgement" in text and "First acknowledge" not in text
     assert rec_with("expired")["outbox"][-1]["needs_ack"] is False
 

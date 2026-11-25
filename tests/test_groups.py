@@ -327,6 +327,7 @@ def test_submit_names_excludes_the_new_card_and_prints_the_move_command(monkeypa
     store.create(card(1, journey=False))
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "fixture")
     req = {"type": "experiment", "title": "Show a search hint", "part_of": "Search help", "about": "X-12",
+           "stands": {"whole": "Search hint", "his_latest": "No earlier words or open discussion; checked today with Product.", "state": "new-to-him"},
            "why": "Readers can find the search box.", "facts": [["Place", "Library"]],
            "approves": "The search hint", "does_not_approve": "A new search engine"}
     path = tmp_path / "card.json"

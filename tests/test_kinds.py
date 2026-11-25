@@ -90,6 +90,7 @@ def test_buttons_are_named_for_what_happens():
 def test_old_cards_without_the_new_fields_still_render():
     rec = make_rec(dict(SAMPLES["money"]))
     del rec["versions"][0]["card"]["part_of"]
+    del rec["versions"][0]["card"]["stands"]
     blocks = cards.card_blocks(rec, 1, "open")
     assert "Part of" not in txt(blocks) and "From Tester" in txt(blocks)
     assert values(blocks) == ["AP-0001|1|approve", "AP-0001|1|decline"]

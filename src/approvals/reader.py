@@ -7,7 +7,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from . import journey
+from . import cards, journey
 
 def lines(v, pad="  "):
     if isinstance(v, list): return "\n".join(pad + "- " + str(x) for x in v)
@@ -16,6 +16,7 @@ def lines(v, pad="  "):
 def card_text(c):
     L = [f"[{c.get('type', '')} card]", f"TITLE: {c.get('title')}"]
     if c.get("part_of"): L.append(f"PART OF: {c['part_of']}")
+    L.append(cards.stands_line(c.get("stands")))
     if c.get("thread"): L.append("(opens with his own Slack message that it answers)")
     if c.get("why"): L.append(f"WHY: {c['why']}")
     if c.get("changes"): L.append(f"WHAT CHANGED IN THIS VERSION: {c['changes']}")
@@ -88,6 +89,7 @@ HE WOULD STOP AT:
 (one numbered line for every place he would have to stop and work something out, in the order he meets them; the single word "nowhere" if there is none)
 WHAT HE'D THINK YOU ARE ASKING: <one sentence in words he would use, or "can't tell">
 WHAT HE'D THINK A YES MAKES HAPPEN: <one sentence, or "can't tell">
+SHOULD THIS CARD EXIST YET: <yes, or "no: " and why, judged only from the sender's claim: if his latest words on the whole are a question, a change, a hold or an unanswered deck or thread, he is still shaping it and the answer is no>
 
 A stop is: a name or phrase the writer made up, or that only makes sense inside the writer's work; an approval, decision, card number or earlier message he is expected to remember, with no statement of what it was; a sentence where he can't tell who does what, or what is true now; a button whose words don't say what tapping it makes happen, or a choice called by a key (A, B, 2) instead of what it does; a plain-word stand-in where the real engineering or poker term would tell him more. Small roughness he would read past is not a stop. Don't suggest rewrites."""
 

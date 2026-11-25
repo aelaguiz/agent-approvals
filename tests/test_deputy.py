@@ -99,7 +99,10 @@ def test_the_deputy_is_kept_on_the_hub_and_hears_on_its_own_machine(hubbox):
 def test_the_deputy_hears_each_card_posted_and_each_new_version(monkeypatch, slack, tmp_path):
     be_deputy()
     path = tmp_path / "card.json"
-    path.write_text(json.dumps(SAMPLES["budget"]))
+    stands = {"state": "yes-to-the-whole", "whole": "Search ads test", "his_latest": '"Yes to the test" Monday in chat with Pricing.'}
+    claim = ('WHERE HE STANDS (the sender\'s claim): yes-to-the-whole; whole: Search ads test; '
+             'his latest: "Yes to the test" Monday in chat with Pricing.')
+    path.write_text(json.dumps(dict(SAMPLES["budget"], stands=stands)))
     as_session(monkeypatch, "sid-a", agent="Pricing")
     cli.main(["submit", str(path)])
     [item] = to("AP-0001", "deputy")
@@ -108,10 +111,15 @@ def test_the_deputy_hears_each_card_posted_and_each_new_version(monkeypatch, sla
         "Sam's answer. Make your call: `approvals show AP-0001` reads it, `approvals pictures AP-0001` saves its pictures "
         'where you can look at them, then `approvals call AP-0001 --approve --why "<why>"` or `approvals call AP-0001 --his --why "<why>"`.')
     assert item["kind"] == "deputy" and not item["needs_ack"] and to("AP-0001") == []
-    path.write_text(json.dumps(dict(SAMPLES["budget"], changes="Cut to $200")))
+    assert claim in item["text"]
+    revised = dict(SAMPLES["budget"], changes="Cut to $200")
+    del revised["stands"]
+    path.write_text(json.dumps(revised))
     cli.main(["revise", "AP-0001", str(path)])
     text = to("AP-0001", "deputy")[-1]["text"]
     assert 'Pricing posted v2 ("Cut to $200")' in text and "doesn't carry to this version" in text and "approvals call AP-0001" in text
+    assert claim in text
+    assert cards.ctx(f"Your yes: {stands['his_latest']}") in cards.card_blocks(store.load("AP-0001"), 2, "open")
     # A TEST card stays away from the real deputy, and the deputy's own cards don't come back to it.
     path.write_text(json.dumps(dict(SAMPLES["budget"], test=True)))
     cli.main(["submit", str(path)])

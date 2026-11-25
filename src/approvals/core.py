@@ -95,7 +95,7 @@ def make_your_call(rec):
         also = also_instruction(rec.get("target"))
     return (f'Make your call: `approvals show {rid}` reads it, `approvals pictures {rid}` saves its pictures where you '
             f'can look at them, then `approvals call {rid} --approve --why "<why>"` or `approvals call {rid} --his --why "<why>"`.'
-            + also)
+            + also + " " + one_line(cards.stands_line(cards.stands_for(rec, card(rec)))))
 
 
 def also_instruction(target=None):
@@ -305,7 +305,11 @@ def msg_replies(rec, kind, texts, question=None, member=None):
                 f'If it changes what you do, say so in one line with `approvals ack {rid} "<what changes>"`. No new card unless asked for one.')
     return (f'{head(rec)} {name} replied {said_in()} at {t}: {said}. '
             f'If it asks a question, answer it with `approvals answer {rid} "<the verdict, then the fact it rests on>"`: that hands the card back as it stands, with no new version. '
-            f'If it asks for a change, post the next version with `approvals revise {rid} <card.json>` (say what changed in "changes"). '
+            f'First ask what the reply is. If it reopens the design or the plan (he wants other options, another journey, says hold on, '
+            f'or sends you to work it out with someone), he isn\'t deciding yet: say so in one line with `approvals ack {rid}`, '
+            f'post no new version, and bring the work back once, whole, where he is working it through, with the card taken down if '
+            f'nothing on it stands. If it changes only what is on the card (a label, a number, a word), post the next version with '
+            f'`approvals revise {rid} <card.json>` (say what changed in "changes"). '
             f'If it asks a question and the answer also changes the card, do both in one: `approvals revise {rid} <card.json> --answer "<the verdict, then the fact it rests on>"`. '
             f'The answer then goes under his reply with one line saying what changed on the card, so keep the answer out of "changes". '
             f'If you truly cannot go on without one fact, ask it with `approvals ask {rid} "<question>"`. {one_reply} '
