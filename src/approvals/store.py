@@ -522,10 +522,16 @@ class Record:
         self.url, self.token = url, token
         self.lock = threading.Lock()
         self.cache = {}   # id -> (rev, marshal bytes of the card without its pop-ups, whether a version lacks them)
+        self.looking = threading.Lock()   # one look at every card at a time; the asks that come during it share it
+        self.fresh = None   # (when, revisions) of the last whole look, good for a moment and dropped by any write
+        self.writes = 0
 
     def call(self, method, path, body=None):
         """(HTTP status, JSON body). A missing card (404) and a changed one (409) are answers; a write the record's
         rules refuse (422) raises Refused with its words; anything else that isn't 200 is an error."""
+        if method != "GET" and path != "/api/cards/read":
+            self.writes += 1
+            self.fresh = None
         data = json.dumps(body, ensure_ascii=False).encode() if body is not None else None
         req = urllib.request.Request(self.url + path, data=data, method=method,
                                      headers={"X-Hub-Token": self.token, "Content-Type": "application/json"})
@@ -572,7 +578,25 @@ class Record:
                 return None
 
     def all(self):
-        """Every card, read again only where its revision moved since the last look."""
+        """Every card, read again only where its revision moved since the last look.
+
+        Every machine's listener asks for every card every few seconds. When each ask made its own look, a slow
+        moment at the record left dozens of looks queued here, each ask timed out, and the next round added more:
+        no machine could reach the hub from 6:20 to 6:40 am on November 26 (Studio). So one look runs at a time, the
+        asks that arrive during it take its answer, and a look stays good for two seconds unless a card is written."""
+        with self.looking:
+            fresh, writes = self.fresh, self.writes
+            if fresh and time.monotonic() - fresh[0] < 2:
+                revs = fresh[1]
+            else:
+                started = time.monotonic()
+                revs = self._look()
+                if self.writes == writes:
+                    self.fresh = (started, revs)
+            with self.lock:
+                return [marshal.loads(self.cache[rid][1]) for rid in sorted(revs) if rid in self.cache]
+
+    def _look(self):
         revs = {c["id"]: c["rev"] for c in self.call("GET", "/api/cards")[1]["cards"]}
         with self.lock:
             for rid in self.cache.keys() - revs.keys():
@@ -585,7 +609,7 @@ class Record:
                     for v in versions:
                         v.pop("views", None)
                     self.cache[c["record"]["id"]] = (c["rev"], marshal.dumps(c["record"]), lacking)
-            return [marshal.loads(self.cache[rid][1]) for rid in sorted(revs) if rid in self.cache]
+        return revs
 
     def without_views(self):
         """The cards a version of which isn't kept with its pop-ups yet, as of the last look at every card."""

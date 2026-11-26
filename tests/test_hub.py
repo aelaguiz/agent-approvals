@@ -400,3 +400,35 @@ def test_each_teammates_hours_travel_with_the_team_to_every_machine(hubbox):
     config.CONFIG.write_text(json.dumps(s))
     team = hub.Client().who()["team"]
     assert team["riley"] == s["team"]["riley"] and team["morgan"] == s["team"]["morgan"]
+
+
+def test_asks_for_every_card_that_arrive_together_share_one_look_and_a_write_ends_it(monkeypatch):
+    # November 26, 6:20 to 6:40 am: each machine's listener asked for every card every few seconds, each ask made its
+    # own look at the record, the looks queued, every ask timed out and the next round added more.
+    import threading, time as t
+    record = store.Record("http://record.invalid", "token")
+    lists = []
+
+    def call(method, path, body=None):
+        if method == "GET" and path == "/api/cards":
+            lists.append(1)
+            t.sleep(0.2)
+            return 200, {"cards": [{"id": "AP-1", "rev": 1}]}
+        if path == "/api/cards/read":
+            return 200, {"cards": [{"rev": 1, "record": {"id": "AP-1", "versions": []}}]}
+        record.writes += 1
+        record.fresh = None
+        return 200, {"rev": 2}
+
+    monkeypatch.setattr(record, "call", call)
+    seen = []
+    threads = [threading.Thread(target=lambda: seen.append(record.all())) for _ in range(20)]
+    [th.start() for th in threads]
+    [th.join() for th in threads]
+    assert len(seen) == 20 and all(s == [{"id": "AP-1", "versions": []}] for s in seen)
+    assert len(lists) == 1
+    record.all()
+    assert len(lists) == 1   # still fresh
+    call("PUT", "/api/cards/AP-1", {})
+    record.all()
+    assert len(lists) == 2   # a write ends the shared look
