@@ -344,7 +344,7 @@ def local_all(shared=False):
     third of the Studio's core and asks that timed out behind it (November 27)."""
     global _shared
     if record():
-        return record().all()
+        return record().all(shared)
     config.ensure_dirs()
     with _records_cache_lock:
         stamp = config.REQUESTS.stat().st_mtime_ns
@@ -536,6 +536,7 @@ class Record:
         self.looking = threading.Lock()   # one look at every card at a time; the asks that come during it share it
         self.fresh = None   # (when, revisions) of the last whole look, good for a moment and dropped by any write
         self.writes = 0
+        self.shared = (None, [])   # (the look's revisions, its cards): the copy readers that only read share
 
     def call(self, method, path, body=None):
         """(HTTP status, JSON body). A missing card (404) and a changed one (409) are answers; a write the record's
@@ -588,8 +589,9 @@ class Record:
             if rev is not None:
                 return None
 
-    def all(self):
-        """Every card, read again only where its revision moved since the last look.
+    def all(self, shared=False):
+        """Every card, read again only where its revision moved since the last look. A caller that only reads passes
+        shared=True and gets the one copy of that look all such callers share (see local_all).
 
         Every machine's listener asks for every card every few seconds. When each ask made its own look, a slow
         moment at the record left dozens of looks queued here, each ask timed out, and the next round added more:
@@ -604,8 +606,13 @@ class Record:
                 revs = self._look()
                 if self.writes == writes:
                     self.fresh = (started, revs)
+            if shared and self.shared[0] is revs:
+                return self.shared[1]
             with self.lock:
-                return [marshal.loads(self.cache[rid][1]) for rid in sorted(revs) if rid in self.cache]
+                out = [marshal.loads(self.cache[rid][1]) for rid in sorted(revs) if rid in self.cache]
+            if shared:
+                self.shared = (revs, out)
+            return out
 
     def _look(self):
         revs = {c["id"]: c["rev"] for c in self.call("GET", "/api/cards")[1]["cards"]}

@@ -51,7 +51,7 @@ class FakeRecord:
         self.cards[rec["id"]] = (1, copy.deepcopy(rec))
         return self.read(rec["id"])[0]
 
-    def all(self):
+    def all(self, shared=False):
         return [self.read(rid)[0] for rid in sorted(self.cards)]
 
     def delete(self, rid):

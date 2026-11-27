@@ -432,3 +432,7 @@ def test_asks_for_every_card_that_arrive_together_share_one_look_and_a_write_end
     call("PUT", "/api/cards/AP-1", {})
     record.all()
     assert len(lists) == 2   # a write ends the shared look
+    a = record.all(shared=True)
+    assert record.all(shared=True) is a and record.all() is not a   # readers share one copy; others get their own
+    call("PUT", "/api/cards/AP-1", {})
+    assert record.all(shared=True) is not a   # a write ends the shared copy too
