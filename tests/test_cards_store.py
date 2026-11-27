@@ -144,6 +144,17 @@ def test_local_all_reuses_unchanged_records_and_returns_copies(monkeypatch):
     assert reads == [first, second, first]
 
 
+def test_readers_share_one_copy_until_a_card_is_written(tmp_home):
+    config.ensure_dirs()
+    store._write({"id": "AP-0001", "values": ["first"]})
+    a = store.local_all(shared=True)
+    assert store.local_all(shared=True) is a
+    assert store.local_all() is not a
+    store._write({"id": "AP-0002", "values": ["second"]})
+    b = store.local_all(shared=True)
+    assert b is not a and [r["id"] for r in b] == ["AP-0001", "AP-0002"]
+
+
 def test_first_press_wins_and_old_versions_refuse():
     rec = make_rec(SAMPLES["money"])
     rec["versions"].append({"n": 2, "card": SAMPLES["money"], "copy_ts": "1.5"})

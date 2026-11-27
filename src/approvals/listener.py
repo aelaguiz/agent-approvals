@@ -451,7 +451,7 @@ class Listener:
         """The cards whose threads are watched, the most recently active first."""
         cutoff = store.now() - timedelta(days=WATCH_DAYS)
         out = []
-        for rec in store.all_records():
+        for rec in store.all_records(shared=True):
             if not rec.get("thread_ts"):
                 continue
             last = max(datetime.fromisoformat(e["at"]) for e in rec.get("events") or [{"at": rec["created"]}])
@@ -656,7 +656,7 @@ class Listener:
 
     def deliver_due(self):
         """On the hub, every few seconds: what's due for this machine's sessions, and ⏳ kept true on the cards."""
-        recs = [r for r in store.all_records() if r.get("thread_ts")]
+        recs = [r for r in store.all_records(shared=True) if r.get("thread_ts")]
         due, strays = core.to_deliver(recs, self.me, store.reviewer(), store.deputy())
         self.queue(due)
         self.take_strays(strays)

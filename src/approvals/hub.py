@@ -196,7 +196,7 @@ class Handler(BaseHTTPRequestHandler):
             if method == "GET" and len(parts) == 2 and parts[0] == "corrections":
                 return self._send(200, {"corrections": store.local_corrections(unquote(parts[1]))})
             if method == "GET" and parts == ["due"]:
-                recs, machine = store.local_all(), q.get("machine", [""])[0]
+                recs, machine = store.local_all(shared=True), q.get("machine", [""])[0]
                 due, strays = core.to_deliver(recs, machine, store.local_reviewer(), store.local_deputy())
                 return self._send(200, {"due": due, "strays": strays})
             if method == "GET" and parts == ["history"]:

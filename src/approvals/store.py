@@ -29,6 +29,7 @@ UPDATE_TRIES = 20
 FILE_TIMEOUT = 300   # a card's video can be 100 MB
 _records_cache = {}
 _records_cache_lock = threading.Lock()
+_shared = (None, [])   # (requests folder's mtime, the cards as of then): one copy every reader that only reads shares
 _fork_cache = {}
 _fork_cache_lock = threading.RLock()
 # Who is acting in this thread: the Slack user whose press or pop-up is being handled, or the Herdr name of the agent
@@ -107,9 +108,9 @@ def update(rid, fn, media=None):
     raise StoreError(f"{rid} kept changing on the hub while this tried to change it; try again")
 
 
-def all_records():
+def all_records(shared=False):
     h = hub_client()
-    return h.records() if h else local_all()
+    return h.records() if h else local_all(shared)
 
 
 def history_records(agent=None, type=None, since=None, limit=20, calls=False):
@@ -336,11 +337,19 @@ def local_put(rec, rev=None, media=None):
         return _write(rec)
 
 
-def local_all():
+def local_all(shared=False):
+    """Every card. A caller that only reads passes shared=True and gets the one copy all such callers share until a
+    card is written (every write renames a file into the folder, which moves its mtime). Copying 2,654 cards took
+    0.15 s, and the hub's every-5-second polls and each machine's /due did it about three times a second, about a
+    third of the Studio's core and asks that timed out behind it (November 27)."""
+    global _shared
     if record():
         return record().all()
     config.ensure_dirs()
     with _records_cache_lock:
+        stamp = config.REQUESTS.stat().st_mtime_ns
+        if shared and _shared[0] == stamp:
+            return _shared[1]
         paths = sorted(config.REQUESTS.glob(f"{config.settings()['id_prefix']}-*.json"))
         for p in _records_cache.keys() - set(paths):
             del _records_cache[p]
@@ -357,6 +366,8 @@ def local_all():
                 out.append(marshal.loads(cached[2]))
             except (json.JSONDecodeError, OSError):
                 _records_cache.pop(p, None)
+        if shared:
+            _shared = (stamp, out)
         return out
 
 
@@ -483,7 +494,7 @@ def local_inbox_count(session_id):
     roles = {to: bool(role) and session_id == role["reach"].get("session_id")
              for to, role in (("reviewer", local_reviewer()), ("deputy", local_deputy()))}
     count = 0
-    for rec in local_all():
+    for rec in local_all(shared=True):
         r = rec.get("reach") or {}
         own = (session_id in [r.get("session_id"), *r.get("earlier_ids", [])]
                and families.get(r.get("session_id")) == families.get(session_id))
