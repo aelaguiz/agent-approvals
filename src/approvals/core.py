@@ -1212,6 +1212,16 @@ def overdue(records, now):
     """Asker messages the tool has failed to deliver, as (record, item, reason). A decision the agent acknowledged
     is one it has, however it got it: three answers acted on weeks before raised an alarm the first time this ran."""
     hold = held(records)
+    # A session whose answers are being typed in one after another is being delivered to, however long its queue:
+    # on November 27, 2026 Amir pressed about 40 answers for one agent across three cards in seconds, each was typed
+    # within three minutes, and the ones waiting their turn raised 11 alarms that said nothing had typed them.
+    moving = set()
+    for rec in records:
+        sid = (rec.get("reach") or {}).get("session_id")
+        for i in rec.get("outbox", []):
+            at = i.get("delivered_at")
+            if sid and at and now - store.parse(at) < timedelta(seconds=ALARM_SECONDS):
+                moving.add(sid)
     out = []
     for rec in records:
         # Several answers on one card go one at a time behind its next message, so while that one is held for the
@@ -1231,6 +1241,8 @@ def overdue(records, now):
             elif item.get("inbox_only"):
                 reason = error or "the answer can only be picked up from the agent's inbox"
             elif not item.get("sent_at") and not item.get("typed_at") and not error:
+                if (rec.get("reach") or {}).get("session_id") in moving:
+                    continue   # waiting its turn behind answers that are reaching the agent
                 reason = "nothing has typed the answer into the agent's session"
             else:
                 continue

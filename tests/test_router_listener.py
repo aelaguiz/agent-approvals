@@ -630,6 +630,17 @@ def test_overdue_answers_and_exclusions(monkeypatch):
     second["outbox"][1]["created"] = store.iso(now - timedelta(seconds=60))
     assert core.overdue([first, second], now) == []
 
+    # Answers waiting their turn behind others that are reaching the same session raise nothing (Nov 27, 2026).
+    busy = make_rec(SAMPLES["money"], id="AP-0004", reach={"session_id": "busy"})
+    queued = make_rec(SAMPLES["money"], id="AP-0005", reach={"session_id": "busy"})
+    core.enqueue(busy, "feedback", "typed a moment ago")
+    busy["outbox"][0].update(created=store.iso(now - timedelta(seconds=90)), delivered_at=store.iso(now - timedelta(seconds=5)))
+    core.enqueue(queued, "feedback", "next in line")
+    queued["outbox"][0]["created"] = store.iso(now - timedelta(seconds=90))
+    assert core.overdue([busy, queued], now) == []
+    busy["outbox"][0]["delivered_at"] = store.iso(now - timedelta(seconds=120))   # nothing reached it for two minutes
+    assert [i["ref"] for _, i, _ in core.overdue([busy, queued], now)] == [queued["outbox"][0]["ref"]]
+
 
 def test_alarm_posts_and_wakes_once_and_skips_test_cards(monkeypatch):
     from datetime import timedelta
