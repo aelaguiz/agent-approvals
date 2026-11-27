@@ -68,7 +68,7 @@ Every card needs:
 - `title`, the action said plainly ("Move $20,000 from savings to operating", not "Transfer approval");
 - `why`, one or two sentences on what the business gets and why now;
 - `part_of`, the initiative it belongs to, or `null`;
-- `about`, the id of the one thing in the pod dashboard it decides;
+- `about`, the id of the one thing in the pod dashboard it decides: the record his yes acts on, since his card shows it on its first screen as "What it decides" and that record's page shows the card as waiting on his yes. AP-2847, a card to change what an Android trialist sees after backing out of cancelling, names the designer's task that drew the screen; a reply to a person names that person, never the process the reply came out of;
 - `recipients`, on an `email` or `reply` card: whom it goes to, `[{"place": "email", "handle": "brantzenpoker@gmail.com"}]`, the handle exactly as the place writes it, so its done moves the person whose route it is. A player is an id, never their address: their thread's (`"email thread"`), their account's when they never wrote to us (`"player account"`), or their review's; where no listed place fits, `"other"` says where and whom in a few words. `approvals guide email` lists the places;
 - `thread`, optional: the link of the approver's Slack message this card answers, when it came out of a conversation with him;
 - `facts`, a list of `[label, value]` pairs;
@@ -78,7 +78,7 @@ Some types also need `quotes`, a `table`, or an `image` or `video`; the cards re
 
 A card that changes what a user sees carries the user's `journey`: today's path and the path with the change, screen by screen, with each tap named. The card shows it as a small map with a See it big button, which opens every screen at full height with today beside the change, so he never has to ask to be shown it. A strip of separate screens got "I need you to show me the user journey before and after" on card after card. The cards reference says how to build one, and when a plain `gallery` is still right.
 
-**Evidence has to open in Slack.** A path to a file on your machine posted as text opens nothing, so give the file's path (alone or after a label, like `"Recipe: /path/recipe.json"`) and it's attached to the thread, or link a page the approver can open: a doc, a sheet, a share link.
+**Evidence has to open in Slack.** A path to a file on your machine posted as text opens nothing, so give the file's path (alone or after a label, like `"Recipe: /path/recipe.json"`) and it's attached to the thread, or link a page the approver can open: a doc, a sheet, a share link. A number, experiment or analysis the ask stands on is named by its pod dashboard address (`https://pods.fun.country/#/thing/N-1308`) in the fact that cites it: the card then shows that record under "Evidence", beside the ask, where he can open it.
 
 ## When the answer arrives
 
