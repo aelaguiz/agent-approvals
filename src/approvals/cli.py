@@ -393,7 +393,13 @@ def _submit_one(card, a, set_pos, thread=None):
         rec["set"] = set_pos
     rec = store.create(rec, media)
     reach.refresh(rec, who)
-    ts = slackapi.post(cards.card_blocks(rec, 1, "open"), cards.card_text(rec, 1), **config.channel_args(rec))
+    try:
+        ts = slackapi.post(cards.card_blocks(rec, 1, "open"), cards.card_text(rec, 1), **config.channel_args(rec))
+    except Exception:
+        # A card Slack never got is no card: left in the store it showed on the pod dashboard with no way to reach its
+        # asker, which posted again, and Amir found two copies of one card (AP-3029 and AP-3035, November 28).
+        store.delete(rec["id"])
+        raise
     rec["thread_ts"] = ts
     rec["last_seen"] = ts
     link = slackapi.permalink(ts, **config.channel_args(rec))

@@ -135,3 +135,19 @@ def test_guide_refuses_a_type_there_is_no_card_for(capsys):
     with pytest.raises(SystemExit):
         cli.main(["guide", "tweet"])
     assert "No card type 'tweet'" in capsys.readouterr().err
+
+
+def test_a_card_slack_never_got_leaves_no_record(held, monkeypatch, tmp_path, slack):
+    # AP-3029, November 28: the post failed after the record was made, the asker posted again, and the first record
+    # stayed on the dashboard as a second copy whose answers could reach nobody.
+    from approvals import slackapi
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "fixture")
+    monkeypatch.setattr(pods, "here", lambda: {"pod": "product", "copy": "bots"})
+    def down(*a, **k):
+        raise TimeoutError("The handshake operation timed out")
+    monkeypatch.setattr(slackapi, "post", down)
+    path = tmp_path / "card.json"
+    path.write_text(json.dumps(CARD | {"corrections_seen": ["C-6", "C-9"]}))
+    with pytest.raises(TimeoutError):
+        cli.main(["submit", str(path)])
+    assert store.all_records() == []
