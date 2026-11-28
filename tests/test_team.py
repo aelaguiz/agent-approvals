@@ -44,7 +44,7 @@ def slack(monkeypatch):
     monkeypatch.setattr(slackapi, "open_dm", lambda user: wire.opens.append(user) or DM)
     monkeypatch.setattr(slackapi, "post", post)
     monkeypatch.setattr(slackapi, "update", lambda ts, blocks, text, **kw: wire.updates.append((ts, blocks, kw)))
-    monkeypatch.setattr(slackapi, "note", lambda ts, text, **kw: wire.notes.append((ts, text)))
+    monkeypatch.setattr(slackapi, "note", lambda ts, text, **kw: wire.notes.append((ts, text)) or f"8.{len(wire.notes)}")
     monkeypatch.setattr(slackapi, "ephemeral", lambda user, text, ts=None, **kw: wire.notices.append(text))
     monkeypatch.setattr(slackapi, "message_url", lambda ts, **kw: f"https://slack.test/{ts}")
     monkeypatch.setattr(slackapi, "replies", lambda ts, **kw: wire.reads.append((ts, kw)) or wire.threads.get(ts, []))
@@ -500,6 +500,7 @@ def test_channel_and_dm_replies_reach_the_asker_once_with_the_name(team, slack, 
     assert "Riley replied" in "\n".join(cli._happened(rec))
     if via_dm:
         assert slack.notes == [(rec["thread_ts"], "💬 Riley replied in a direct message:\n" + cards.quoted(m["text"]))]
+        assert rec["events"][-1]["copy_ts"] == "8.1"   # its copy in the thread, so the dashboard draws it once
         assert (thread, {"oldest": m["ts"], "channel_id": DM}) in slack.reads
         assert answer["react_ts"] == rec["thread_ts"]
         assert not rec["thread"].get("copied_ts")

@@ -438,12 +438,18 @@ def cmd_ask(a):
             rec["card_dirty"] = True
         core.mark_acked(rec)
         store.event(rec, "question", text=a.question)
-        return rec, send
-    rec, send = store.update(a.id, fn)
+        return rec, send, len(rec["events"]) - 1
+    rec, send, asked = store.update(a.id, fn)
     blocks = cards.question_blocks(rec, a.question)
     text = f"{rec['agent']} asks: {a.question}"
     ts = slackapi.post(blocks, text, thread_ts=rec["thread_ts"], broadcast=True, **config.channel_args(rec))
-    store.update(a.id, lambda r: r["open_question"].__setitem__("ts", ts))
+
+    def posted(r):
+        # The post is the question's line in the thread, so the event carries its Slack id, as an ack's does: the pod
+        # dashboard draws the two as one line by that id.
+        r["open_question"]["ts"] = ts
+        r["events"][asked]["ts"] = ts
+    store.update(a.id, posted)
     core.post_to_teammate(a.id, send, text, blocks)
     print(f"Asked in the thread of {a.id}. The answer will arrive as an [Approvals] message.")
 

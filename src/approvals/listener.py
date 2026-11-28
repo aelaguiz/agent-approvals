@@ -536,8 +536,14 @@ class Listener:
                 log.info("%s: reply from %s -> %s", rec["id"], name, kind)
                 if send:
                     try:
-                        slackapi.note(rec["thread_ts"], f"💬 {cards.esc(name)} replied in a direct message:\n{cards.quoted(words)}",
-                                      **config.channel_args(rec))
+                        copy = slackapi.note(rec["thread_ts"], f"💬 {cards.esc(name)} replied in a direct message:\n{cards.quoted(words)}",
+                                             **config.channel_args(rec))
+                        # The reply's event keeps its copy's Slack id, so the pod dashboard draws the reply once.
+                        def copied(r, ts=ts, kind=kind, copy=copy):
+                            for event in r["events"]:
+                                if event.get("ts") == ts and event["kind"] == kind:
+                                    event["copy_ts"] = copy
+                        store.update(rec["id"], copied)
                     except Exception as e:
                         log.warning("direct message reply note for %s failed: %s", rec["id"], e)
                 else:

@@ -130,6 +130,9 @@ def test_a_question_shows_in_the_channel(slack):
     saved()
     cli.main(["ask", "AP-0001", "Mexico at MX$899 or MX$999?"])
     assert slack[-1]["broadcast"] and "MX$899" in slack[-1]["text"]
+    rec = store.load("AP-0001")
+    question = [e for e in rec["events"] if e["kind"] == "question"][-1]
+    assert question["ts"] == rec["open_question"]["ts"]   # the post is its line, so the dashboard draws it once
 
 
 def test_evidence_as_one_block_of_text_is_one_post(slack):
